@@ -1251,9 +1251,28 @@ def main(args=None):
     say(f'building the IPA → {out_ipa}')
     ipa_env = dict(env, GAME=g.id, W=str(work / 'ipa'), PATCHED=str(patched), ROMFS=str(game / 'RomFS'), MSL_IOS=str(ios), GFXAPI=gfx, FONT_PY=py, DM_DISPLAY_NAME=app_name, DM_BUNDLE_ID=bundle_id, AOC=str(aoc or ''))
     if app_version: ipa_env['DM_APP_VERSION'] = app_version
-    # app icon: the game icon nx_extract saved from the control data (English, icon.jpg); the packed version's first, then the base game's
-    icon = next((d / 'icon.jpg' for d in (game, base) if (d / 'icon.jpg').exists()), None)
-    if icon: ipa_env['DM_ICON'] = str(icon); say(f'app icon: {icon}')
+    # app icon: an explicitly supplied DM_ICON wins.  Otherwise prefer artwork
+    # supplied beside the requested IPA (for example <Game>_icon.jpg/png), then
+    # fall back to the English icon nx_extract saves from control data.
+    def icon_artwork(folder, names):
+        keys = {''.join(c for c in n.casefold() if c.isalnum()) for n in names if n}
+        for p in sorted(folder.iterdir()) if folder.is_dir() else ():
+            if not p.is_file() or p.suffix.casefold() not in {'.png', '.jpg', '.jpeg', '.heic', '.tif', '.tiff'}:
+                continue
+            stem = p.stem.casefold()
+            if not stem.endswith('_icon'):
+                continue
+            if ''.join(c for c in stem[:-5] if c.isalnum()) in keys:
+                return p
+        return None
+
+    icon = Path(os.environ['DM_ICON']) if os.environ.get('DM_ICON') else None
+    if not icon or not icon.is_file():
+        icon = icon_artwork(out_ipa.parent, (app_name, out_ipa.stem))
+    if not icon:
+        icon = next((d / 'icon.jpg' for d in (game, base) if (d / 'icon.jpg').exists()), None)
+    if icon:
+        ipa_env['DM_ICON'] = str(icon); say(f'app icon: {icon}')
     else: say('[RED] no game icon in the extraction (an older extraction did not save it: delete extract/ and run again); the home-screen icon will be blank')
     env_file = args.env_file or DM_ENV_FILE
     if env_file: ipa_env['DM_ENV_FILE'] = str(Path(os.path.expanduser(env_file)).resolve())
