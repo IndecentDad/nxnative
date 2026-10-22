@@ -1,7 +1,7 @@
 # NX Native Project Handoff
 
 Repository: `IndecentDad/nxnative`  
-Current branch: `feature/gamesave-local-documents` (unmerged GameSave simplification)
+Current branch: `game/mario-rabbids-kingdom-battle` (experimental port; paused 2026-10-22)
 
 ## Completed
 
@@ -14,6 +14,21 @@ Current branch: `feature/gamesave-local-documents` (unmerged GameSave simplifica
 - Permanent development checkout: `/volume1/docker/nxnative`.
 - Preserve the existing Tahoe checkout at `/Users/kylepyne/nxnative`; do not overwrite, clean, or copy unrelated local changes.
 - Do not push to `seedds/nxnative`.
+
+## Mario + Rabbids checkpoint (2026-10-22)
+
+- NAS worktree: `/volume1/docker/nxnative-mario-rabbids`; Tahoe worktree: `/Users/kylepyne/nxnative-mario-rabbids`. Both use the dedicated game branch, based on `7b99983`. No branches were merged or main commits added during this port. NAS main is clean, one pre-existing commit ahead of `origin/main` (`6783602`); that GameSave commit still awaits device validation. Do not push or merge main automatically.
+- Inputs preserved. Tahoe copy/intermediates: `/Users/kylepyne/nxnative-games/Mario Rabbids - Kingdom Battle`. Base title `010067300059A000`; patch `010067300059A800`, CNMT version `589824`; NACP display `1.9.589692` (filename says v1.9.0). All four DLCs have matching application IDs: B001 Battle Pixel v0, B002 Steampunk v0, B003 Ultra Challenge v65536, B004 Donkey Kong Adventure v131072.
+- Base+update extraction passed integrity checks: 4,004 RomFS files, 2,888.3 MiB. All four DLCs extracted; Donkey Kong Adventure has 17 files/1,531.5 MiB. No IPA, iOS project build, or gameplay verification yet.
+- Recovered proven tools: Python `/Users/kylepyne/nxnative-pr-5-x86-archive-20261022/.venv/bin/python3` (lz4, capstone, fontTools); .NET `/usr/local/share/dotnet/dotnet` 10.0.402; keys `/Users/kylepyne/nxnative-keys/prod.keys`; tools `/Users/kylepyne/nxnative-tools/bin` (xcodegen, spirv-cross, zstd). Existing Intel translator uses `dotnet exec dmsh_xlate.dll`. System Python and existing environments were preserved. Only zstandard was added under the Rabbids build's `python/` directory; use that as PYTHONPATH.
+- Dedicated profile exists in `dm/games/010067300059A000/`. Actual SDK 4.4.0; modules main/subsdk0(GLSLC)/sdk. main build `3b39e0c06b8841f1baf0ea4d54286bfe`. Static call at main+0x37c requests a 100 MiB heap; profile's 128 MiB heap region fits it. Profile remains experimental.
+- Implemented CNMT `nx_extract --metadata`, DLC shader scan roots/cache inputs, explicit `--no-glslc-capture` for Intel offline packaging, and initial BERG shader reader. Six synthetic framing/shader tests pass on Tahoe, but the full real-resource scan still fails; do not report shader coverage complete.
+- Two concrete next fixes: (1) `subsdk0` rewriter asserts `jump table 7340b8`; sdk translation succeeded and remains in `010067300059A000_build/patched_v589824.partial/`, while main was terminated when subsdk0 failed. At subsdk0+0x733f94, w18 copies w17; bounds checks use w17 <=4, and +0x7340b0..b8 is `ldrsw x18,[x9,x18,lsl #2]; add x18,x18,x9; br x18`. Existing 16-instruction recognizer misses the earlier copy. Extend recognition with stable-copy/bounds evidence and test before rerunning the expensive rewrite (~10 min).
+- (2) BERG streams contain arbitrary unframed resources. Sequential `berg.records` fails at sdf-A-0001+0x416 (`ff42564d`); use the WEST `.sdftoc` index for exact resource bounds. Verified v22 TOC header, 4,000 archive IDs, 198 DDS entries of 204 bytes, and zstd-compressed tree at 0x3ca95. Prototype `rabbids-toc.py` decodes the tree but hits its end while reading fileId. Investigate zero chunk descriptors/real v22 leaf layout; do not ignore parse errors. Reference format source: https://github.com/GoldFarmer/rouge_sdf/blob/master/main.cpp .
+- BERG shaders are confirmed offline inside compressed resources: control size 0x838, followed by valid NVN code (both vertex and pixel observed). Some full records have zstd wrappers plus inner zlib. Four DLC roots must be included in the scan. Runtime GLSL variants remain unverified; Intel cannot execute the ARM64 host for capture, so report this explicitly on the first offline IPA.
+- Tahoe tool fingerprints were measured into this branch's `dmsh_chain.lock` (same translator, installed Metal 32023.883/SPIRV-Cross); regenerate Rabbids chain header, build Mac+iOS shader libraries, regenerate c1 guard, then compile host. No Dread profile or build assets changed.
+- Persistent inspection/stage scripts and survey are saved at `/volume1/docker/nxnative-mario-rabbids-handoff/`; Tahoe copies are under the Rabbids build's `session-tools/`. `rabbids-stage.py` runs rewrite/split/shaders/ipa using exact env/paths. `rabbids-prepare.py` is historical: do not regenerate over the refined profile. Source now synchronized between worktrees. No active port jobs remain.
+- Resume: fix indexed shader extraction and subsdk0 recognition; then run shader split/chain/Metal stages, Xcode unsigned Release and ZIP64 pack, verify icon/DLC/CRC/unsigned state, copy the IPA to the NAS input folder, and commit/push the reviewed game branch. User will test gameplay. No external entitlement file is required.
 
 ## Metroid Dread
 

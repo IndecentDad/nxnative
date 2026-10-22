@@ -509,6 +509,26 @@ def scan_blob(d, label, out):
         size = struct.unpack_from('<I', d, m.start() + 0x1c)[0]
         if m.start() + size <= len(d) and d[m.start() + 0x60:m.start() + 0x64] == b'grsc': out.extend(bnsh_shaders(d, m.start(), label))
 
+def berg_shaders(path, label, out):
+    """Snowdrop stores single-stage NVN programs in BERG records (Rabbids SDK 4).
+    Its 0x838-byte controls directly precede code, without a GLSLC wrapper.
+    Validate lengths and stage for every match, including all DLC resources.
+    """
+    import berg
+    for where, kind, data in berg.records(path, label):
+        for match in re.finditer(CTL_MAGIC, data):
+            offset = match.start()
+            if offset + 0x760 > len(data): continue
+            nctl = struct.unpack_from('<I', data, offset + 0x20)[0]
+            ncode = struct.unpack_from('<I', data, offset + 0x704)[0]
+            end = offset + nctl + ncode
+            if nctl < 0x760 or nctl & 3 or ncode < 4 or end > len(data): continue
+            ctl, code = data[offset:offset + nctl], data[offset + nctl:end]
+            headerless_cs = code[:4] not in (CS_MAGIC, GFX_MAGIC) and all(struct.unpack_from('<3I', ctl, 0x748))
+            stage = 'cs' if code[:4] == CS_MAGIC or headerless_cs else SPH_STAGE.get((struct.unpack_from('<I', code, 0x30)[0] >> 10) & 0xf) if code[:4] == GFX_MAGIC and len(code) >= 0x34 else None
+            if stage and not check(where, stage, ctl, code):
+                out.append((f'{where}#BERG{kind}@{offset:#x}', stage, ctl, code))
+
 def group(label):
     """source group (second half of the package file name)"""
     if label.startswith('main'): return 'main'
@@ -520,7 +540,7 @@ def ps_inputs(code):
     """Generic attributes a pixel shader reads: SPH words 6–13 are the input map, 8 bits for each of the 32 attributes (Ryujinx ShaderHeader.ImapTypes), non-zero = read; the translated MSL inputs are exactly user(locn<attribute>)"""
     return {i for i in range(32) if struct.unpack_from('<I', code, 0x30 + 4 * (6 + (i >> 2)))[0] >> ((i & 3) * 8) & 0xff}
 
-SINGLE_STAGE = ('#GLSLC@', '#UE')   # sources whose every shader is a program of one stage: GLSLC outputs, Unreal's shader records (BNSH variations, Unity programs, MSHD and SDF pair theirs)
+SINGLE_STAGE = ('#GLSLC@', '#UE', '#BERG')   # single-stage programs: GLSLC, Unreal and Snowdrop (other containers pair theirs)
 def separable_pairs(keys):
     """Single-stage programs (13 Sentinels: each GLSLC output becomes a program with one stage, and BindProgram's stage bits combine vertex and pixel programs per draw; Unreal combines its shaders per draw
     from the pipeline state) have their real pairs only at draw time. vs_pad uses only the union of the locations the paired pixel shaders read, so every single-stage vertex shader is paired with
@@ -567,6 +587,9 @@ def scan_file(args):
     path, rel = args[:2]
     with open(path, 'rb') as f: head = f.read(16)
     found = []; trees = {}
+    if head[:4] == b'BERG':
+        berg_shaders(path, '/' + rel, found)
+        return rel, uniq_keys(found), var_pairs(found), trees
     if head[:8] == IDRK:
         idrk_shaders(path, '/' + rel, found)
         return rel, uniq_keys(found), var_pairs(found), trees
@@ -641,6 +664,12 @@ def main():
         if not names and uepak.unreal_paks(romfs): red(f'the RomFS has Unreal paks, but there are no decoded shader code archives in {ued} (the NSP script writes them)')
         for nm in names: found += ue_shaders(open(os.path.join(ued, nm), 'rb').read(), f'/ue_shaders/{nm}')
         results.append(('main', {skey(c, k): (w, s, c, k) for w, s, c, k in found}, var_pairs(found), {}))
+    # Add-ons may carry shaders absent from the merged base/update RomFS
+    # (Rabbids' Donkey Kong Adventure has its own Snowdrop archives).
+    aoc = os.environ.get('DM_AOC_DIR')
+    if aoc and os.path.isdir(aoc):
+        files += sorted((os.path.join(dp, f), 'aoc/' + os.path.relpath(os.path.join(dp, f), aoc))
+                        for dp, _, names in os.walk(aoc) for f in names)
     zdicts = {k: v for r in romfs_v for k, v in zs_dicts(r).items()}   # Tears of the Kingdom's zstd dictionaries (zs_dicts)
     keys = {}
     # First pass: every file; Unity bundles carry type trees, and the Shader trees are collected on the way. Second pass: Unity serialized files without type trees are scanned again with the borrowed trees

@@ -926,6 +926,7 @@ def split_shaders(py, repo, roms, mains, pkg, env, logs, g, provisional=False, o
     PROG.stage('shader split', step='checking the inputs')   # then a spinner: shader_split.py writes the package and the tables only at the end
     kf = pkg.with_name(pkg.name + '.key')
     key = None if provisional or ALLOW_DAMAGED else fingerprint(('files', tool_files(repo)), ('files', profile_files(g)),
+        ('tree', env.get('DM_AOC_DIR', pkg.parent / 'no-aoc')),
         *[x for r, m in zip(roms, mains) for x in (('files', [m]), ('tree', r), ('files', sorted((r.parent / 'glslc_capture').glob('*.glslc'))),
                                                    ('files', sorted((r.parent / 'ue_shaders').glob('*.ushaderbytecode'))))])
     if key and pkg.is_dir() and (note := reused(kf, key)) is not None:
@@ -1133,6 +1134,7 @@ def parse_args(argv):
     ap.add_argument('--profile-out', help='where the provisional profile goes (default: <NSP folder>/<title ID>_build/profile)')
     ap.add_argument('--provisional', action='store_true', help='build from a provisional profile even when dm/games has one for the game (tests the guesses)')
     ap.add_argument('--no-heap-check', action='store_true', help='a provisional profile: skip the heap check on the Mac (the alias / heap split stays a guess)')
+    ap.add_argument('--no-glslc-capture', action='store_true', help='package offline shaders without booting the ARM64 Mac host for runtime GLSLC capture (e.g. on Intel); runtime-only shader coverage remains unverified')
     ap.add_argument('--progress', choices=('auto', 'bar', 'lines', 'off'), help='stage lines on the console: bar = one line per stage, redrawn in place; lines = a plain line every BEAT seconds; off = only each stage\'s start and end '
                     '(default: the PROGRESS setting; auto = bar in a terminal or Spyder, lines when the output goes to a file or a pipe)')
     return ap.parse_args(argv)
@@ -1212,6 +1214,9 @@ def main(args=None):
     src = pg.build_sources(game / 'ExeFS', game / 'RomFS', g.words('modules'))
     gfx = src['graphics'][0]   # nvn, or vulkan (Hades: the host's Vulkan layer, SPIR-V shaders)
     glslc = gfx == 'nvn' and src['glslc_capture'][0]   # shaders the game compiles at run time, captured in the Mac host (capture_glslc)
+    if glslc and args.no_glslc_capture:
+        say('[RED] runtime GLSLC capture disabled: packaging the offline shaders; runtime-only shader coverage remains unverified')
+        glslc = False
     vkcap = gfx == 'vulkan' and src['vk_capture'][0]   # SPIR-V shaders the game generates at run time, captured in the Mac host (capture_vk)
     uedec = gfx == 'nvn' and src['ue_decode'][0]   # Unreal Engine shaders, Oodle-compressed in the paks' shader code archives, decoded in the Mac host (decode_ue_shaders)
     if gfx == 'vulkan': say(f'Vulkan game ({src["graphics"][1]}): vk_shaders.py translates the shaders instead of the NVN shader chain')
@@ -1219,6 +1224,7 @@ def main(args=None):
         if on: say(src[k][1])
     PROG.add(glslc + vkcap + uedec + (gfx == 'nvn'))
     aoc = extract_aoc(nx, keys, work, app, fam, logs)
+    env['DM_AOC_DIR'] = str(aoc or '')
     base = next((dirs[v] for v in versions if picks[v][1] is None), dirs[versions[0]])   # the folder the base game was extracted to alone
     # the app name and bundle ID both come from the base NSP: the game name in its control data, and a bundle ID from its title ID; a setting / the command line overrides them
     app_name = args.app_name or APP_NAME or nacp.name(base / 'control.nacp')

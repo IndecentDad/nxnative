@@ -7,6 +7,7 @@
 // Title keys come from the common tickets (.tik) inside the NSPs, so only prod.keys is needed; key values are never printed.
 // The base game may also be a cartridge dump (.xci, Monster Hunter Rise): its secure partition holds the NCAs, which carry their keys in the key area (no ticket).
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -28,6 +29,9 @@ static class P {
     static int Main(string[] a) {
         bool manifest = Array.IndexOf(a, "--manifest") >= 0; a = Array.FindAll(a, s => s != "--manifest");
         g_allow = Array.IndexOf(a, "--allow-damaged") >= 0; a = Array.FindAll(a, s => s != "--allow-damaged");
+        // Inspect the CNMT rather than guessing the update version from its file name.
+        // Useful for new profiles and for checking an add-on's application ID before packing.
+        if (a.Length == 3 && a[1] == "--metadata") return Metadata(ExternalKeyReader.ReadKeyFile(a[0]), a[2]);
         if (a.Length < 4) { Console.Error.WriteLine("usage: nx_extract <prod.keys> <base.nsp> <update.nsp|-> <out dir> [base RomFS dir] [--manifest] [--allow-damaged]\n       nx_extract <prod.keys> --aoc <dlc.nsp> <out dir>"); return 2; }
         KeySet ks = ExternalKeyReader.ReadKeyFile(a[0]);
         if (a[1] == "--aoc") return Aoc(ks, a[2], a[3]);
@@ -110,6 +114,36 @@ static class P {
         return ncas;
     }
     static Nca Pick(List<Nca> l, NcaContentType t) { foreach (Nca n in l) if (n.Header.ContentType == t) return n; return null; }
+
+    static int Metadata(KeySet ks, string path) {
+        Nca meta = Pick(OpenNsp(ks, path), NcaContentType.Meta) ?? throw new Exception("no Meta NCA in the NSP");
+        IFileSystem fs = meta.OpenFileSystem(NcaSectionType.Data, IntegrityCheckLevel.ErrorOnInvalid);
+        foreach (DirectoryEntryEx entry in fs.EnumerateEntries("*.cnmt", SearchOptions.Default)) {
+            using var file = new UniqueRef<IFile>();
+            fs.OpenFile(ref file.Ref, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+            file.Get.GetSize(out long size).ThrowIfFailure();
+            if (size < 0x20) throw new Exception("truncated CNMT header");
+            byte[] header = new byte[Math.Min(size, 0x40)];
+            file.Get.Read(out _, 0, header, ReadOption.None).ThrowIfFailure();
+            ulong title = BinaryPrimitives.ReadUInt64LittleEndian(header);
+            uint version = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(8));
+            byte type = header[0xc];
+            int extended = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(0xe));
+            if (title != meta.Header.TitleId) throw new Exception("CNMT title ID does not match Meta NCA");
+            ulong application = title;
+            if (type == 0x81 || type == 0x82) {
+                if (extended < 8 || size < 0x28) throw new Exception("truncated CNMT application ID");
+                application = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(0x20));
+            }
+            string kind = type switch { 0x80 => "Application", 0x81 => "Patch", 0x82 => "AddOnContent", _ => $"0x{type:x2}" };
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new {
+                title_id = title.ToString("X16"), version, content_type = kind,
+                application_id = application.ToString("X16")
+            }));
+            return 0;
+        }
+        throw new Exception("no CNMT file in Meta NCA");
+    }
 
     // Icon: the control data holds one 256x256 JPEG per language (/icon_<language>.dat). Use the English one (American, then British); if neither exists, take the first in NACP language order
     static readonly string[] IconLangs = { "AmericanEnglish", "BritishEnglish", "Japanese", "French", "German", "LatinAmericanSpanish", "Spanish", "Italian",
