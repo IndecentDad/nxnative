@@ -1,7 +1,7 @@
 # NX Native Project Handoff
 
 Repository: `IndecentDad/nxnative`  
-Current branch: `feature/icloud-save-sync` (isolated worktree from fork `main` at `f613cd3`)
+Current branch: `main` (iCloud feature fast-forwarded from `feature/icloud-save-sync` at `752255f`)
 
 ## Completed
 
@@ -27,6 +27,6 @@ On 2026-10-21, the isolated Tahoe checkout `/Users/kylepyne/nxnative-dread-diag-
 
 ## iCloud save feature (2026-10-22)
 
-The isolated feature branch adds shared iOS snapshot/revision sync, manual Files export/import, an on-screen Saves menu, deferred imports, and optional shared iCloud Documents build configuration. See [icloud-saves.md](icloud-saves.md). Tahoe compiled the shared iOS sources; APFS runtime tests and two generated Xcode project configurations passed. No new IPA was built. Obsolete `app-icon-support` and `intel-macos-support` remote branches were deleted after verifying both are ancestors of fork main and no worktree depends on them; the local app-icon branch was also deleted. Newer upstream was reviewed but not merged.
+Commit `752255f` adds shared iOS snapshot/revision sync, manual Files export/import, an on-screen Saves menu, deferred imports, and optional shared iCloud Documents build configuration. See [icloud-saves.md](icloud-saves.md). Tahoe compiled the shared iOS sources; APFS runtime tests, two generated Xcode project configurations, and an ad hoc entitlement check passed. No new IPA was built. Obsolete `app-icon-support` and `intel-macos-support` remote branches were deleted after verifying both are ancestors of fork main and no worktree depends on them; the local app-icon branch was also deleted. Newer upstream was reviewed but not merged. The old uncommitted status document was preserved in a pre-merge stash, and its findings were incorporated here.
 
-Next: review the feature diff and signing requirements, validate PlumeImpactor's actual provisioned entitlements and iCloud behavior on device, then merge the branch into fork main only when that review is complete. Continue Dread memory diagnostics separately; do not modify graphics resource management before device logs are analyzed.
+Next: configure the Apple Developer shared iCloud container and explicit App ID/profile per game; then validate PlumeImpactor's actual provisioned entitlements and two-device iCloud behavior. Build a cloud-enabled IPA only after that configuration is ready. Continue Dread memory diagnostics separately; do not modify graphics resource management before device logs are analyzed.
