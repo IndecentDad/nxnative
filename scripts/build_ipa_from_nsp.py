@@ -11,11 +11,12 @@
 #   without keyboard input a missing value is not asked for but reported as an error; exit code 0 on success, 1 on error, 130 when interrupted). Command-line options entered in Spyder's run configuration work the same way.
 # Uses only three things: this repository, a folder holding one game's NSPs (the base game plus the updates listed in the profile's shader_versions are required; DLC NSPs, when present, are packed too and unlock the add-on content already in the game), and prod.keys.
 # Every intermediate file is under <id>_build/ in the NSP folder: extract/ (the extracted game files, kept for the next build unless KEEP_EXTRACTED / --no-keep-extracted), aoc/ (each DLC's RomFS by index), tools/ (nx_extract, and the Mac host for a run-time shader capture), patched_*/, shader/ (shader package and caches, kept so the next build is fast), logs/ (each step's full output), tmp/, ipa/. The finished IPA also goes to the NSP folder by default.
-# The rewrite, the shader split and the iOS (or Vulkan) shaders are reused when all their inputs are as at their last successful run (the game files, the tools, the profile, Xcode and spirv-cross: fingerprint() keys beside their output).
+# The DLC, the rewrite, the shader split and the iOS (or Vulkan) shaders are reused when all their inputs are as at their last successful run (the game files, the tools, the profile, Xcode and spirv-cross: fingerprint() keys beside their output);
+#   the iOS shaders' inputs are the shader package's content and the chain's own tools, so a split that runs again and writes the same package leaves them reused.
 # The shader translator is the in-repo dm/gfx/tools/dmsh_xlate_bin (the build whose fingerprints match dmsh_chain.lock; a rebuilt dll has different fingerprints and dmsh_build refuses it).
 # The Python running this file needs lz4, capstone and fonttools; also needed: Xcode, xcodegen, .NET SDK 10, zstd, spirv-cross. A first run takes 2 (Metroid Dread) to 10 minutes (Breath of the Wild: 5 of them the shader split), longer when shader libraries must be compiled; a repeat run with unchanged inputs takes about 20 s (Metroid Dread), mostly packing the IPA. Key values are never printed.
 # The console shows one line per stage ([k/n] stage, with a bar, done/total, percent, elapsed time and ETA where the work can be counted); the tools' own output goes only to logs/ (PROGRESS / --progress).
-import collections, ctypes, getpass, hashlib, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types, zlib
+import ast, collections, ctypes, getpass, hashlib, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types, zlib
 from pathlib import Path
 
 # ---- Settings ----
@@ -549,6 +550,23 @@ def tool_files(repo):   # what the shader stages run: dm/gfx/tools' scripts and 
     return sorted((repo / 'dm/gfx/tools').glob('*.py')) + [repo / p for p in ('dm/gfx/tools/dmsh_chain.lock', 'dm/games/game.py', 'dm/ios/tools/ios_metal.py')]
 
 
+def chain_files(repo):   # what the iOS shaders run: dmsh_build.py and every repository module it imports, at any depth (dmsh_*.py, ios_metal.py, game.py), and the translator's lock; not the split's readers (shader_split.py, unityfs.py, uepak.py)
+    dirs, todo, seen = [repo / d for d in ('dm/gfx/tools', 'dm/ios/tools', 'dm/games')], [repo / 'dm/gfx/tools/dmsh_build.py'], set()
+    while todo:
+        p = todo.pop()
+        if p in seen or not p.is_file(): continue
+        seen.add(p)
+        for n in ast.walk(ast.parse(p.read_bytes())):
+            mods = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module] if isinstance(n, ast.ImportFrom) and n.module else []
+            todo += [d / f'{m.split(".")[0]}.py' for m in mods for d in dirs]
+    return sorted(seen) + [repo / 'dm/gfx/tools/dmsh_chain.lock']
+
+
+def package_key(pkg):   # the shader package's content (file names and bytes): what the iOS shaders are built from
+    fs = [rel for rel, _ in files_under(pkg)]
+    return fingerprint(fs, ('files', [pkg / f for f in fs]))
+
+
 def profile_files(g):   # every file of the game profile (game.tsv and its tables)
     return sorted(p for p in g.dir.iterdir() if p.is_file())
 
@@ -594,24 +612,30 @@ def extract(nx, keys, ex, name, base, upd, cmp_dir, logs, g):
     return dst
 
 
-def extract_aoc(nx, keys, work, app, fam, logs):
+def extract_aoc(nx, keys, repo, work, app, fam, logs):
     """DLC NSPs in the folder → <id>_build/aoc/<index>/ (the RomFS of each one's data NCA; index = title ID − base − 0x1000). The host reports these indices as owned and mounts them (DM_AOC_DIR).
-    Returns None without DLC. DLC packages are small (121 KB each for Engage, the content itself is in the update), so they are extracted again every time"""
+    Returns None without DLC. Reused when the DLC NSPs (names, sizes and times) and nx_extract's sources are as at the last extraction (Monster Hunter Rise: 250 DLC, 30 s)"""
     if not fam['dlc']: return None
-    tmp = work / 'aoc.partial'; rmtree(tmp)
+    tmp, dst = work / 'aoc.partial', work / 'aoc'; rmtree(tmp)
     best = {}   # when one DLC comes in several copies, take the highest version, and the largest of equal versions
     for tid, ver, p in fam['dlc']:
         k = (ver or 0, p.stat().st_size)
         if tid not in best or k > best[tid][0]: best[tid] = (k, p)
     PROG.stage('extract DLC')
+    kf = work / 'aoc.key'
+    key = fingerprint(sorted((tid, p.name, p.stat().st_size, p.stat().st_mtime_ns) for tid, (_, p) in best.items()), ('files', [repo / 'dm/tools/nx_extract' / f for f in ('Program.cs', 'nx_extract.csproj')]))
+    if dst.is_dir() and (note := reused(kf, key)) is not None:
+        PROG.end(f'{note}, reused (inputs unchanged)'); return dst
+    rmtree(kf)
     for i, (tid, (_, p)) in enumerate(sorted(best.items())):
         idx = tid - app - 0x1000
         PROG.set(step='extracting', done=i, total=len(best), unit='DLC')
         say(f'DLC index {idx}: {p.name}')
         run([nx, keys, '--aoc', p, tmp / str(idx)], logs / f'aoc_{idx}.log')
-    swap_in(tmp, work / 'aoc')
+    swap_in(tmp, dst)
+    kf.write_text(f'{key}\n{len(best)} DLC\n')
     PROG.end(f'{len(best)} DLC')
-    return work / 'aoc'
+    return dst
 
 
 def check_build(d, name, g):   # every module's build ID must be the one registered in the profile's build row
@@ -919,8 +943,9 @@ def data_rows(b):   # a table's data rows (without # comment lines: the header c
 
 
 def split_shaders(py, repo, roms, mains, pkg, env, logs, g, provisional=False, oodle=None):
-    """The shader split into pkg, checked against the profile's tables. Returns its key (None for a provisional profile or damaged files, which never reuse it): the package is reused
-    when the tools, the profile and each version's main, RomFS (paths and sizes) and run-time capture are as at the last successful split.
+    """The shader split into pkg, checked against the profile's tables. The package is reused when the tools, the profile and each version's main, RomFS (paths and sizes) and run-time capture
+    are as at the last successful split. Returns the package's content key, the iOS shaders' input (None for a provisional profile or damaged files, which never reuse them): a split that runs
+    again because a reader of another engine changed writes the same package, and the iOS shaders stay reused.
     oodle: for a game with Trinity packs (Pokémon Legends: Z-A; profile_guess.py shader_sources), a function that builds the Mac host and returns the split's DM_OODLE_HOST / DM_OODLE_MODULES; called only when the split runs"""
     names = ('shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv')
     PROG.stage('shader split', step='checking the inputs')   # then a spinner: shader_split.py writes the package and the tables only at the end
@@ -929,7 +954,7 @@ def split_shaders(py, repo, roms, mains, pkg, env, logs, g, provisional=False, o
         *[x for r, m in zip(roms, mains) for x in (('files', [m]), ('tree', r), ('files', sorted((r.parent / 'glslc_capture').glob('*.glslc'))),
                                                    ('files', sorted((r.parent / 'ue_shaders').glob('*.ushaderbytecode'))))])
     if key and pkg.is_dir() and (note := reused(kf, key)) is not None:
-        PROG.end(f'{note}, reused (inputs unchanged)'); return key
+        PROG.end(f'{note}, reused (inputs unchanged)'); return package_key(pkg)
     if oodle:   # the packs are decoded by the game's own Oodle in the Mac host (dm/host/hle_oodle.c)
         PROG.set(step='building the Mac host for the game\'s Oodle decoder'); env = dict(env, **oodle())
     PROG.set(step='splitting')
@@ -946,7 +971,7 @@ def split_shaders(py, repo, roms, mains, pkg, env, logs, g, provisional=False, o
     note = f'{int(m.group(1)):,} shaders' if m else ''
     if key: kf.write_text(f'{key}\n{note}\n')
     PROG.end(note)
-    return key
+    return key and package_key(pkg)
 
 
 class ShaderWatch:
@@ -997,8 +1022,8 @@ def toolchain():   # the compilers' versions, part of the shader stages' keys
     return ('cmd', ['xcodebuild', '-version']), ('cmd', ['spirv-cross', '--revision'])
 
 
-def build_shaders(py, repo, sh, xlate, env, logs, g, provisional=False, split_key=None):
-    """The iOS shader libraries (dmsh_build.py). Reused when the split's key (split_key; None never reuses) and the chain's tools, translator binaries, profile and compilers
+def build_shaders(py, repo, sh, xlate, env, logs, g, provisional=False, pkg_key=None):
+    """The iOS shader libraries (dmsh_build.py). Reused when the shader package (pkg_key, its content; None never reuses) and the chain's tools, translator binaries, profile and compilers
     are as at the last successful build: dmsh_build.py would only restore every shader from its cache (63,000 for Breath of the Wild: about 100 s)"""
     ios, log = sh / 'ios', logs / 'dmsh_build.log'
     PROG.stage('iOS shaders')
@@ -1007,9 +1032,9 @@ def build_shaders(py, repo, sh, xlate, env, logs, g, provisional=False, split_ke
         run([py, repo / 'dm/gfx/tools/dmsh_chain.py', '--header'], logs / 'dmsh_chain.log', env=env)   # the profile's chain version header (dmsh_build checks it)
     chain = re.search(r'#define DMSH_CHAIN "(.*)"', g.table('dmsh_chain.h').read_text()).group(1)
     libs = ios / f'b-{chain}'; kf = libs.with_name(libs.name + '.key')
-    if split_key:
+    if pkg_key:
         PROG.set(step='checking the inputs')
-        key = fingerprint(split_key, ('files', tool_files(repo)), ('stat', xlate.parent), ('files', profile_files(g)), *toolchain(), str(xlate),
+        key = fingerprint(pkg_key, ('files', chain_files(repo)), ('stat', xlate.parent), ('files', profile_files(g)), *toolchain(), str(xlate),
                           {k: env.get(k) for k in ('XLATE_DEBUG', 'XLATE_REDUCED')}, env=env)
         if next(libs.glob('*_b.metallib'), None) and (note := reused(kf, key)) is not None:
             PROG.end(f'{note}, reused (inputs unchanged)'); return ios
@@ -1218,7 +1243,7 @@ def main(args=None):
     for on, k in ((glslc, 'glslc_capture'), (vkcap, 'vk_capture'), (uedec, 'ue_decode'), (gfx == 'nvn' and src['oodle_packs'][0], 'oodle_packs')):
         if on: say(src[k][1])
     PROG.add(glslc + vkcap + uedec + (gfx == 'nvn'))
-    aoc = extract_aoc(nx, keys, work, app, fam, logs)
+    aoc = extract_aoc(nx, keys, repo, work, app, fam, logs)
     base = next((dirs[v] for v in versions if picks[v][1] is None), dirs[versions[0]])   # the folder the base game was extracted to alone
     # the app name and bundle ID both come from the base NSP: the game name in its control data, and a bundle ID from its title ID; a setting / the command line overrides them
     app_name = args.app_name or APP_NAME or nacp.name(base / 'control.nacp')
@@ -1242,10 +1267,10 @@ def main(args=None):
         cap = capture_vk(repo, game, patched, work, env, logs, g) if vkcap else None
         ios = build_vk_shaders(py, repo, [game / 'RomFS'] + ([cap] if cap else []), sh, env, logs, g, reuse=not (provisional or ALLOW_DAMAGED))
     else:
-        # Trinity packs: the split decodes them with the packed version's own Oodle decoder, in the Mac host built for the profile
-        oodle = (lambda: {'DM_OODLE_HOST': str(build_mac_host(repo, work / 'tools/dmhost', env, logs, g)), 'DM_OODLE_MODULES': str(patched)}) if src['oodle_packs'][0] else None
-        skey = split_shaders(py, repo, [dirs[v] / 'RomFS' for v in need], [dirs[v] / 'ExeFS/main' for v in need], sh / 'pkg', env, logs, g, provisional, oodle)
-        ios = build_shaders(py, repo, sh, xlate, env, logs, g, provisional, skey)
+        # Trinity packs and legacy Unreal paks: the split decodes them with the packed version's own decoder (Oodle, LZ5), in the Mac host built for the profile
+        oodle = (lambda: {'DM_OODLE_HOST': str(build_mac_host(repo, work / 'tools/dmhost', env, logs, g)), 'DM_OODLE_MODULES': str(patched)}) if src['oodle_packs'][0] or src['ue_legacy'][0] else None
+        pkey = split_shaders(py, repo, [dirs[v] / 'RomFS' for v in need], [dirs[v] / 'ExeFS/main' for v in need], sh / 'pkg', env, logs, g, provisional, oodle)
+        ios = build_shaders(py, repo, sh, xlate, env, logs, g, provisional, pkey)
 
     if free_gb(out_ipa.parent) < 5: raise BuildError(f'less than 5 GB free on the volume of {out_ipa.parent}')
     say(f'building the IPA → {out_ipa}')

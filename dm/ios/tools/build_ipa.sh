@@ -67,12 +67,12 @@ python3 tools/configure_icloud.py Sources/Info.plist Gen/DmIOS.entitlements --ti
 
 t "xcodebuild (Release, unsigned, iPhone + iPad)"
 mkdir -p "$O"
-xcodebuild -project DmIOS.xcodeproj -scheme DmIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$DD" \
+# SYMROOT / OBJROOT keep the build in $DD whatever Xcode's Locations setting says (a custom build location ignores -derivedDataPath): one build folder per game work folder,
+# so a repeat build compiles only what changed, and two games built at once never write the same app
+xcodebuild -project DmIOS.xcodeproj -scheme DmIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$DD" SYMROOT="$DD/Build/Products" OBJROOT="$DD/Build/Intermediates.noindex" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build > "$O/build.log" 2>&1 \
   || { grep -E 'error:' "$O/build.log" | head -20; die "xcodebuild, log $O/build.log"; }
-# When Xcode's Locations setting is a custom location, products ignore -derivedDataPath: take the actual path from this build's log
-APP=$DD/Build/Products/Release-iphoneos/DmIOS.app; [ -d "$APP" ] || APP=$(grep -o '/[^ ]*/Release-iphoneos/DmIOS\.app' "$O/build.log" | tail -1)
-[ -n "$APP" ] && [ -d "$APP" ] || die "no built app"; t "app: $APP"
+APP=$DD/Build/Products/Release-iphoneos/DmIOS.app; [ -d "$APP" ] || die "no built app at $APP"; t "app: $APP"
 
 # Straight from the sources: the app without its signature, and without the folders an app built before pack_ipa.py still has (DerivedData keeps resources that left the project;
 # msl/ is also deleted there, it took 1.5 GB of the home disk), then the shader libraries, the add-on content (the RomFS extracted from the player's DLC NSPs, one folder per index:
