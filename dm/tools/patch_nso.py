@@ -602,14 +602,14 @@ def func_of(a):
     i = bisect.bisect_right(starts, a) - 1
     return (starts[i], starts[i + 1] if i + 1 < len(starts) else TEXT_END) if i >= 0 else (a, a + 4)
 done = set(); windows = []; jumps = {}; tabjumps = {}; tailcalls = set(); retries = []
-def jump_offsets(insl, j):
+def jump_offsets(insl, j, lookback=16):
     """The br x18 is preceded by the offset-table form (Engage main+0x12eec94): cmp w18,#N; b.hi; ldrsw x18,[xB,x18,lsl #2]; add x18,x18,xB.
     The index may be another register, and the bounds check may be on a register copied into it: Link's Awakening's GLSLC (subsdk0+0x1be6e8) has
     sub w0,w18,#0xd1; cmp w0,#0x31; b.hi; ldrsw x18,[x17,x0,lsl #2], its movie module (subsdk1+0xae9a4) cmp w21,#7; b.hi; ...; mov w18,w21; ldrsw x18,[x4,x18,lsl #2].
     The entry may also be loaded into another register and only the add writes x18: Cuphead (Unity 2017.4, main+0x1bb872c) has cmp w17,#7; ldrsw x17,[x15,x17,lsl #2]; add x18,x17,x15
     (found by armyja, GitHub pull request #1).
     For the table base xB, search back for the nearest writer: it must be add xB,xB,#lo, and the writer before it must be adrp xB. Returns all targets, or None if not recognized"""
-    ctx = insl[max(0, j - 16):j]
+    ctx = insl[max(0, j - lookback):j]
     add = next((p for p in reversed(ctx) if p.mnemonic == 'add' and re.fullmatch(r'x18, x\d+, x\d+', p.op_str)), None)
     if not add: return None
     _, t, rb = add.op_str.split(', ')   # t = the loaded entry, rb = the table base
@@ -620,6 +620,19 @@ def jump_offsets(insl, j):
     masked = None   # (source, mask, position) when the index is "source & mask"
     k0 = ctx.index(ld); cmp = None
     def wname(r): return 'w' + r[1:]
+    if lookback > 16:
+        # SDK 4 GLSLC (Rabbids subsdk0+0x7340b8) copies w17 into w18
+        # before a long dispatch block; later checks still compare w17.
+        # Only accept a copy whose source stays unchanged until the load.
+        for i in range(k0 - 1, -1, -1):
+            p = ctx[i]
+            if not idx.intersection(wname(p.reg_name(r)) for r in p.regs_access()[1]): continue
+            copy = re.fullmatch(r'(w\d+), (w\d+)', p.op_str) if p.mnemonic == 'mov' else None
+            if copy and copy.group(1) in idx and not any(
+                    copy.group(2) in {wname(q.reg_name(r)) for r in q.regs_access()[1]}
+                    for q in ctx[i + 1:k0] if q.mnemonic not in ('cmp', 'cmn', 'tst')):
+                idx.add(copy.group(2))
+            break
     for i in range(k0 - 1, -1, -1):   # walk back from the load: follow register copies into the index, stop at the bounds check
         p = ctx[i]
         m = re.fullmatch(r'(w\d+), (w\d+)', p.op_str) if p.mnemonic == 'mov' else None
@@ -650,7 +663,10 @@ def jump_offsets(insl, j):
         break
     if page is None: return None
     tb = page + lo
-    return [tb + struct.unpack_from('<i', IMG, tb + 4 * i)[0] for i in range(n)]
+    if lookback > 16 and not (0 < n <= 4096 and 0 <= tb and tb + 4 * n <= len(IMG)): return None
+    targets = [tb + struct.unpack_from('<i', IMG, tb + 4 * i)[0] for i in range(n)]
+    if lookback > 16 and not all(insl[0].address <= t <= insl[-1].address and t % 4 == 0 for t in targets): return None
+    return targets
 def table_base(insl, k, rb):
     """Address the table-base register rb holds at insl[k]: its writer chain before k must be add rb,rb,#lo after adrp rb (as in jump_offsets); None otherwise"""
     lo = None
@@ -750,7 +766,7 @@ for fa, fb in funcs:
                         if width: break
                     break
             if not (base and width):
-                tgt = jump_offsets(insl, j) or jump_adr_offsets(insl, j)
+                tgt = jump_offsets(insl, j) or jump_adr_offsets(insl, j) or jump_offsets(insl, j, 128)
                 if not tgt and tail_call(insl, j): tailcalls.add(ins.address); continue
                 if not tgt and (far := jump_bytes_far(insl, j)): jumps[ins.address] = far; continue
                 assert tgt, f'jump table {ins.address:x}'

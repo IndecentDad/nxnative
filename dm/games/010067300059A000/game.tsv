@@ -20,7 +20,8 @@ shader_versions	v589824
 # every module main imports from
 modules	main subsdk0 sdk
 romfs_marker	moria/sdf/nx/data/sdf-B-1052.sdfdata
-zip_store	.sdftoc:.metallib
+# BERG and WEST already compress their resources; store them directly in ZIP64.
+zip_store	.sdfdata:.sdftoc:.metallib
 
 # ---- Memory ----
 # NPDM: 16 MB of system resource (virtual address memory).

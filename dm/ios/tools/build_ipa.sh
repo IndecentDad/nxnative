@@ -73,6 +73,10 @@ xcodebuild -project DmIOS.xcodeproj -scheme DmIOS -configuration Release -destin
 # When Xcode's Locations setting is a custom location, products ignore -derivedDataPath: take the actual path from this build's log
 APP=$DD/Build/Products/Release-iphoneos/DmIOS.app; [ -d "$APP" ] || APP=$(grep -o '/[^ ]*/Release-iphoneos/DmIOS\.app' "$O/build.log" | tail -1)
 [ -n "$APP" ] && [ -d "$APP" ] || die "no built app"; t "app: $APP"
+if [ "${DM_BUILD_ONLY:-0}" = 1 ]; then
+  t "Release build complete (DM_BUILD_ONLY=1; IPA packaging deferred)"
+  exit 0
+fi
 
 # Straight from the sources: the app without its signature, and without the folders an app built before pack_ipa.py still has (DerivedData keeps resources that left the project;
 # msl/ is also deleted there, it took 1.5 GB of the home disk), then the shader libraries, the add-on content (the RomFS extracted from the player's DLC NSPs, one folder per index:

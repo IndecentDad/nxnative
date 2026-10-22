@@ -509,13 +509,13 @@ def scan_blob(d, label, out):
         size = struct.unpack_from('<I', d, m.start() + 0x1c)[0]
         if m.start() + size <= len(d) and d[m.start() + 0x60:m.start() + 0x64] == b'grsc': out.extend(bnsh_shaders(d, m.start(), label))
 
-def berg_shaders(path, label, out):
+def berg_shaders(path, label, out, entries=None):
     """Snowdrop stores single-stage NVN programs in BERG records (Rabbids SDK 4).
     Its 0x838-byte controls directly precede code, without a GLSLC wrapper.
     Validate lengths and stage for every match, including all DLC resources.
     """
     import berg
-    for where, kind, data in berg.records(path, label):
+    for where, kind, data in berg.records(path, label, entries):
         for match in re.finditer(CTL_MAGIC, data):
             offset = match.start()
             if offset + 0x760 > len(data): continue
@@ -588,7 +588,7 @@ def scan_file(args):
     with open(path, 'rb') as f: head = f.read(16)
     found = []; trees = {}
     if head[:4] == b'BERG':
-        berg_shaders(path, '/' + rel, found)
+        berg_shaders(path, '/' + rel, found, args[2] if len(args) > 2 else None)
         return rel, uniq_keys(found), var_pairs(found), trees
     if head[:8] == IDRK:
         idrk_shaders(path, '/' + rel, found)
@@ -677,8 +677,10 @@ def main():
     big = [j for p, r in files for j in (linkdata_jobs(p, r) or [])]   # Three Houses' 6.9 GB DATA1.bin: one job per range of entries, not one read of the whole file
     pak_jobs, paks = kpka_jobs(files)   # Monster Hunter Rise's PAKs: the newest copy of each path, in ranges of entries
     tr_jobs, trp = trpfs_jobs(files)   # Pokémon Legends: Z-A's Trinity packs (data.trpfs and its index data.trpfd), decoded by the game's own Oodle in the Mac host
-    big += pak_jobs + tr_jobs
-    files = [(p, r) for p, r in files if not linkdata_jobs(p, r) and p not in paks and p not in trp]
+    import berg
+    berg_jobs, berg_archives = berg.jobs(files)
+    big += pak_jobs + tr_jobs + berg_jobs
+    files = [(p, r) for p, r in files if not linkdata_jobs(p, r) and p not in paks and p not in trp and p not in berg_archives]
     with cf.ProcessPoolExecutor(J, initializer=_pool_init, initargs=(common, {}, zdicts)) as ex:
         results += list(ex.map(scan_file, big)) + list(ex.map(scan_file, files, chunksize=16))
     trees, defer = {}, []
