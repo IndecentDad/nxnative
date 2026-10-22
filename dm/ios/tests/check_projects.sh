@@ -23,10 +23,11 @@ ent = plistlib.loads((p / 'Gen/DmIOS.entitlements').read_bytes())
 project = (p / 'DmIOS.xcodeproj/project.pbxproj').read_text()
 assert info['DMTitleID'] == game
 assert f'org.nxnative.{game.lower()}' in project, 'stable bundle ID missing'
-assert 'DmSaveSync.m' in project, 'shared source missing'
+  assert 'DmGameSave.m' in project, 'shared GameSave source missing'
 assert 'Gen/DmIOS.entitlements' in project, 'entitlements setting missing'
 assert ent['com.apple.developer.ubiquity-container-identifiers'] == ['iCloud.org.nxnative.saves']
-assert info['NSUbiquitousContainers']['iCloud.org.nxnative.saves']['NSUbiquitousContainerIsDocumentScopePublic']
+  assert info['NSUbiquitousContainers']['iCloud.org.nxnative.saves']['NSUbiquitousContainerIsDocumentScopePublic']
+  assert 'NSUbiquitousContainerName' not in info['NSUbiquitousContainers']['iCloud.org.nxnative.saves']
 print(f'{game}: shared source, identity, iCloud Files folder and entitlements verified')
 PY
 done

@@ -1,7 +1,7 @@
 # NX Native Project Handoff
 
 Repository: `IndecentDad/nxnative`  
-Current branch: `main` (iCloud feature fast-forwarded from `feature/icloud-save-sync` at `752255f`)
+Current branch: `feature/gamesave-local-documents` (unmerged GameSave simplification)
 
 ## Completed
 
@@ -29,4 +29,6 @@ On 2026-10-21, the isolated Tahoe checkout `/Users/kylepyne/nxnative-dread-diag-
 
 Commit `752255f` adds shared iOS snapshot/revision sync, manual Files export/import, an on-screen Saves menu, deferred imports, and optional shared iCloud Documents build configuration. See [icloud-saves.md](icloud-saves.md). Tahoe compiled the shared iOS sources; APFS runtime tests, two generated Xcode project configurations, and an ad hoc entitlement check passed. No new IPA was built. Obsolete `app-icon-support` and `intel-macos-support` remote branches were deleted after verifying both are ancestors of fork main and no worktree depends on them; the local app-icon branch was also deleted. Newer upstream was reviewed but not merged. The old uncommitted status document was preserved in a pre-merge stash, and its findings were incorporated here.
 
-Next: configure the Apple Developer shared iCloud container and explicit App ID/profile per game; then validate PlumeImpactor's actual provisioned entitlements and two-device iCloud behavior. Build a cloud-enabled IPA only after that configuration is ready. Continue Dread memory diagnostics separately; do not modify graphics resource management before device logs are analyzed.
+The feature branch replaces custom `DmSaveSync` snapshot/export/import logic with the iOS 26 GameSave `GSSyncedDirectory` adapter. Local `Documents/save` remains authoritative and visible through the app's display-name folder; the Saves button, manual Files workflows, and `NXNative Saves` metadata are removed. Project-generation tests pass and the adapter passes an arm64 Tahoe/Xcode 26.5 SDK syntax check. No IPA or save data was changed.
+
+Remaining: device-test local Files visibility, first upload, offline/unavailable iCloud, newer-save restore, and conflict preservation. Confirm the signed profile retains `CloudDocuments`, the exact shared container, increased-memory-limit, and extended-virtual-addressing. Do not merge until those tests pass; continue Dread memory diagnostics separately.

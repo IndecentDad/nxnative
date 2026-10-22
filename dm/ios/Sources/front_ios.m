@@ -4,7 +4,6 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 #import <AVFAudio/AVFAudio.h>
-#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <errno.h>
 #include "front.h"
 #include "hle.h"
@@ -14,9 +13,8 @@ UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_reset(void);
 void front_ios_boot(void);
 int front_ios_boot_ok(void);
-NSString *dm_save_sync_status(void);
-void dm_save_sync_action(int action, void (^completion)(NSString *));
-void dm_save_sync_import_file(NSURL *url, void (^completion)(NSString *));
+extern NSString * const DmGameSaveNotice;
+void dm_save_sync_resume(void);
 
 static CAMetalLayer *g_layer;
 static void front_ios_power_watch(void);
@@ -42,10 +40,9 @@ static void front_ios_audio_watch(void);
 }
 @end
 
-@interface DmRootVC : UIViewController <UIDocumentPickerDelegate>
+@interface DmRootVC : UIViewController
 @property (nonatomic, strong) DmGameView *game;
 @property (nonatomic, strong) UIView *pad;
-@property (nonatomic, strong) UIButton *savesButton;
 @property (nonatomic, strong) UILabel *saveNotice;
 @end
 @implementation DmRootVC
@@ -67,53 +64,21 @@ static void front_ios_audio_watch(void);
     self.pad = dm_gamepad_view(self.view.bounds);
     self.pad.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.pad];
-    self.savesButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.savesButton setTitle:@"Saves" forState:UIControlStateNormal];
-    self.savesButton.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
-    self.savesButton.tintColor = UIColor.whiteColor;
-    self.savesButton.layer.cornerRadius = 8;
-    [self.savesButton addTarget:self action:@selector(showSaveMenu) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.savesButton];
     self.saveNotice = [UILabel new]; self.saveNotice.textColor = UIColor.whiteColor;
     self.saveNotice.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
     self.saveNotice.textAlignment = NSTextAlignmentCenter; self.saveNotice.numberOfLines = 2;
     self.saveNotice.font = [UIFont systemFontOfSize:12]; self.saveNotice.hidden = YES;
     [self.view addSubview:self.saveNotice];
+    [[NSNotificationCenter defaultCenter] addObserverForName:DmGameSaveNotice object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        [self showSaveNotice:note.object];
+    }];
 }
 - (void)showSaveNotice:(NSString *)message {
     self.saveNotice.text = message; self.saveNotice.hidden = NO;
     NSLog(@"save sync UI: %@", message);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([self.saveNotice.text isEqual:message]) self.saveNotice.hidden = YES;
     });
-}
-- (void)showSaveMenu {
-    UIAlertController *menu = [UIAlertController alertControllerWithTitle:@"Game saves"
-        message:dm_save_sync_status() preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray<NSString *> *names = @[@"Sync Now", @"Export Save to Files", @"Import Cloud Save on Next Launch"];
-    for (int action = 0; action < 3; action++) {
-        int selected = action;
-        [menu addAction:[UIAlertAction actionWithTitle:names[action] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            (void)a; [self showSaveNotice:@"Working on save…"];
-            dm_save_sync_action(selected, ^(NSString *result) { [self showSaveNotice:result]; });
-        }]];
-    }
-    [menu addAction:[UIAlertAction actionWithTitle:@"Import Save from Files" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        (void)a;
-        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:YES];
-        picker.delegate = self;
-        [self presentViewController:picker animated:YES completion:nil];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    menu.popoverPresentationController.sourceView = self.savesButton;
-    menu.popoverPresentationController.sourceRect = self.savesButton.bounds;
-    [self presentViewController:menu animated:YES completion:nil];
-}
-- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    (void)controller;
-    if (!urls.count) return;
-    [self showSaveNotice:@"Verifying save export…"];
-    dm_save_sync_import_file(urls[0], ^(NSString *result) { [self showSaveNotice:result]; });
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
@@ -122,7 +87,6 @@ static void front_ios_audio_watch(void);
     if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
     CGFloat top = self.view.safeAreaInsets.top;
-    self.savesButton.frame = CGRectMake(CGRectGetMidX(b) - 38, top + 49, 76, 27);
     self.saveNotice.frame = CGRectMake(CGRectGetMidX(b) - MIN(220, b.size.width / 3), top + 81,
                                         MIN(440, b.size.width * 2 / 3), 44);
 }

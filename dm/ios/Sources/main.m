@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "game_profile.h"   // game profile constants (the RomFS marker path)
-#import "DmSaveSync.h"
+#import "DmGameSave.h"
 
 int dm_main(int argc, char **argv);   // dm/host/main.c compiled in with -Dmain=dm_main
 void dm_host_preload_start(int argc, char **argv);
@@ -14,18 +14,9 @@ UIViewController *front_ios_root(void);
 void front_ios_focus_event(int ev);
 
 static char *g_argv[4]; static int g_argc;
-static DmSaveSync *g_save_sync;
-NSString *dm_save_sync_status(void) { return [g_save_sync status] ?: @"Save sync unavailable"; }
-void dm_save_sync_action(int action, void (^completion)(NSString *)) {
-    if (!g_save_sync) { completion(@"Save sync unavailable"); return; }
-    if (action == 0) [g_save_sync sync:completion];
-    else if (action == 1) [g_save_sync exportSave:completion];
-    else [g_save_sync importCloudSave:completion];
-}
-void dm_save_sync_import_file(NSURL *url, void (^completion)(NSString *)) {
-    if (!g_save_sync) { completion(@"Save sync unavailable"); return; }
-    [g_save_sync importSaveAtURL:url completion:completion];
-}
+static DmGameSave *g_game_save;
+void dm_save_sync_resume(void) { [g_game_save resumeSafely]; }
+void front_save_committed(void) { [g_game_save saveCommitted]; }
 
 static NSString *romfs_locate(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -65,10 +56,9 @@ static int boot_env(void) {
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
-    g_save_sync = [[DmSaveSync alloc] initWithDocuments:[NSURL fileURLWithPath:doc isDirectory:YES]
-                                                titleID:@DM_GAME_ID
-                                            containerID:[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMICloudContainer"]];
-    fprintf(stderr, "boot: save sync %s\n", [g_save_sync applyPendingImport].UTF8String);
+    g_game_save = [[DmGameSave alloc] initWithLocalSave:[NSURL fileURLWithPath:[doc stringByAppendingPathComponent:@"save"] isDirectory:YES]
+                                           containerID:[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMICloudContainer"]];
+    [g_game_save startBeforeGameplay];
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
@@ -119,7 +109,7 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
 - (void)sceneWillResignActive:(UIScene *)s { front_ios_focus_event(0); }
 - (void)sceneDidEnterBackground:(UIScene *)s { front_ios_focus_event(1); }
 - (void)sceneWillEnterForeground:(UIScene *)s { front_ios_focus_event(2); }
-- (void)sceneDidBecomeActive:(UIScene *)s { front_ios_focus_event(3); }
+- (void)sceneDidBecomeActive:(UIScene *)s { front_ios_focus_event(3); dm_save_sync_resume(); }
 @end
 
 int main(int argc, char **argv) {

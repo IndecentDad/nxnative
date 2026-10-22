@@ -36,7 +36,6 @@ def configure(info_path, entitlements_path, title_id, container='', team='', bas
         info['DMICloudContainer'] = container
         info['NSUbiquitousContainers'] = {container: {
             'NSUbiquitousContainerIsDocumentScopePublic': True,
-            'NSUbiquitousContainerName': 'NXNative Saves',
             'NSUbiquitousContainerSupportedFolderLevels': 'Any',
         }}
         needed = {
