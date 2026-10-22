@@ -24,6 +24,10 @@ def configure(info_path, entitlements_path, title_id, container='', team='', bas
     if base:
         with open(base, 'rb') as file:
             entitlements = plistlib.load(file)
+        # A reusable base may come from a previously signed game's plist.
+        # Identity belongs to this game's provisioning profile, not the old app.
+        for key in ('application-identifier', 'com.apple.developer.team-identifier', 'keychain-access-groups'):
+            entitlements.pop(key, None)
     if container:
         if not re.fullmatch(r'iCloud\.[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?:\.[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)+', container):
             raise ValueError('DM_ICLOUD_CONTAINER must be a full iCloud.* container identifier')

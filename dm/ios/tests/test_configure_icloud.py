@@ -30,11 +30,15 @@ class ConfigureCloudTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             info, ent, base = root / 'Info.plist', root / 'out.plist', root / 'base.plist'
-            for path, data in ((info, {}), (base, {'com.apple.developer.kernel.increased-memory-limit': True})):
+            for path, data in ((info, {}), (base, {'com.apple.developer.kernel.increased-memory-limit': True,
+                                                  'application-identifier': 'OLDTEAMID.org.nxnative.oldgame',
+                                                  'com.apple.developer.team-identifier': 'OLDTEAMID'})):
                 with path.open('wb') as file: plistlib.dump(data, file)
             result, signing = module.configure(info, ent, '010093801237C000', base=str(base))
             self.assertNotIn('NSUbiquitousContainers', result)
             self.assertTrue(signing['com.apple.developer.kernel.increased-memory-limit'])
+            self.assertNotIn('application-identifier', signing)
+            self.assertNotIn('com.apple.developer.team-identifier', signing)
 
     def test_invalid_cloud_configuration_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
