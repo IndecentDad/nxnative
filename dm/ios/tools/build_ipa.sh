@@ -24,7 +24,7 @@ NACP=$W/data/v0/control.nacp; [ -f "$NACP" ] || NACP=$(dirname "$ROMFS")/control
 [ -n "${DM_DISPLAY_NAME:-}" ] || DM_DISPLAY_NAME=$(python3 "$DM/tools/nacp.py" "$NACP") || die "no game name in $NACP (re-extract with nx_extract, or set DM_DISPLAY_NAME)"
 VNACP=$(dirname "$ROMFS")/control.nacp; [ -f "$VNACP" ] || VNACP=$W/data/v0/control.nacp
 [ -n "${DM_APP_VERSION:-}" ] || DM_APP_VERSION=$(python3 "$DM/tools/nacp.py" --version "$VNACP") || { t "no display version in $VNACP: the app version is 1.0"; DM_APP_VERSION=1.0; }
-export LC_ALL=C DM_BUNDLE_ID=${DM_BUNDLE_ID:-org.nxnative.$(echo "$GAME" | tr 'A-Z' 'a-z')} DM_DISPLAY_NAME DM_APP_VERSION DM_APP_CATEGORY=$(gp app_category) DM_TEAM_ID=${DM_TEAM_ID:-0000000000}   # placeholder identity: unsigned, the install tool replaces it
+export LC_ALL=C DM_BUNDLE_ID=${DM_BUNDLE_ID:-org.nxnative.$(echo "$GAME" | tr 'A-Z' 'a-z')} DM_DISPLAY_NAME DM_APP_VERSION DM_BUILD_VERSION=${DM_BUILD_VERSION:-$DM_APP_VERSION} DM_APP_CATEGORY=$(gp app_category) DM_TEAM_ID=${DM_TEAM_ID:-0000000000} DM_GAME_TITLE_ID=$(gp title_id)   # placeholder identity: unsigned; cloud-enabled apps must retain this bundle ID when signed
 for f in $MODS; do [ -f "$PATCHED/$f.patched.bin" ] && [ -f "$PATCHED/$f.fixups.tsv" ] || die "no rewritten module $PATCHED/$f (run dm/tools/patch_nso.py first)"; done
 [ -e "$ROMFS/$MARKER" ] || die "no RomFS at $ROMFS (missing $MARKER)"
 V=$(sed -n 's/^#define DMSH_CHAIN "\(.*\)"/\1/p' "$GD/dmsh_chain.h")
@@ -63,6 +63,7 @@ if [ -f "$ICON" ]; then
   t "app icon: $ICON"
 else t "no app icon ($ICON not found): the home-screen icon stays blank"; fi
 xcodegen generate -q > /dev/null || die "xcodegen"
+python3 tools/configure_icloud.py Sources/Info.plist Gen/DmIOS.entitlements --title-id "$DM_GAME_TITLE_ID" || die "iCloud configuration"
 
 t "xcodebuild (Release, unsigned, iPhone + iPad)"
 mkdir -p "$O"
@@ -77,9 +78,18 @@ APP=$DD/Build/Products/Release-iphoneos/DmIOS.app; [ -d "$APP" ] || APP=$(grep -
 # msl/ is also deleted there, it took 1.5 GB of the home disk), then the shader libraries, the add-on content (the RomFS extracted from the player's DLC NSPs, one folder per index:
 # the app sets DM_AOC_DIR at launch, the host reports them as owned and mounts them from it) and the RomFS
 rm -rf "$APP/msl" "$O/Payload" "$O/out.ipa"   # (the last two: what the copy-and-zip packing left behind)
+# Impactor discovers requested capabilities from the Mach-O signature. An
+# ad-hoc entitlement seed carries them without a developer certificate; the
+# installer still must provision and re-sign for the target device.
+if [ -n "${DM_ICLOUD_CONTAINER:-}${DM_BASE_ENTITLEMENTS:-}" ]; then
+  codesign --force --sign - --entitlements Gen/DmIOS.entitlements --generate-entitlement-der "$APP" || die "ad-hoc entitlement seed"
+  codesign -d --entitlements :- "$APP" 2>/dev/null | python3 -c 'import plistlib,sys; d=plistlib.loads(sys.stdin.buffer.read()); assert "CloudDocuments" in d.get("com.apple.developer.icloud-services", [])' >/dev/null 2>&1 || \
+    { [ -z "${DM_ICLOUD_CONTAINER:-}" ] || die "cloud entitlement missing from executable"; }
+fi
 P=Payload/DmIOS.app; MAPS=("$P=$APP" "$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR")
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
 MAPS+=("$P/romfs=$ROMFS")
 t "pack IPA (already-compressed game files stored, everything else deflated)"
 python3 tools/pack_ipa.py "$OUT_IPA" --store "$(gp zip_store)" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/aoc --skip $P/romfs "${MAPS[@]}" || die "pack_ipa"
+cp Gen/DmIOS.entitlements "$OUT_IPA.entitlements.plist" || die "copy signing entitlements"
 t "done: $OUT_IPA ($(du -h "$OUT_IPA" | cut -f1))"
