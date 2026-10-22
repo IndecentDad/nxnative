@@ -1,4 +1,4 @@
-# Game profile of Celeste (Switch, update 1.4.1.1 = v589824, the game shows v.1.4.1.0; base game v0 not extracted). Plays on the Mac (title, file select, the prologue at 60 fps with sound)
+# Game profile of Celeste (Switch, update 1.4.1.1 = v589824, the game shows v.1.4.1.0; base game v0 not extracted). Plays on the Mac (title, file select, the prologue at 60 fps with sound) and on the iPhone
 # Format: see dm/games/README.md
 # MonoGame for the Switch (Microsoft.Xna.Framework over NVN), its C# and the game's compiled to C++ by Sickhead's BRUTE into main, FMOD Studio sound through AudioOut, SDK 15.3.2.
 # The shaders are MonoGame effects (MGFX version 8): 13 in Content/Effects/*.xnb, and SpriteBatch's built-in effect in main (shader_split.py mgfx_effect). The provisional profile's guesses held: no key needed changing
