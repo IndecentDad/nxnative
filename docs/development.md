@@ -315,6 +315,96 @@ The game's own work and its frame rate stay as they are; the host avoids work of
 - **Saves:** the game writes a slot when it reaches the map, not when the slot is picked.
 - **Mac input:** a fresh save goes through the title (L+R), a new slot, the storybook and the house to the map with `DM_KEYS="20:L+R,26:A,32:A,38:A,44:A,50:A,56:A*20/3,120:LRight~4,125:A,127:LRight~3,131:A*10/2,152:LLeft~3,155.5:A"` (the map at about 160 s). From that save, `DM_KEYS="20:L+R,26:A,32:A,35:A,40:LRight~1.5,42:LDown~1.5,45:LRight~3,49:LUp~1,51:LRight~3,54.5:LLeft~0.5,55.2:LUp~0.25,55.6:LRight~2,58:LUp~0.2,58.4:LRight~0.25,58.8:LUp~0.2,59.2:LRight~0.25,59.6:LUp~0.2,60:LRight~0.25,60.4:LUp~0.2,61:A,63:A"` crosses the bridge (its entry is narrow between the posts) and enters Forest Follies (play from about 68 s; Y shoots).
 
+**FINAL FANTASY TACTICS - The Ivalice Chronicles (`010038B015560000`)**
+- **Status:** brought up on the Mac: initial settings, the opening movie, the prologue and the Orbonne Monastery battle up to the player's first turn, at 60 fps with no red line (about 1.4 GB resident); playable on an iPhone.
+- **Engine:** Square Enix's engine on SDK 19.3.9 (its `sdk` is byte-identical to Hades II's), NVN, update 1.4.0 (v393216). The OpenGL driver bundled as `subsdk0` is not loaded. CRI Mana movies and ADX audio run in the game's own code.
+- **Shaders:** 306: 257 GLSLC outputs in the technique files (`resources_nx/release/master/shader/*.tec`), which `shader_split.py` now reads like `main`'s 49, and one geometry shader Metal cannot build.
+- **Job system:** its pools wake one worker through a shared auto-clear event and relied on the workers sleeping in index order; a build cut makes a worker woken in another's place pass the wake on (`patch_nso.py`; the boot hung in 4 of 6 runs) ([03](agents/03-bringup.md)).
+- **Graphics:** UI textures are written by the CPU into uncached pools after creation (`tex_flush_upload`, `tex_dirty_upload`), and the UI is composited into the window texture by fragment-shader image stores read back as `r32ui`, between game barriers inside one pass ([04](agents/04-graphics.md)).
+- **Mac input:** a fresh save reaches the first battle turn at about frame 21,000 with `DM_KEYS="22:A*60/2,150:Plus,152:X~2.5,165:Plus,167:X~2.5,175:A*70/2"` (A through the settings and the birthday, then + and a held X skip each part of the opening).
+
+**Absolum (`0100A83022A22000`)**
+- **Status:** brought up on the Mac: the logo movie, the licence agreement, the main menu, the campfire character select, the intro and the first level (the "Strike / Skill" tutorial and the cave after it), at 60 fps with real sound and saves; about 2.5 GB resident. Playable on an iPhone.
+- **Engine:** FNA (XNA 4 in C#) compiled with .NET NativeAOT (its own GC, regions enabled), SDL3, FNA3D's NVN driver, Wwise, SDK 18.3.2, update 1.1.1 (v393216). NVIDIA's OpenGL and Vulkan drivers (`subsdk1`, `subsdk0`) are not loaded; `subsdk2` is the movie module (H.264 logos). Epic Online Services comes as an NRO the host does not load; the game plays offline without it.
+- **Code:** `main` starts its text with 1.7 MB of data, which the rewriter now leaves alone (`dm/tools/nso_code.py`).
+- **Shaders:** 162 GLSLC outputs in `shaders.nx.bin`. The picture is flipped by a viewport swizzle, which the host now applies ([04](agents/04-graphics.md)).
+- **Memory:** everything is virtual address memory: malloc's StandardAllocator (40 GB of address space, cut to 2.5 GB on this build; 1.75 GB of it is FNA3D's GPU heap), the .NET GC's region range (`game_env DOTNET_GCRegionRange=60000000`: 1.5 GB instead of 3.75), and the SDK cuts for its node area and its 1 GB alignment of large regions. They take 4.13 GB of the 4.375 GB alias region in a 5 GB block ([03](agents/03-bringup.md)).
+- **Mac input:** a fresh save reaches the first level at about frame 9,000 with `DM_KEYS="f1500:A,f1900:A,f2300:A,f2700:A,f3000:A,f3300:A,f3600:A,f4000:A,f4400:A,f4800:A,f5400:A*30/150"` (any button, accept the licence, New game, the character select, then A through the intro and the first dialogue); `LRight` walks, Y strikes and X uses the skill.
+
+**Captain Toad: Treasure Tracker (`01009BF0072D4000`)**
+- **Status:** brought up on the Mac with no host change:
+  - the opening course, the cutscene that follows it and the title menu;
+  - the first save, the Episode 1 book and Plucky Pass Beginnings;
+  - the Special Episode's book (add-on content 1).
+
+  It runs at 60 fps with no red line. Three minutes in a course: about 950 MB resident and 690 MB of Metal allocations, flat. Playable on an iPhone.
+- **Engine:** Nintendo EPD Tokyo's engine (the `al` library over sead / agl, as Super Mario 3D World and Super Mario Odyssey) on SDK 8.2.0, update 1.4.2 (v393216). Its `sdk` is the build Link's Awakening 1.1.0 runs. `main` exports its symbols (48,804 defined), so `sdis.py --find` names most functions.
+- **Shaders:** 7,258, all with Mario's binding layout. The fin fur geometry shader does not build, as in 3D World. `main` imports `glslcCompile` but no module defines it, so nothing is compiled at run time ([04](agents/04-graphics.md)).
+- **Graphics:** agl's post-effect program samples its own attachment, as in 3D World, and here the 16x16 magenta blocks showed on the Mac too: the profile's `feedback_snap`.
+- **Input:** the profile plays it handheld (`op_mode`): docked, the game's pointer (touch blocks, stunning enemies) is the Joy-Con gyro; handheld, it is the touch screen. The virtual gamepad starts in the 3D layout (right stick: camera).
+- **Add-on content:** index 1 is the Special Episode; index 2 holds a 1-byte marker file.
+- **Memory:** no system resource; the game sets a 3.00 GB heap (pool − 64 MB) in the 4 GB layout.
+- **Mac input:** a fresh save starts in the opening course with control of Toad. `DM_KEYS="f900:LUp+LRight~2.0,f1030:LUp+LLeft~2.2,f1170:LDown+LLeft~2.8,f1345:LDown+LRight~0.4,f1375:LUp+LRight~2.0,f1500:LDown+LRight~1.5,f1595:LUp+LRight~1.4,f1685:LUp+LLeft~0.9"` walks him to the star:
+  - through the arch, up the back ramp, around the rock on the grass top and over the roof;
+  - the course clears at about frame 2,100 and the title menu comes at about 5,200, with the first save;
+  - A dismisses the title's notices.
+
+  From that save, `DM_KEYS="f600:A,f1000:LRight~0.3,f1300:A"` starts Plucky Pass Beginnings (play from about frame 1,900). How the route was found (position probe, the stage map's guide rail) is in [05](agents/05-debugging.md).
+
+**Brain Memory Training Academy (`0100F5D01DA3A000`)**
+- **Status:** brought up on the Mac: the title, the controls screen, the level select and the levels with their Level Complete / Level Failed screens, at 60 fps with real sound and saves, no red line; about 0.75 GB resident, flat over 20 minutes. Playable on an iPhone.
+- **Engine:** Unity 2022.3.5f1 IL2CPP with FMOD on SDK 16.2.4 (its `sdk` is Unicorn Overlord 1.05's build), base game 1.0.0; `subsdk0` is the movie module.
+- **Shaders:** 496 in the player's serialized files (`Data/*.assets`, `Data/Resources`) and `main`. There are no bundles, so no file carries a `Shader` type tree to borrow; `unityfs.py` has Unity 2022.3's layout written out (`KNOWN_TREES`, the hash Ace Attorney Investigations Collection's bundles carry). The built-in VR blit's geometry shader does not build ([04](agents/04-graphics.md)).
+- **Memory:** virtual address memory as in Ace Attorney Investigations Collection: `nninitStartup` gives StandardAllocator pool − used, which needs the node area cut on this `sdk` build (`patch_nso.py`; Unicorn Overlord, which has no system resource, runs the same with it). Ace Attorney's 1 GB pool and 5 GB block; the live regions end at about +2.1 GB of the 4.375 GB alias region ([03](agents/03-bringup.md)).
+- **Input:** controller only (stick or D-pad, A, B, +); the game never reads the touch screen, so it stays docked at 1920x1080 and the virtual gamepad starts in the 2D layout.
+- **Mac input:** `DM_KEYS="f400:A,f700:A,f1000:A,f1200:Right,f1300:A"` starts a new game, enters level 1 and clears it (Level Complete at about frame 1,350).
+
+**The Great Ace Attorney Chronicles (`010036E00FB20000`)**
+- **Status:** brought up on the Mac: the first-boot notices (the DLC found, auto-save), the title and its Options, a new game of The Great Ace Attorney: Adventures, the opening movie, the first episode's opening scenes and its trial, at 30 fps with sound and saves; about 1.1 GB resident, flat over 14 minutes. Playable on an iPhone.
+- **Engine:** Capcom's MT Framework on SDK 10.4.1, NVN, base game 1.0.0 (v0). Files are ARC archives of zlib entries under `nativeNXx64/` ([01](agents/01-extract.md)); `subsdk0` is the SDK's movie module, whose extractor runs natively while the host decodes the H.264 movies (VideoToolbox).
+- **Shaders:** 460 (230 vertex, 230 pixel) in one MT Framework shader package (`sa/NX_64/root.arc`), which `shader_split.py` now reads ([04](agents/04-graphics.md)); all build, every binding decodes.
+- **Host:** SDK 10 calls that reach a service, found from the import list (album notifications, store demo mode, `vi::ListDisplays`, `fs::RenameDirectory`, save thumbnails, shop and friend applets, the profanity filter called by name), and two NVN calls ([03](agents/03-bringup.md)).
+- **Graphics:** the textures are copied into a CPU-cached pool by the CPU after creation, with no flush of any kind (`tex_flush_upload`, `tex_dirty_upload`; [04](agents/04-graphics.md)).
+- **Add-on content:** index 1 (`DLC.dlcp`); the game reports it found and added to Special Contents.
+- **Memory:** no system resource; the game sets a 3.14 GB heap (pool − 64 MB) in the 4 GB layout.
+- **Mac input:** `DM_KEYS="f700:A*1000/24"` (A every 24 frames) goes through the notices, the title and a new game into the opening movie; the first episode's dialogue starts at about frame 6,000 and its trial at about 20,000.
+
+**STEINS;GATE RE:BOOT (`01008BC024FDE000`)**
+- **Status:** the logos, the title menu (its background is a movie), a new game through the prologue movies into the story, the config pages, save and quick load, at 60 fps with music, voices and movie sound; no red line in 15 minutes of story. Playable on an iPhone.
+- **Engine:** M2's ADV engine (`advengine`, m2lib, the E-mote player for the animated characters) on SDK 20.5.17, update 1.0.3 (v131072). `subsdk0` is the SDK's movie library: its `movie::Extractor` demuxes the 87 H.264 / AAC MP4 movies and the host decodes them (output 4, NV12 buffers). Everything else is in the game's own PSB archives (`*_info.psb.m` + `*_body.bin`), which it reads itself.
+- **Shaders:** 487 in five BNSH in `main` (483 pixel, 4 vertex); RomFS holds none.
+- **Host changes:** `nn::audio::SetAudioOutVolume` / `GetAudioOutVolume` (the movie sound's AudioOut, set every frame; [03](agents/03-bringup.md)); the storage-sharing texture table drops entries whose storage another texture takes over, which kept GPU memory near 1 GB where it used to grow with every picture shown ([04](agents/04-graphics.md)).
+- **Graphics:** 1280x720 in a cropped 1920x1080 window in both modes, by the game's own choice; the backgrounds' scratches, dust and colour fringes look like the art's own film effect.
+- **Input:** buttons only: it reads the touch screen in handheld mode but takes nothing from it, so the profile keeps the default docked mode and the 2D pad layout (ZL / ZR phone trigger; quick save on R3 needs the 3D layout).
+- **Memory:** no system resource; the game sets a 3.05 GB heap in the 4 GB layout. About 1.0–1.1 GB resident in the story on the Mac.
+- **Mac input:** A on the title, Right to CONTINUE, A, Right to QUICK LOAD, A, A on the save, Left to OK, A loads the quick save. The menu takes presses late while its background movie starts (100 to 500 frames after the title's A), so check a `DM_KEYS` route's frames with screenshots.
+
+**Big Brain Academy: Brain vs. Brain (`0100620012D6E000`)**
+- **Status:** brought up on the Mac: the title, Solo, enrolling a new student (birthday, profession, appearance, online features, the creepy-crawly filter), the main menu (Practice, Ghost Clash, Test), the Practice categories and activities from each (Whack Match, Species Spotlight, Frame Filler, Fast Focus, Flash Memory, Cubegame, the photo quiz, Tick-Tock Turn, Shadow Shift) with their results, coins and unlocks, at 60 fps with sound, the H.264 activity previews and saves, by controller and by touch. Playable on an iPhone.
+- **Engine:** NintendoWare Bezel Engine 1.56 on SDK 11.4.3, NVN, update 1.2.0 (v131072). Nearly all of RomFS is in Bezel Engine archives (`.bea`, zstd entries, [01](agents/01-extract.md)); `subsdk0` is GLSLC (imported, never called: `main` holds no GLSL source) and `subsdk1` the movie module.
+- **Shaders:** 2,125 BNSH in the archives' `.bfsha` entries (most of them the engine's own, in `System.nx.bea`), the layouts and `main`; `shader_split.py` reads the archives (`bea_members`, [04](agents/04-graphics.md)). The 12 geometry shaders of Bezel's line renderer do not build: the main menu's chart is drawn with it every frame (a line strip with adjacency expanded into thick lines, then copied out of the frame), so the chart's outlines are missing. Ten pixel shaders pick their texture at run time from one of two places in the game's uniform buffers; they do not load and their draws are skipped. None of the activities above uses them; one 15-minute run of activities met one of them (`e10f24835bbaa5f6`, `03GamePerception.bnbshpk`) and the process aborted moments later, before the host caught SIGABRT, so its cause is not known; a second 15-minute run was clean.
+- **Host:** `nninitStartup` chooses virtual address memory or a heap by `IsVirtualAddressMemoryEnabled`, which the host answered yes for every game; the profile key `sys_resource` reports this NPDM's none. SDK 11's Opus work-buffer call, the IR camera, cached Nintendo Account info, per-file data caches and SDK 11's socket overloads ([03](agents/03-bringup.md)). The activity previews loop with Flush and Start from four threads, which corrupted the movie decoder (a host fix, `hle_movie.c`).
+- **Input:** the profile plays it handheld with Boost (`op_mode handheld`, `perf_mode boost`): handheld, the game reads the touch screen (every menu and activity, and Party's two-player touch battles); docked it does not. Handheld Normal draws 1280x720, Boost 1920x1080. The buttons work as well; the virtual gamepad starts in the 2D layout.
+- **Memory:** no system resource; the game sets a 3.14 GB heap (pool − used) in the 4 GB layout. It creates 1.5 GB of NVN memory pools in its first 25 s (384 + 256 MB CPU-uncached, a 320 MB physical pool for sparse mappings, 192 + 64 MB of render targets), so about 1.3 GB is resident at the title and 1.5 GB in the first activity. Over 15 minutes of activities it rose to 1.86 GB in steps as each new activity loaded (pools 217 → 292, textures 444 → 1,173), flat in between.
+- **Mac input:** from a fresh save, `DM_KEYS="f1900:A,f2400:A*9/150,f3800:Right*14/150,f3875:A*14/150,f6000:A*4/150,f6900:Down*5/60,f7250:A,f7500:A*17/150,f10050:A"` enrolls a student (birthday 01/01/2000, the default appearance, no online features) and starts Whack Match from Practice at about frame 10,050 (`<work>/run/enroll.sh`). In handheld mode `T<x>x<y>` taps work too: `f1900:T0.5x0.88` taps Start on the title.
+
+**Patrick's Parabox (`0100E44016C22000`)**
+- **Status:** brought up on the Mac: the first-boot language menu (all ten languages drawn), the title, the hub, Intro 1 solved and Intro 2 with undo, reset and the menu, at 60 fps with music and saves (progress kept across a restart); no red line, about 0.42–0.48 GB resident, flat over four minutes. Playable on an iPhone.
+- **Engine:** Unity 2020.3.30f1 IL2CPP with FMOD on SDK 13.3.7, update 1.0.1 (v65536); `subsdk0` is the movie module, which the game never uses.
+- **Shaders:** 486, all Unity built-ins (`Data/Resources/unity default resources`, `unity_builtin_extra`) plus the player's 11 GLSLC outputs in `main`. There are no bundles, so `unityfs.py` has Unity 2020.3's `Shader` layout written out (`KNOWN_TREES`: the type tree of Engage's bundles, the same hash). The built-in VR blit's geometry shader does not build ([04](agents/04-graphics.md)). The whole game draws with three shader pairs.
+- **Fonts:** its only font, Jost, falls back to the shared fonts for Japanese, Korean and Chinese text, which Unity's player opens with FreeType straight from `GetSharedFontAddress`; the host gives a game that imports no `ScalableFontEngineHelper::Decode` the TTF itself ([03](agents/03-bringup.md)).
+- **Memory:** the NPDM declares 16 MB of system resource (`sys_resource`), so virtual address memory as in Ace Attorney Investigations Collection and Brain Memory Training Academy: `nninitStartup` gives StandardAllocator pool − used, which needs the node area cut on this `sdk` build (`patch_nso.py`); their 1 GB pool and 5 GB block. The alias region is mapped up to +1.5 GB with 0.27 GB in use.
+- **Input:** controller only (stick or D-pad to move, A redo, B undo, X reset, + menu): it stays docked at 1920x1080 with the 2D pad layout.
+- **Mac input:** a fresh save solves Intro 1 with `DM_KEYS="f700:A,f1000:A,f1300:A,f1600:A,f2400:Right,f2450:Down,f2500:Down,f2550:Down,f2600:Down,f3000:Up*3/30,f3090:Right*3/30,f3180:Down*2/30,f3240:Up*3/30,f3330:Left*4/30"` (English, the title, into Intro 1 from the hub at about frame 2,700, solved and on to Intro 2 at about frame 3,500).
+
+**Celeste (`01002B30028F6000`)**
+- **Status:** brought up on the Mac with no host change: the logos, the title, a new file and the prologue (walking, jumping, the camera following Madeline), at 60 fps with music and sound, no red line; about 1.6–1.7 GB resident, flat over five minutes. Not yet tested on an iPhone.
+- **Engine:** MonoGame for the Switch: MonoGame's and the game's C# compiled to C++ by Sickhead's BRUTE into `main` (78 MB with its bss), FMOD Studio (its banks in `Content/FMOD/Desktop`, sound through AudioOut), SDK 15.3.2, NVN, update 1.4.1.1 (v589824; the title shows v.1.4.1.0). Only `main` and `sdk`.
+- **Shaders:** 26 (20 pixel, 6 vertex) in MonoGame effects: the 13 XNB files in `Content/Effects` and SpriteBatch's built-in effect in `main`, which `shader_split.py` now reads (`mgfx_effect`, [04](agents/04-graphics.md)). Every binding decodes.
+- **Memory:** no system resource (`sys_resource 0`), so no virtual address memory: the game sets a 3.11 GB heap (pool − used memory) in the 4 GB layout. The rewritten modules need 100 MB of used memory (`mem_used`).
+- **Input:** controller only; the game maps its buttons by position, so B and X jump. The virtual gamepad starts in the 2D layout.
+- **Mac input:** a fresh save reaches the prologue with `DM_KEYS="f1850:A,f2200:A,f2600:A,f3000:A"` (the title, Climb, a new file, Begin; control of Madeline from about frame 5,000); then `f5100:LRight~1.0,f5400:LRight+X~0.3` walks to the first ledge and jumps onto it.
+
 ## Tools (`dm/tools`)
 
 | Tool | What it does |
