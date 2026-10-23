@@ -1,13 +1,15 @@
 # Save Folder Sync
 
 `DmSaveFolderSync` is an optional Files-provider bridge. The game continues to
-run against the transactional `Documents/save` tree; the bridge only reads a
-complete committed snapshot and exports it after a successful host commit.
+run against its transactional `Documents/save` tree; the bridge receives the
+game's current payload directory from its profile, reads a complete committed
+snapshot, and exports it after a successful host commit. Celeste's payload is
+`Documents/save/nts/save`, so the external folder contains `0.celeste` directly.
 
 The selected folder is held by a security-scoped bookmark. Sync uses
-`<selected folder>/<title ID>/` and copies the committed `Documents/save`
-contents directly beneath that title-ID directory. No emulator-specific layout
-or intermediate save directory is added.
+`<selected folder>/<title ID>/` and copies the committed payload contents
+directly beneath that title-ID directory. No emulator-specific layout or
+intermediate save directory is added.
 
 The bridge fingerprints file contents and relative paths rather than relying on
 timestamps. Reads and staged replacements use `NSFileCoordinator` where the
