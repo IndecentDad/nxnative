@@ -15,7 +15,6 @@ UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_reset(void);
 void front_ios_boot(void);
 int front_ios_boot_ok(void);
-extern NSString * const DmGameSaveNotice;
 void dm_save_sync_resume(void);
 DmSaveFolderSync *dm_save_folder_sync(void);
 
@@ -46,7 +45,6 @@ static void front_ios_audio_watch(void);
 @interface DmRootVC : UIViewController
 @property (nonatomic, strong) DmGameView *game;
 @property (nonatomic, strong) UIView *pad;
-@property (nonatomic, strong) UILabel *saveNotice;
 @end
 @implementation DmRootVC
 - (void)viewDidLoad {
@@ -67,24 +65,9 @@ static void front_ios_audio_watch(void);
     self.pad = dm_gamepad_view(self.view.bounds);
     self.pad.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.pad];
-    self.saveNotice = [UILabel new]; self.saveNotice.textColor = UIColor.whiteColor;
-    self.saveNotice.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
-    self.saveNotice.textAlignment = NSTextAlignmentCenter; self.saveNotice.numberOfLines = 2;
-    self.saveNotice.font = [UIFont systemFontOfSize:12]; self.saveNotice.hidden = YES;
-    [self.view addSubview:self.saveNotice];
-    [[NSNotificationCenter defaultCenter] addObserverForName:DmGameSaveNotice object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-        [self showSaveNotice:note.object];
-    }];
     [[NSNotificationCenter defaultCenter] addObserverForName:@"DmOpenSettings" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
         [self presentViewController:DmMakeSettingsViewController(dm_save_folder_sync()) animated:YES completion:nil];
     }];
-}
-- (void)showSaveNotice:(NSString *)message {
-    self.saveNotice.text = message; self.saveNotice.hidden = NO;
-    NSLog(@"save sync UI: %@", message);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([self.saveNotice.text isEqual:message]) self.saveNotice.hidden = YES;
-    });
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
@@ -92,9 +75,6 @@ static void front_ios_audio_watch(void);
     CGFloat w = b.size.width, h = b.size.height;   // Fit 16:9 into the whole screen
     if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
-    CGFloat top = self.view.safeAreaInsets.top;
-    self.saveNotice.frame = CGRectMake(CGRectGetMidX(b) - MIN(220, b.size.width / 3), top + 81,
-                                        MIN(440, b.size.width * 2 / 3), 44);
 }
 - (void)viewDidAppear:(BOOL)a { [super viewDidAppear:a]; UIApplication.sharedApplication.idleTimerDisabled = YES; front_ios_boot(); }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }

@@ -17,7 +17,7 @@ void front_ios_focus_event(int ev);
 static char *g_argv[4]; static int g_argc;
 static DmGameSave *g_game_save;
 static DmSaveFolderSync *g_folder_sync;
-void dm_save_sync_resume(void) { [g_game_save resumeSafely]; }
+void dm_save_sync_resume(void) { [g_game_save resumeSafely]; [g_folder_sync resumeSafely]; }
 void front_save_committed(void) { [g_game_save saveCommitted]; [g_folder_sync saveCommitted]; }
 void dm_save_folder_sync_committed(void) { [g_folder_sync saveCommitted]; }
 DmSaveFolderSync *dm_save_folder_sync(void) { return g_folder_sync; }

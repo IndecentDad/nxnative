@@ -33,10 +33,12 @@ The feature branch replaces custom `DmSaveSync` snapshot/export/import logic wit
 
 Remaining: device-test local Files visibility, first upload, offline/unavailable iCloud, newer-save restore, and conflict preservation. Confirm the signed profile retains `CloudDocuments`, the exact shared container, increased-memory-limit, and extended-virtual-addressing. Do not merge until those tests pass; continue Dread memory diagnostics separately.
 
-## Save Folder Sync (feature/save-folder-sync)
+## Save Folder Sync (compat/save-folder-sync-tahoe-xcode26)
 
 Added a separate `DmSaveFolderSync` component and native NXNative Settings UI. It preserves GameSave and transactional `Documents/save`, stores security-scoped bookmarks, resolves title-ID folders for NXNative/Eden modes, stages copies, fingerprints content, and stops on conflicts or missing external game directories. Touch long-press and L+R+Plus fallback open settings. Eden automatic synchronization is enabled for device testing; its Metroid Dread round trip remains unverified.
 
 The Tahoe build worktree is clean at the feature commit and Xcode 26.6 is available. IPA generation is currently blocked before shader compilation because Tahoe’s installed `spirv-cross`/Metal tools do not match `dmsh_chain.lock`; no incompatible shader libraries or IPA were produced.
 
 Compatibility branch `compat/save-folder-sync-tahoe-xcode26` uses the verified Tahoe Dread foundation `78c708956b92`: the existing GameSave-test IPA embeds this chain and the matching `shader/ios/b-78c708956b92` cache is present. The repository lock and translator remain unchanged; this branch changes only Dread’s generated expected-chain header so NXNative’s compatibility check selects those verified artifacts.
+
+The current fix removes the deprecated GameSave/iCloud runtime observer and freshness UI, keeps its host lifecycle boundary, and resumes the selected-folder synchronizer on foreground. Eden maps the selected profile directly to `<profile>/<titleID>`, with no `nts/save` layer. Recovery snapshots are content-deduplicated under one per-game root and new snapshots are capped at three; existing legacy recovery folders are preserved for review. Focused Save Folder Sync tests pass; Tahoe IPA rebuild remains next.
