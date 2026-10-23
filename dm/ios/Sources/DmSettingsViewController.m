@@ -25,7 +25,8 @@
 }
 - (NSString *)syncDetail {
     NSString *last = self.sync.lastSuccessfulSync ? self.sync.lastSuccessfulSync.description : @"Never";
-    return [NSString stringWithFormat:@"%@\nLast sync: %@", [self statusSummary], last];
+    NSString *message = self.sync.statusText.length ? self.sync.statusText : [self statusSummary];
+    return [NSString stringWithFormat:@"%@\nLast sync: %@", message, last];
 }
 - (void)clearFolder {
     [self.sync clearSelectedFolder];
@@ -42,7 +43,7 @@
             UIButton *clear = [UIButton buttonWithType:UIButtonTypeSystem]; clear.frame = CGRectMake(0, 0, 32, 32); [clear setTitle:@"×" forState:UIControlStateNormal]; clear.titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightRegular]; clear.accessibilityLabel = @"Clear selected folder"; [clear addTarget:self action:@selector(clearFolder) forControlEvents:UIControlEventTouchUpInside]; c.accessoryView = clear;
         }
     } else {
-        c.textLabel.text = @"Sync Now"; c.detailTextLabel.text = [self syncDetail]; c.detailTextLabel.numberOfLines = 2; c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        c.textLabel.text = @"Sync Now"; c.detailTextLabel.text = [self syncDetail]; c.detailTextLabel.numberOfLines = 0; c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         c.userInteractionEnabled = self.sync.selectedFolder != nil && self.sync.state != DmSaveFolderSyncStateUnavailable;
     }
     return c;
@@ -52,8 +53,8 @@
     if (ip.row == 0) [self.sync presentFolderPickerFromViewController:self];
     else if (self.sync.state == DmSaveFolderSyncStateNeedsResolution) {
         UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Resolve Conflicts" message:@"Choose which complete save to keep. The other side will not be overwritten until you choose." preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"Import external" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { [self.sync resolveByImportingExternal]; }]];
-        [a addAction:[UIAlertAction actionWithTitle:@"Export local" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { [self.sync resolveByExportingLocal]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Use Folder Saves" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { [self.sync resolveByImportingExternal]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Use Device Saves" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) { [self.sync resolveByExportingLocal]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Preserve both" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *x) { [self.sync preserveBoth]; }]]; [self presentViewController:a animated:YES completion:nil];
     } else [self.sync syncNow];
 }

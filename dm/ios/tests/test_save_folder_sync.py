@@ -48,8 +48,8 @@ def test_unified_settings_and_explicit_conflict_actions_are_present():
     assert "Eden" not in SETTINGS
     assert "NXNative Folder" not in SETTINGS
     assert "Sync mode" not in SETTINGS
-    assert "Import external" in SETTINGS
-    assert "Export local" in SETTINGS
+    assert "Use Folder Saves" in SETTINGS
+    assert "Use Device Saves" in SETTINGS
     assert "Preserve both" in SETTINGS
 
 
@@ -65,6 +65,18 @@ def test_folder_selection_controls_enablement_and_clear_persistence():
     assert 'self.enabled = NO' in SYNC
     assert 'stopAccessingSecurityScopedResource' in SYNC
     assert 'Last sync: %@' in SETTINGS
+    assert 'self.sync.statusText' in SETTINGS
+
+
+def test_first_sync_reports_verified_direction_and_restart_requirement():
+    assert 'Save files imported. Restart the game to load your updated saves.' in SYNC
+    assert 'Save files exported' in SYNC
+    assert 'Already Up to Date' in SYNC
+    assert 'Imported save verification failed' in SYNC
+    assert 'Exported save verification failed' in SYNC
+    assert 'restartRequired' in SYNC
+    assert 'if (!self.enabled || !self.selectedFolder || self.restartRequired)' in SYNC
+    assert 'if (!hasLocalBaseline || !hasExternalBaseline) [self syncOnQueue:NO];' in SYNC
 
 
 def test_legacy_icloud_synchronizer_and_warning_are_gone():
