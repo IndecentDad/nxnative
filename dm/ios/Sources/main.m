@@ -71,9 +71,13 @@ static int boot_env(void) {
     if (!romfs) { fprintf(stderr, "boot: game files not found (<App>/romfs or Documents/romfs)\n"); return 0; }
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
-    setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
+    NSString *saveRoot = [doc stringByAppendingPathComponent:@"save"];
+    setenv("DM_SAVE", saveRoot.fileSystemRepresentation, 0);
     NSString *titleID = @DM_GAME_TITLE_ID;
-    g_folder_sync = [[DmSaveFolderSync alloc] initWithLocalSave:[NSURL fileURLWithPath:[doc stringByAppendingPathComponent:@"save"] isDirectory:YES]
+    NSString *savePath = @DM_GAME_SAVE_PATH;
+    NSString *savePayload = savePath.length ? [saveRoot stringByAppendingPathComponent:savePath] : saveRoot;
+    fprintf(stderr, "save-sync: native root %s payload %s\n", saveRoot.fileSystemRepresentation, savePayload.fileSystemRepresentation);
+    g_folder_sync = [[DmSaveFolderSync alloc] initWithLocalSave:[NSURL fileURLWithPath:savePayload isDirectory:YES]
                                                          titleID:titleID];
     [g_folder_sync startBeforeGameplay];
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);

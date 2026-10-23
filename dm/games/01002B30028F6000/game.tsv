@@ -6,6 +6,7 @@
 # ---- Identity ----
 title_id	01002B30028F6000
 program_id	01002B30028F6000
+save_path	nts/save
 
 # ---- App ----
 # Game name: only a label for profile listings and the Mac window title; the iOS app name is the game name in the base NSP, and the bundle ID comes from the base game title ID (build_ipa.sh / NSP script)

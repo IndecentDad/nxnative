@@ -109,7 +109,11 @@ class _FilesystemSync:
     """Small real-filesystem model of the production transfer decisions."""
 
     def __init__(self, root: Path):
-        self.local = root / "Documents" / "save"
+        self.native_root = root / "Documents" / "save"
+        # Celeste mounts the transactional native root, then writes its actual
+        # payload below save:/nts/save. Sync receives this payload URL, not the
+        # mount root, so the external folder contains 0.celeste directly.
+        self.local = self.native_root / "nts" / "save"
         self.selected = root / "Selected Folder"
         self.external = self.selected / TITLE_ID
         self.baseline = None
@@ -201,6 +205,7 @@ def test_real_filesystem_initial_export_import_and_exact_title_id(tmp_path):
     assert sync.sync() == "export"
     assert sync.external == sync.selected / "01002B30028F6000"
     assert (sync.external / "0.celeste").read_text() == "save"
+    assert (sync.native_root / "nts" / "save" / "0.celeste").read_text() == "save"
     assert not list(sync.selected.glob("org.nxnative.*"))
     assert not (sync.external / "nts" / "save").exists()
 
