@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "game_profile.h"   // game profile constants (the RomFS marker path)
+#import "DmSaveFolderSync.h"
 
 int dm_main(int argc, char **argv);   // dm/host/main.c compiled in with -Dmain=dm_main
 void dm_host_preload_start(int argc, char **argv);
@@ -13,6 +14,11 @@ UIViewController *front_ios_root(void);
 void front_ios_focus_event(int ev);
 
 static char *g_argv[4]; static int g_argc;
+static DmSaveFolderSync *g_folder_sync;
+void dm_save_sync_resume(void) { [g_folder_sync resumeSafely]; }
+void front_save_committed(void) { [g_folder_sync saveCommitted]; }
+void dm_save_folder_sync_committed(void) { [g_folder_sync saveCommitted]; }
+DmSaveFolderSync *dm_save_folder_sync(void) { return g_folder_sync; }
 
 static NSString *romfs_locate(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -60,6 +66,10 @@ static int boot_env(void) {
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
+    NSString *titleID = NSBundle.mainBundle.bundleIdentifier.lastPathComponent;
+    g_folder_sync = [[DmSaveFolderSync alloc] initWithLocalSave:[NSURL fileURLWithPath:[doc stringByAppendingPathComponent:@"save"] isDirectory:YES]
+                                                         titleID:titleID];
+    [g_folder_sync startBeforeGameplay];
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
@@ -110,7 +120,7 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
 - (void)sceneWillResignActive:(UIScene *)s { front_ios_focus_event(0); }
 - (void)sceneDidEnterBackground:(UIScene *)s { front_ios_focus_event(1); }
 - (void)sceneWillEnterForeground:(UIScene *)s { front_ios_focus_event(2); }
-- (void)sceneDidBecomeActive:(UIScene *)s { front_ios_focus_event(3); }
+- (void)sceneDidBecomeActive:(UIScene *)s { front_ios_focus_event(3); dm_save_sync_resume(); }
 @end
 
 int main(int argc, char **argv) {
