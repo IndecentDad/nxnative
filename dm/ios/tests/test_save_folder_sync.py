@@ -60,7 +60,8 @@ def test_unified_settings_and_explicit_conflict_actions_are_present():
 
 
 def test_external_game_directory_is_not_created_implicitly():
-    assert 'createDirectoryAtURL:external withIntermediateDirectories:YES' in SYNC
+    assert 'createDirectoryAtURL:external withIntermediateDirectories:YES' not in SYNC
+    assert 'replaceTree:local destination:external' in SYNC
     assert 'SaveFolderSync-Recovery' in SYNC
 
 
@@ -85,6 +86,10 @@ def test_first_sync_reports_verified_direction_and_restart_requirement():
     assert 'if (!self.enabled || !self.selectedFolder || self.restartRequired)' in SYNC
     assert 'if (!hasLocalBaseline || !hasExternalBaseline) [self syncOnQueue:NO];' in SYNC
     assert 'entries sortUsingComparator' in SYNC
+    assert 'localChanged' in SYNC
+    assert 'externalChanged' in SYNC
+    assert 'Source save changed or disappeared during import' in SYNC
+    assert 'Save file is present but not downloaded' in SYNC
 
 
 def test_legacy_icloud_synchronizer_and_warning_are_gone():
