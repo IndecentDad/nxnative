@@ -8,6 +8,8 @@
 #include "front.h"
 #include "hle.h"
 #include "dm.h"
+#import "DmSaveFolderSync.h"
+#import "DmSettingsViewController.h"
 
 UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_reset(void);
@@ -15,6 +17,7 @@ void front_ios_boot(void);
 int front_ios_boot_ok(void);
 extern NSString * const DmGameSaveNotice;
 void dm_save_sync_resume(void);
+DmSaveFolderSync *dm_save_folder_sync(void);
 
 static CAMetalLayer *g_layer;
 static void front_ios_power_watch(void);
@@ -71,6 +74,9 @@ static void front_ios_audio_watch(void);
     [self.view addSubview:self.saveNotice];
     [[NSNotificationCenter defaultCenter] addObserverForName:DmGameSaveNotice object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
         [self showSaveNotice:note.object];
+    }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"DmOpenSettings" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+        [self presentViewController:DmMakeSettingsViewController(dm_save_folder_sync()) animated:YES completion:nil];
     }];
 }
 - (void)showSaveNotice:(NSString *)message {

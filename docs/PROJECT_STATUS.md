@@ -32,3 +32,7 @@ Commit `752255f` adds shared iOS snapshot/revision sync, manual Files export/imp
 The feature branch replaces custom `DmSaveSync` snapshot/export/import logic with the iOS 26 GameSave `GSSyncedDirectory` adapter. Local `Documents/save` remains authoritative and visible through the app's display-name folder; the Saves button, manual Files workflows, and `NXNative Saves` metadata are removed. Project-generation tests pass and the adapter passes an arm64 Tahoe/Xcode 26.5 SDK syntax check. No IPA or save data was changed.
 
 Remaining: device-test local Files visibility, first upload, offline/unavailable iCloud, newer-save restore, and conflict preservation. Confirm the signed profile retains `CloudDocuments`, the exact shared container, increased-memory-limit, and extended-virtual-addressing. Do not merge until those tests pass; continue Dread memory diagnostics separately.
+
+## Save Folder Sync (feature/save-folder-sync)
+
+Added a separate `DmSaveFolderSync` component and native NXNative Settings UI. It preserves GameSave and transactional `Documents/save`, stores security-scoped bookmarks, resolves title-ID folders for NXNative/Eden modes, stages copies, fingerprints content, and stops on conflicts or missing external game directories. Touch long-press and L+R+Plus fallback open settings. Focused Python contract checks pass. Eden’s actual Metroid Dread format and round trip remain unverified; no IPA was built.
