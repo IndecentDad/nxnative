@@ -14,7 +14,8 @@ def test_title_id_is_the_only_game_folder_component():
     assert 'localPayloadURL' in SYNC
     assert 'externalPayloadURL' in SYNC
     assert 'SaveFolderSync-Recovery' not in SYNC.split('- (NSURL *)externalPayloadURL', 1)[1].split('- (NSURL *)gameFolder', 1)[0]
-    assert 'nts/save' not in SYNC
+    assert 'URLByAppendingPathComponent:@"nts/save"' in SYNC  # legacy wrapper is detected only to avoid exporting it
+    assert 'URLByAppendingPathComponent:@"nts"' not in SYNC
     assert 'titleID.length != 16' in SYNC
     assert "010093801237C000" not in SYNC
     assert "Yuzu" not in SYNC
@@ -27,6 +28,8 @@ def test_local_save_remains_documents_save_and_game_save_is_preserved():
 
 
 def test_bookmarks_and_coordinated_external_access_are_present():
+    assert 'kBookmark' in SYNC
+    assert 'NSUserDefaults.standardUserDefaults dataForKey:kBookmark' in SYNC
     assert 'NSURLBookmarkResolutionWithoutUI' in SYNC
     assert 'NSURLBookmarkResolutionWithoutMounting' in SYNC
     assert 'bookmarkDataWithOptions:0' in SYNC
@@ -35,18 +38,21 @@ def test_bookmarks_and_coordinated_external_access_are_present():
     assert 'NSFileCoordinator' in SYNC
 
 
-def test_eden_hint_and_explicit_conflict_actions_are_present():
-    assert "Eden → user → save → 0000000000000000" in SETTINGS
+def test_unified_settings_and_explicit_conflict_actions_are_present():
+    assert "Save Format" in SETTINGS
+    assert "Selected Folder / %@ / Save Files" in SETTINGS
+    assert "Eden" not in SETTINGS
+    assert "NXNative Folder" not in SETTINGS
+    assert "Sync mode" not in SETTINGS
     assert "Import external" in SETTINGS
     assert "Export local" in SETTINGS
     assert "Preserve both" in SETTINGS
 
 
 def test_external_game_directory_is_not_created_implicitly():
-    marker = 'Game folder is missing; confirm creation in Resolve Conflicts'
-    assert marker in SYNC
+    assert 'createDirectoryAtURL:external withIntermediateDirectories:YES' in SYNC
     assert 'SaveFolderSync-Recovery' in SYNC
-    assert 'mode == DmSaveFolderSyncModeEden' not in SYNC
+    assert 'DmSaveFolderSyncMode' not in SYNC
 
 
 def test_legacy_icloud_synchronizer_and_warning_are_gone():

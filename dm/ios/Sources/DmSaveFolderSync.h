@@ -1,11 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-typedef NS_ENUM(NSInteger, DmSaveFolderSyncMode) {
-    DmSaveFolderSyncModeNXNative = 0,
-    DmSaveFolderSyncModeEden = 1,
-};
-
 typedef NS_ENUM(NSInteger, DmSaveFolderSyncState) {
     DmSaveFolderSyncStateUnconfigured = 0,
     DmSaveFolderSyncStateReady,
@@ -27,7 +22,6 @@ extern NSString * const DmSaveFolderSyncNotice;
 @property(nonatomic,readonly) NSString *statusText;
 @property(nonatomic,readonly) NSDate *lastSuccessfulSync;
 @property(nonatomic,readonly) DmSaveFolderSyncState state;
-@property(nonatomic) DmSaveFolderSyncMode mode;
 @property(nonatomic) BOOL enabled;
 - (void)presentFolderPickerFromViewController:(UIViewController *)viewController;
 - (void)startBeforeGameplay;
