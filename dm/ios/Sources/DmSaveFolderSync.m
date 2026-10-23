@@ -170,22 +170,21 @@ static BOOL validTitleID(NSString *titleID) {
     }
     return count;
 }
-- (BOOL)copyTree:(NSURL *)source to:(NSURL *)destination error:(NSError **)error {
+- (BOOL)copyDirectoryContents:(NSURL *)source to:(NSURL *)destination error:(NSError **)error {
     NSFileManager *fm = NSFileManager.defaultManager;
-    BOOL isDirectory = NO;
-    if (![fm fileExistsAtPath:source.path isDirectory:&isDirectory] || !isDirectory) {
-        if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:10 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Source save directory does not exist: %@", source.lastPathComponent ?: source.path], @"DmSaveFolderSyncFile": source.lastPathComponent ?: @"(root)"}];
-        return NO;
-    }
-    if (![fm createDirectoryAtURL:destination withIntermediateDirectories:YES attributes:nil error:error]) return NO;
-    NSDirectoryEnumerator *e = [fm enumeratorAtURL:source includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLIsUbiquitousItemKey, NSURLUbiquitousItemIsDownloadedKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *u, NSError *err) { if (error) *error = err; return NO; }];
-    for (NSURL *item in e) {
+    NSError *contentsError = nil;
+    NSArray<NSURL *> *items = [fm contentsOfDirectoryAtURL:source includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLIsUbiquitousItemKey, NSURLUbiquitousItemIsDownloadedKey] options:NSDirectoryEnumerationSkipsHiddenFiles error:&contentsError];
+    if (!items) { if (error) *error = contentsError; return NO; }
+    for (NSURL *item in items) {
         NSError *resourceError = nil; NSNumber *reservedDir = nil;
         if (![item getResourceValue:&reservedDir forKey:NSURLIsDirectoryKey error:&resourceError]) { if (error) *error = resourceError; return NO; }
-        if ([self isReservedPayloadComponent:item.lastPathComponent]) { if (reservedDir.boolValue) [e skipDescendants]; continue; }
-        NSString *rel = [item.path substringFromIndex:source.path.length]; while ([rel hasPrefix:@"/"]) rel = [rel substringFromIndex:1]; NSURL *target = [destination URLByAppendingPathComponent:rel]; NSNumber *dir = reservedDir;
-        if (dir.boolValue) { if (![fm createDirectoryAtURL:target withIntermediateDirectories:YES attributes:nil error:error]) return NO; }
-        else {
+        if ([self isReservedPayloadComponent:item.lastPathComponent]) continue;
+        NSURL *target = [destination URLByAppendingPathComponent:item.lastPathComponent isDirectory:reservedDir.boolValue];
+        if (reservedDir.boolValue) {
+            if (![fm createDirectoryAtURL:target withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+            if (![self copyDirectoryContents:item to:target error:error]) return NO;
+        } else {
+            NSString *rel = item.lastPathComponent ?: @"(unknown)";
             NSNumber *ubiquitous = nil, *downloaded = nil;
             [item getResourceValue:&ubiquitous forKey:NSURLIsUbiquitousItemKey error:&resourceError];
             [item getResourceValue:&downloaded forKey:NSURLUbiquitousItemIsDownloadedKey error:&resourceError];
@@ -205,6 +204,15 @@ static BOOL validTitleID(NSString *titleID) {
         }
     }
     return YES;
+}
+- (BOOL)copyTree:(NSURL *)source to:(NSURL *)destination error:(NSError **)error {
+    NSFileManager *fm = NSFileManager.defaultManager; BOOL isDirectory = NO;
+    if (![fm fileExistsAtPath:source.path isDirectory:&isDirectory] || !isDirectory) {
+        if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:10 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Source save directory does not exist: %@", source.lastPathComponent ?: source.path], @"DmSaveFolderSyncFile": source.lastPathComponent ?: @"(root)"}];
+        return NO;
+    }
+    if (![fm createDirectoryAtURL:destination withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+    return [self copyDirectoryContents:source to:destination error:error];
 }
 - (NSURL *)recoveryRoot {
     return [[[self localPayloadURL] URLByDeletingLastPathComponent] URLByAppendingPathComponent:[NSString stringWithFormat:@"SaveFolderSync-Recovery/%@", self.titleID] isDirectory:YES];
