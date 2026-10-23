@@ -66,6 +66,8 @@ def test_folder_selection_controls_enablement_and_clear_persistence():
     assert 'stopAccessingSecurityScopedResource' in SYNC
     assert 'Last sync: %@' in SETTINGS
     assert 'self.sync.statusText' in SETTINGS
+    assert 'self.restartRequired = NO' in SYNC
+    assert SYNC.count('removeObjectForKey:kLocalFingerprint') >= 2
 
 
 def test_first_sync_reports_verified_direction_and_restart_requirement():

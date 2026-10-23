@@ -225,6 +225,10 @@ static BOOL validTitleID(NSString *titleID) {
     NSURL *url = urls.firstObject; if (!url || ![url startAccessingSecurityScopedResource]) { [self notice:@"Could not access that folder" state:DmSaveFolderSyncStateUnavailable]; return; }
     NSData *bookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
     if (!bookmark) { [self notice:@"Could not persist access to that folder" state:DmSaveFolderSyncStateError]; return; }
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kLocalFingerprint];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kExternalFingerprint];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kLastSync];
+    self.lastSuccessfulSync = nil; self.restartRequired = NO;
     [NSUserDefaults.standardUserDefaults setObject:bookmark forKey:kBookmark]; _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path; self.state = DmSaveFolderSyncStateReady; self.statusText = @"Folder selected";
     self.enabled = YES;
     [self syncNow];
