@@ -127,6 +127,36 @@ static BOOL validTitleID(NSString *titleID) {
     return NO;
 }
 - (NSString *)fingerprint:(NSURL *)url { return [self fingerprint:url error:nil]; }
+- (BOOL)collectFingerprintEntriesAtURL:(NSURL *)url relativePath:(NSString *)relativePath entries:(NSMutableArray<NSDictionary *> *)entries error:(NSError **)error {
+    NSFileManager *fm = NSFileManager.defaultManager; NSError *contentsError = nil;
+    NSArray<NSURL *> *items = [fm contentsOfDirectoryAtURL:url includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLIsUbiquitousItemKey, NSURLUbiquitousItemIsDownloadedKey] options:NSDirectoryEnumerationSkipsHiddenFiles error:&contentsError];
+    if (!items) { if (error) *error = contentsError; return NO; }
+    for (NSURL *item in items) {
+        NSError *resourceError = nil; NSNumber *isDirectory = nil;
+        if (![item getResourceValue:&isDirectory forKey:NSURLIsDirectoryKey error:&resourceError]) { if (error) *error = resourceError; return NO; }
+        if ([self isReservedPayloadComponent:item.lastPathComponent]) continue;
+        NSString *relative = relativePath.length ? [relativePath stringByAppendingPathComponent:item.lastPathComponent] : item.lastPathComponent;
+        if (isDirectory.boolValue) {
+            if (![self collectFingerprintEntriesAtURL:item relativePath:relative entries:entries error:error]) return NO;
+            continue;
+        }
+        NSNumber *ubiquitous = nil, *downloaded = nil;
+        [item getResourceValue:&ubiquitous forKey:NSURLIsUbiquitousItemKey error:&resourceError];
+        [item getResourceValue:&downloaded forKey:NSURLUbiquitousItemIsDownloadedKey error:&resourceError];
+        if (ubiquitous.boolValue && !downloaded.boolValue) {
+            if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:11 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is present but not downloaded: %@", relative], @"DmSaveFolderSyncFile": relative}];
+            return NO;
+        }
+        NSData *contents = [[NSData alloc] initWithContentsOfURL:item options:NSDataReadingMappedIfSafe error:&resourceError];
+        if (!contents) {
+            if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:17 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is missing or unreadable: %@%@", relative, resourceError.localizedDescription.length ? [NSString stringWithFormat:@" (%@)", resourceError.localizedDescription] : @""], @"DmSaveFolderSyncFile": relative}];
+            return NO;
+        }
+        unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(contents.bytes, (CC_LONG)contents.length, digest);
+        [entries addObject:@{@"path": relative, @"digest": [NSData dataWithBytes:digest length:sizeof digest]}];
+    }
+    return YES;
+}
 - (NSString *)fingerprint:(NSURL *)url error:(NSError **)error {
     BOOL directory = NO;
     if (![[NSFileManager defaultManager] fileExistsAtPath:url.path isDirectory:&directory]) return @"empty";
@@ -135,27 +165,8 @@ static BOOL validTitleID(NSString *titleID) {
         return nil;
     }
     if (![self hasData:url]) return @"empty";
-    NSMutableData *manifest = [NSMutableData data]; NSMutableArray<NSDictionary *> *entries = [NSMutableArray array]; NSFileManager *fm = NSFileManager.defaultManager;
-    __block NSError *scanError = nil;
-    NSDirectoryEnumerator *e = [fm enumeratorAtURL:url includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLIsUbiquitousItemKey, NSURLUbiquitousItemIsDownloadedKey]
-                         options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *u, NSError *err) { scanError = err; return NO; }];
-    for (NSURL *item in e) {
-        NSError *resourceError = nil; NSNumber *dir = nil;
-        if (![item getResourceValue:&dir forKey:NSURLIsDirectoryKey error:&resourceError]) { scanError = resourceError; break; }
-        if ([self isReservedPayloadComponent:item.lastPathComponent]) { if (dir.boolValue) [e skipDescendants]; continue; }
-        if (dir.boolValue) continue;
-        NSNumber *ubiquitous = nil, *downloaded = nil;
-        [item getResourceValue:&ubiquitous forKey:NSURLIsUbiquitousItemKey error:&resourceError];
-        [item getResourceValue:&downloaded forKey:NSURLUbiquitousItemIsDownloadedKey error:&resourceError];
-        if (ubiquitous.boolValue && !downloaded.boolValue) { scanError = [NSError errorWithDomain:@"DmSaveFolderSync" code:11 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is present but not downloaded: %@", item.lastPathComponent]}]; break; }
-        NSData *contents = [[NSData alloc] initWithContentsOfURL:item options:NSDataReadingMappedIfSafe error:&resourceError];
-        if (!contents) { scanError = [NSError errorWithDomain:@"DmSaveFolderSync" code:17 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is missing or unreadable: %@%@", item.lastPathComponent, resourceError.localizedDescription.length ? [NSString stringWithFormat:@" (%@)", resourceError.localizedDescription] : @""], @"DmSaveFolderSyncFile": item.lastPathComponent ?: @"(unknown)"}]; break; }
-        unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(contents.bytes, (CC_LONG)contents.length, digest);
-        NSString *relative = [item.path substringFromIndex:url.path.length];
-        while ([relative hasPrefix:@"/"]) relative = [relative substringFromIndex:1];
-        [entries addObject:@{ @"path": relative, @"digest": [NSData dataWithBytes:digest length:sizeof digest] }];
-    }
-    if (scanError) { if (error) *error = scanError; return nil; }
+    NSMutableData *manifest = [NSMutableData data]; NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    if (![self collectFingerprintEntriesAtURL:url relativePath:@"" entries:entries error:error]) return nil;
     [entries sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [a[@"path"] compare:b[@"path"]]; }];
     for (NSDictionary *entry in entries) { [manifest appendData:[entry[@"path"] dataUsingEncoding:NSUTF8StringEncoding]]; [manifest appendData:entry[@"digest"]]; }
     unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(manifest.bytes, (CC_LONG)manifest.length, digest);
@@ -358,7 +369,8 @@ static BOOL validTitleID(NSString *titleID) {
         NSURL *backup = nil;
         if (ok) ok = [self replaceTree:external destination:local error:&e backup:&backup];
         if (ok && ![[self fingerprint:external] isEqualToString:xf]) { e = [NSError errorWithDomain:@"DmSaveFolderSync" code:14 userInfo:@{NSLocalizedDescriptionKey: @"Folder save changed or disappeared during import; local save preserved"}]; ok = NO; }
-        if (ok && ![[self fingerprint:local] isEqualToString:xf]) { e = [NSError errorWithDomain:@"DmSaveFolderSync" code:4 userInfo:@{NSLocalizedDescriptionKey: @"Folder save verification failed; local save preserved"}]; ok = NO; }
+        NSString *localAfter = ok ? [self fingerprint:local error:&e] : nil;
+        if (ok && ![localAfter isEqualToString:xf]) { [self logVerification:@"import" source:external destination:local expected:xf actual:localAfter]; e = [NSError errorWithDomain:@"DmSaveFolderSync" code:4 userInfo:@{NSLocalizedDescriptionKey: @"Folder save verification failed; local save preserved", @"DmSaveFolderSyncExpectedFingerprint": xf ?: @"(nil)", @"DmSaveFolderSyncActualFingerprint": localAfter ?: @"(nil)"}]; ok = NO; }
         if (!ok && backup) { [NSFileManager.defaultManager removeItemAtURL:local error:nil]; [NSFileManager.defaultManager moveItemAtURL:backup toURL:local error:nil]; }
         else if (backup) [NSFileManager.defaultManager removeItemAtURL:backup error:nil];
         if (!ok && e) [self logFailure:@"import" phase:@"verification" source:external destination:local error:e preserved:YES];
