@@ -8,9 +8,6 @@ RESERVED = {"SaveFolderSync-Recovery"}
 
 
 def actual_payload(local_root: Path) -> Path:
-    nested = local_root / "nts" / "save"
-    if nested.is_dir() and not any(p.name != "nts" for p in local_root.iterdir()):
-        return nested
     return local_root
 
 
@@ -20,7 +17,7 @@ def copy_payload(source: Path, destination: Path) -> None:
         relative = item.relative_to(source)
         if any(part in RESERVED or part.startswith((".stage-", ".incoming-", ".old-")) for part in relative.parts):
             continue
-        if relative.parts[:2] == ("nts", "save"):
+        if relative.parts == ("nts",) or relative.parts[:2] == ("nts", "save"):
             continue
         target = destination / relative
         if item.is_dir():
@@ -73,7 +70,7 @@ def test_legacy_local_wrapper_is_read_as_payload_but_not_exported(tmp_path):
     (local / "nts" / "save" / "progress.dat").write_text("payload")
     external = tmp_path / "selected" / TITLE_ID
     copy_payload(actual_payload(local), external)
-    assert (external / "progress.dat").read_text() == "payload"
+    assert not (external / "progress.dat").exists()
     assert not (external / "nts").exists()
 
 

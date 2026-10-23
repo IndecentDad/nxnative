@@ -24,6 +24,7 @@ extern NSString * const DmSaveFolderSyncNotice;
 @property(nonatomic,readonly) DmSaveFolderSyncState state;
 @property(nonatomic) BOOL enabled;
 - (void)presentFolderPickerFromViewController:(UIViewController *)viewController;
+- (void)clearSelectedFolder;
 - (void)startBeforeGameplay;
 - (void)resumeSafely;
 - (void)saveCommitted;

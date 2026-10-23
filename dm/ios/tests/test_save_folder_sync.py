@@ -14,8 +14,8 @@ def test_title_id_is_the_only_game_folder_component():
     assert 'localPayloadURL' in SYNC
     assert 'externalPayloadURL' in SYNC
     assert 'SaveFolderSync-Recovery' not in SYNC.split('- (NSURL *)externalPayloadURL', 1)[1].split('- (NSURL *)gameFolder', 1)[0]
-    assert 'URLByAppendingPathComponent:@"nts/save"' in SYNC  # legacy wrapper is detected only to avoid exporting it
-    assert 'URLByAppendingPathComponent:@"nts"' not in SYNC
+    assert 'localPayloadURL { return self.localSave; }' in SYNC
+    assert 'URLByAppendingPathComponent:@"nts/save"' not in SYNC
     assert 'titleID.length != 16' in SYNC
     assert "010093801237C000" not in SYNC
     assert "Yuzu" not in SYNC
@@ -39,8 +39,12 @@ def test_bookmarks_and_coordinated_external_access_are_present():
 
 
 def test_unified_settings_and_explicit_conflict_actions_are_present():
-    assert "Save Format" in SETTINGS
-    assert "Selected Folder / %@ / Save Files" in SETTINGS
+    assert 'numberOfRowsInSection:(NSInteger)section { return 2; }' in SETTINGS
+    assert "Sync Folder" in SETTINGS
+    assert "Save Format: Selected Folder / %@ / Save Files" in SETTINGS
+    assert "clearSelectedFolder" in SETTINGS
+    assert "Clear selected folder" in SETTINGS
+    assert "Enable synchronization" not in SETTINGS
     assert "Eden" not in SETTINGS
     assert "NXNative Folder" not in SETTINGS
     assert "Sync mode" not in SETTINGS
@@ -53,6 +57,14 @@ def test_external_game_directory_is_not_created_implicitly():
     assert 'createDirectoryAtURL:external withIntermediateDirectories:YES' in SYNC
     assert 'SaveFolderSync-Recovery' in SYNC
     assert 'DmSaveFolderSyncMode' not in SYNC
+
+
+def test_folder_selection_controls_enablement_and_clear_persistence():
+    assert 'self.enabled = YES' in SYNC
+    assert 'removeObjectForKey:kBookmark' in SYNC
+    assert 'self.enabled = NO' in SYNC
+    assert 'stopAccessingSecurityScopedResource' in SYNC
+    assert 'Last sync: %@' in SETTINGS
 
 
 def test_legacy_icloud_synchronizer_and_warning_are_gone():

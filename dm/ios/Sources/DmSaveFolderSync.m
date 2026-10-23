@@ -58,6 +58,7 @@ static BOOL validTitleID(NSString *titleID) {
     NSURL *url = [NSURL URLByResolvingBookmarkData:data options:(NSURLBookmarkResolutionWithoutUI | NSURLBookmarkResolutionWithoutMounting)
                                       relativeToURL:nil bookmarkDataIsStale:&stale error:&error];
     if (!url || ![url startAccessingSecurityScopedResource]) {
+        self.enabled = NO;
         [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; return;
     }
     if (stale) {
@@ -68,18 +69,7 @@ static BOOL validTitleID(NSString *titleID) {
     _state = DmSaveFolderSyncStateReady; _statusText = @"Ready";
 }
 
-- (NSURL *)localPayloadURL {
-    // Normally Documents/save is the payload. If an older build left only an
-    // nts/save wrapper there, address its real contents without exporting the
-    // wrapper itself.
-    NSURL *nested = [self.localSave URLByAppendingPathComponent:@"nts/save" isDirectory:YES];
-    NSNumber *nestedDirectory = nil; [nested getResourceValue:&nestedDirectory forKey:NSURLIsDirectoryKey error:nil];
-    if (!nestedDirectory.boolValue) return self.localSave;
-    BOOL hasOtherPayload = NO;
-    for (NSURL *item in [NSFileManager.defaultManager contentsOfDirectoryAtURL:self.localSave includingPropertiesForKeys:nil options:NSDirectoryEnumerationSkipsHiddenFiles error:nil])
-        if (![item.lastPathComponent isEqualToString:@"nts"] && ![self isReservedPayloadComponent:item.lastPathComponent]) { hasOtherPayload = YES; break; }
-    return hasOtherPayload ? self.localSave : nested;
-}
+- (NSURL *)localPayloadURL { return self.localSave; }
 - (NSURL *)externalPayloadURL {
     // The picker selects a shared root; only the current title ID is appended.
     return [self.selectedFolder URLByAppendingPathComponent:self.titleID isDirectory:YES];
@@ -194,7 +184,11 @@ static BOOL validTitleID(NSString *titleID) {
 - (void)startBeforeGameplay { if (self.enabled) [self resumeSafely]; }
 - (void)resumeSafely { if (!self.enabled || !self.selectedFolder) return; [self.queue addOperationWithBlock:^{ [self syncOnQueue:NO]; }]; }
 - (void)saveCommitted { if (!self.enabled || !self.selectedFolder) return; [self.queue addOperationWithBlock:^{ [self syncOnQueue:NO]; }]; }
-- (void)syncNow { [self.queue addOperationWithBlock:^{ [self syncOnQueue:YES]; }]; }
+- (void)syncNow {
+    if (!self.enabled || !self.selectedFolder) return;
+    [self notice:@"Syncing" state:DmSaveFolderSyncStateReady];
+    [self.queue addOperationWithBlock:^{ [self syncOnQueue:YES]; }];
+}
 
 - (void)presentFolderPickerFromViewController:(UIViewController *)viewController {
     self.pickerPresenter = viewController; UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[[UTType typeWithIdentifier:@"public.folder"]] asCopy:NO];
@@ -205,9 +199,20 @@ static BOOL validTitleID(NSString *titleID) {
     NSData *bookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
     if (!bookmark) { [self notice:@"Could not persist access to that folder" state:DmSaveFolderSyncStateError]; return; }
     [NSUserDefaults.standardUserDefaults setObject:bookmark forKey:kBookmark]; _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path; self.state = DmSaveFolderSyncStateReady; self.statusText = @"Folder selected";
-    if (self.enabled) [self syncNow];
+    self.enabled = YES;
+    [self syncNow];
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller { (void)controller; }
+- (void)clearSelectedFolder {
+    if (self.selectedFolder) [self.selectedFolder stopAccessingSecurityScopedResource];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kBookmark];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kLocalFingerprint];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kExternalFingerprint];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kLastSync];
+    self.selectedFolder = nil; self.selectedFolderName = nil; self.lastSuccessfulSync = nil;
+    self.enabled = NO; self.state = DmSaveFolderSyncStateUnconfigured; self.statusText = @"No folder selected";
+    [[NSNotificationCenter defaultCenter] postNotificationName:DmSaveFolderSyncNotice object:self.statusText];
+}
 - (void)resolveByImportingExternal { self.enabled = NO; [self.queue addOperationWithBlock:^{ NSError *e = nil; NSURL *local = [self localPayloadURL], *external = [self externalPayloadURL]; NSString *lf = [self fingerprint:local], *xf = [self fingerprint:external]; BOOL ok = [self makeRecoverySnapshotForLocal:local external:external localFingerprint:lf externalFingerprint:xf error:&e]; if (ok) ok = [self replaceTree:external destination:local error:&e]; self.enabled = YES; if (ok) [self syncOnQueue:YES]; else [self notice:e.localizedDescription ?: @"External save could not be imported" state:DmSaveFolderSyncStateError]; }]; }
 - (void)resolveByExportingLocal { self.enabled = NO; [self.queue addOperationWithBlock:^{ NSError *e = nil; NSURL *local = [self localPayloadURL], *external = [self externalPayloadURL]; NSString *lf = [self fingerprint:local], *xf = [self fingerprint:external]; BOOL ok = (!xf || [xf isEqualToString:@"empty"] || [lf isEqualToString:xf]) ? YES : [self makeRecoverySnapshotForLocal:local external:external localFingerprint:lf externalFingerprint:xf error:&e]; NSURL *stage = [external URLByAppendingPathExtension:[NSString stringWithFormat:@"incoming-%@", NSUUID.UUID.UUIDString]]; if (ok) ok = [self copyTree:local to:stage error:&e]; if (ok) { [NSFileManager.defaultManager removeItemAtURL:external error:nil]; ok = [NSFileManager.defaultManager moveItemAtURL:stage toURL:external error:&e]; } self.enabled = YES; if (ok) [self syncOnQueue:YES]; else [self notice:e.localizedDescription ?: @"Local save could not be exported" state:DmSaveFolderSyncStateError]; }]; }
 - (void)preserveBoth { [self notice:@"Both saves preserved; synchronization remains disabled" state:DmSaveFolderSyncStateNeedsResolution]; self.enabled = NO; }
