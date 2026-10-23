@@ -16,11 +16,10 @@ provider supports it. Provider implementations may not make a directory swap
 atomic, so staging and recovery copies protect the local save but cannot make a
 remote Files provider transactional.
 
-Eden compatibility is not yet confirmed. NXNative maps Horizon `save:/` to the
-local `Documents/save` tree, and the host commits that tree atomically, but no
-Metroid Dread Eden round trip has been run in this branch. Automatic import and
-overwrite must remain disabled until a real Eden profile save is imported,
-loaded, saved, exported, and loaded by Eden on PC.
+Eden synchronization is implemented for the confirmed working MeloNX profile
+directory, but the Metroid Dread round trip still requires device validation.
+Automatic import/export retains the fingerprint, staging, recovery, and
+conflict checks; divergent saves remain manual-resolution cases.
 
 The public GameController API does not expose a portable Home/Guide button to
 apps. Settings therefore use a one-second touch long-press and the documented

@@ -35,4 +35,4 @@ Remaining: device-test local Files visibility, first upload, offline/unavailable
 
 ## Save Folder Sync (feature/save-folder-sync)
 
-Added a separate `DmSaveFolderSync` component and native NXNative Settings UI. It preserves GameSave and transactional `Documents/save`, stores security-scoped bookmarks, resolves title-ID folders for NXNative/Eden modes, stages copies, fingerprints content, and stops on conflicts or missing external game directories. Touch long-press and L+R+Plus fallback open settings. Focused Python contract checks pass. Eden’s actual Metroid Dread format and round trip remain unverified; no IPA was built.
+Added a separate `DmSaveFolderSync` component and native NXNative Settings UI. It preserves GameSave and transactional `Documents/save`, stores security-scoped bookmarks, resolves title-ID folders for NXNative/Eden modes, stages copies, fingerprints content, and stops on conflicts or missing external game directories. Touch long-press and L+R+Plus fallback open settings. Eden automatic synchronization is enabled for device testing; its Metroid Dread round trip remains unverified.

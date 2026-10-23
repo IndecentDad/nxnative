@@ -37,4 +37,4 @@ def test_external_game_directory_is_not_created_implicitly():
     marker = 'Game folder is missing; confirm creation in Resolve Conflicts'
     assert marker in SYNC
     assert 'SaveFolderSync-Recovery' in SYNC
-    assert 'Eden format is not validated; automatic sync is disabled' in SYNC
+    assert 'mode == DmSaveFolderSyncModeEden' not in SYNC

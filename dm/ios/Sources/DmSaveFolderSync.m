@@ -112,9 +112,6 @@ static BOOL validTitleID(NSString *titleID) {
 }
 - (void)syncOnQueue:(BOOL)manual {
     if (!self.enabled || !self.selectedFolder || self.syncing) return; self.syncing = YES;
-    if (self.mode == DmSaveFolderSyncModeEden) {
-        [self notice:@"Eden format is not validated; automatic sync is disabled" state:DmSaveFolderSyncStateNeedsResolution]; self.syncing = NO; return;
-    }
     [self.selectedFolder startAccessingSecurityScopedResource]; NSURL *external = [self gameFolder]; NSError *error = nil;
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil]; __block BOOL ok = YES;
     [coordinator coordinateReadingItemAtURL:external options:0 error:&error byAccessor:^(NSURL *u) { (void)u; }];
