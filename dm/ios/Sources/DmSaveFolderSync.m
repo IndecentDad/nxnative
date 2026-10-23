@@ -22,6 +22,7 @@ static NSUInteger const kRecoverySnapshotLimit = 3;
 @property(nonatomic,weak) UIViewController *pickerPresenter;
 @property(nonatomic) BOOL syncing;
 @property(nonatomic) BOOL restartRequired;
+@property(nonatomic) BOOL securityScopeActive;
 @end
 
 @implementation DmSaveFolderSync
@@ -56,17 +57,17 @@ static BOOL validTitleID(NSString *titleID) {
     NSData *data = [NSUserDefaults.standardUserDefaults dataForKey:kBookmark];
     if (!data) return;
     BOOL stale = NO; NSError *error = nil;
-    NSURL *url = [NSURL URLByResolvingBookmarkData:data options:(NSURLBookmarkResolutionWithoutUI | NSURLBookmarkResolutionWithoutMounting)
+    NSURL *url = [NSURL URLByResolvingBookmarkData:data options:(NSURLBookmarkResolutionWithSecurityScope | NSURLBookmarkResolutionWithoutUI | NSURLBookmarkResolutionWithoutMounting)
                                       relativeToURL:nil bookmarkDataIsStale:&stale error:&error];
     if (!url || ![url startAccessingSecurityScopedResource]) {
         self.enabled = NO;
         [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; return;
     }
     if (stale) {
-        NSData *fresh = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
+        NSData *fresh = [url bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
         if (fresh) [NSUserDefaults.standardUserDefaults setObject:fresh forKey:kBookmark];
     }
-    _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path;
+    _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path; _securityScopeActive = YES;
     _state = DmSaveFolderSyncStateReady; _statusText = @"Ready";
 }
 
@@ -155,7 +156,10 @@ static BOOL validTitleID(NSString *titleID) {
 }
 - (void)syncOnQueue:(BOOL)manual {
     if (!self.enabled || !self.selectedFolder || self.syncing) return; self.syncing = YES;
-    [self.selectedFolder startAccessingSecurityScopedResource]; NSURL *localPayload = [self localPayloadURL]; NSURL *external = [self externalPayloadURL]; NSError *error = nil;
+    if (!self.securityScopeActive && ![self.selectedFolder startAccessingSecurityScopedResource]) {
+        [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; self.syncing = NO; return;
+    }
+    self.securityScopeActive = YES; NSURL *localPayload = [self localPayloadURL]; NSURL *external = [self externalPayloadURL]; NSError *error = nil;
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil]; __block BOOL ok = YES;
     [coordinator coordinateReadingItemAtURL:external options:0 error:&error byAccessor:^(NSURL *u) { (void)u; }];
     NSString *localFP = [self fingerprint:localPayload], *externalFP = [self fingerprint:external];
@@ -215,19 +219,21 @@ static BOOL validTitleID(NSString *titleID) {
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = urls.firstObject; if (!url || ![url startAccessingSecurityScopedResource]) { [self notice:@"Could not access that folder" state:DmSaveFolderSyncStateUnavailable]; return; }
-    NSData *bookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
-    if (!bookmark) { [self notice:@"Could not persist access to that folder" state:DmSaveFolderSyncStateError]; return; }
+    NSData *bookmark = [url bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
+    if (!bookmark) { [url stopAccessingSecurityScopedResource]; [self notice:@"Could not persist access to that folder" state:DmSaveFolderSyncStateError]; return; }
+    if (self.selectedFolder && self.securityScopeActive) [self.selectedFolder stopAccessingSecurityScopedResource];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:kLocalFingerprint];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:kExternalFingerprint];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:kLastSync];
     self.lastSuccessfulSync = nil; self.restartRequired = NO;
-    [NSUserDefaults.standardUserDefaults setObject:bookmark forKey:kBookmark]; _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path; self.state = DmSaveFolderSyncStateReady; self.statusText = @"Folder selected";
+    [NSUserDefaults.standardUserDefaults setObject:bookmark forKey:kBookmark]; _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path; self.securityScopeActive = YES; self.state = DmSaveFolderSyncStateReady; self.statusText = @"Folder selected";
     self.enabled = YES;
     [self syncNow];
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller { (void)controller; }
 - (void)clearSelectedFolder {
-    if (self.selectedFolder) [self.selectedFolder stopAccessingSecurityScopedResource];
+    if (self.selectedFolder && self.securityScopeActive) [self.selectedFolder stopAccessingSecurityScopedResource];
+    self.securityScopeActive = NO;
     [NSUserDefaults.standardUserDefaults removeObjectForKey:kBookmark];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:kLocalFingerprint];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:kExternalFingerprint];

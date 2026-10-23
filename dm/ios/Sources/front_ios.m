@@ -8,15 +8,12 @@
 #include "front.h"
 #include "hle.h"
 #include "dm.h"
-#import "DmSaveFolderSync.h"
-#import "DmSettingsViewController.h"
 
 UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_reset(void);
 void front_ios_boot(void);
 int front_ios_boot_ok(void);
 bool dm_show_launcher(void *view_controller, void (*done)(void));   // Launcher.swift: false = no launcher (no dm/launcher.json, or DM_LAUNCHER=0)
-DmSaveFolderSync *dm_save_folder_sync(void);
 
 static CAMetalLayer *g_layer;
 static void front_ios_power_watch(void);
@@ -65,9 +62,6 @@ static void launcher_done(void) { [g_root startGame]; }
         [self.view addSubview:lb]; return;
     }
     front_ios_audio_watch();
-    [NSNotificationCenter.defaultCenter addObserverForName:@"DmOpenSettings" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
-        [self presentViewController:DmMakeSettingsViewController(dm_save_folder_sync()) animated:YES completion:nil];
-    }];
 }
 // The game view, the pad and the frame-rate counter are made once the launcher has set the switches they read (DM_SHOW_FPS, DM_METAL_HUD); the host's loading began at app launch (main.m)
 - (void)startGame {

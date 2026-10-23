@@ -19,6 +19,12 @@ void dm_save_sync_resume(void) { [g_folder_sync resumeSafely]; }
 void front_save_committed(void) { [g_folder_sync saveCommitted]; }
 void dm_save_folder_sync_committed(void) { [g_folder_sync saveCommitted]; }
 DmSaveFolderSync *dm_save_folder_sync(void) { return g_folder_sync; }
+void dm_save_folder_sync_present(DmSaveFolderSync *sync, UIViewController *viewController) { [sync presentFolderPickerFromViewController:viewController]; }
+void dm_save_folder_sync_clear(DmSaveFolderSync *sync) { [sync clearSelectedFolder]; }
+void dm_save_folder_sync_now(DmSaveFolderSync *sync) { [sync syncNow]; }
+void dm_save_folder_sync_import(DmSaveFolderSync *sync) { [sync resolveByImportingExternal]; }
+void dm_save_folder_sync_export(DmSaveFolderSync *sync) { [sync resolveByExportingLocal]; }
+void dm_save_folder_sync_preserve(DmSaveFolderSync *sync) { [sync preserveBoth]; }
 
 static NSString *romfs_locate(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -66,7 +72,7 @@ static int boot_env(void) {
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
-    NSString *titleID = NSBundle.mainBundle.bundleIdentifier.lastPathComponent;
+    NSString *titleID = @DM_GAME_TITLE_ID;
     g_folder_sync = [[DmSaveFolderSync alloc] initWithLocalSave:[NSURL fileURLWithPath:[doc stringByAppendingPathComponent:@"save"] isDirectory:YES]
                                                          titleID:titleID];
     [g_folder_sync startBeforeGameplay];

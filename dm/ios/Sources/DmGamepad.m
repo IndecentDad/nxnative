@@ -16,7 +16,6 @@
 #import <GameController/GameController.h>
 #import <CoreMotion/CoreMotion.h>
 #import <CoreText/CoreText.h>
-#import "DmSettingsViewController.h"
 #include <pthread.h>
 #include "dm.h"
 #include "dm_input.h"
@@ -91,11 +90,9 @@ static const CGFloat
     K_CLICK_X = 102, K_CLICK_R = 17;                // L3 / R3: centre from the outer edge (level with ZL / ZR), radius
 static const int k_btns[] = {B_ZL, B_L, B_ZR, B_R, B_MINUS, B_PLUS, B_LS, B_RS};   // keys locked at touch-down (L3 / R3 only in the 3D layout)
 static NSString *const k_layout_key = @"DmPadLayout";   // NSUserDefaults: 0 = 2D, 1 = 3D, 2 = Tap (DM_GAME_PAD_LAYOUT's numbers)
-static NSString *const k_settings_notice = @"DmOpenSettings";
 int dm_opmode(void);   // hle_oe.c: 0 = handheld
 
 @interface DmGamepad : UIView
-- (void)updateSettingsShortcut:(BOOL)held;
 @end
 static __weak DmGamepad *g_view;
 
@@ -112,18 +109,7 @@ static __weak DmGamepad *g_view;
     BOOL _full, _tap;                              // the 3D layout / the Tap layout is current
     CALayer *_controls;                            // holds every control layer: hidden while a physical controller is connected (the view itself stays, for game touches)
     BOOL _padOff;                                  // a physical controller is connected: every touch goes to the game
-    BOOL _longPressOpened, _suppressNextSwap, _shortcutArmed;
-    NSTimer *_shortcutTimer;
     UITouch *_game[16];                            // touches on the game's touch screen by finger slot
-}
-
-- (void)updateSettingsShortcut:(BOOL)held {
-    if (held && !_shortcutArmed) {
-        _shortcutArmed = YES; [_shortcutTimer invalidate];
-        _shortcutTimer = [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:NO block:^(__unused NSTimer *t) {
-            if (self->_shortcutArmed) [[NSNotificationCenter defaultCenter] postNotificationName:k_settings_notice object:nil];
-        }];
-    } else if (!held) { _shortcutArmed = NO; [_shortcutTimer invalidate]; _shortcutTimer = nil; }
 }
 
 static UIColor *k_idle, *k_on, *k_line, *k_ringFill, *k_text, *k_textOn;
@@ -171,14 +157,8 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         [nc addObserver:self selector:@selector(padsChanged) name:GCControllerDidDisconnectNotification object:nil];
         [self padsChanged];
         motion_start();
-        UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(settingsLongPress:)];
-        lp.minimumPressDuration = 1.0; lp.cancelsTouchesInView = NO; [self addGestureRecognizer:lp];
     }
     return self;
-}
-- (void)settingsLongPress:(UILongPressGestureRecognizer *)g {
-    if (g.state == UIGestureRecognizerStateBegan && !_longPressOpened) { _longPressOpened = YES; _suppressNextSwap = YES; [[NSNotificationCenter defaultCenter] postNotificationName:k_settings_notice object:nil]; }
-    if (g.state == UIGestureRecognizerStateEnded || g.state == UIGestureRecognizerStateCancelled || g.state == UIGestureRecognizerStateFailed) _longPressOpened = NO;
 }
 - (void)applyLayout {   // show / hide the controls for the current layout
     [CATransaction begin]; [CATransaction setDisableActions:YES];
@@ -338,13 +318,12 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     BOOL swap = NO, game = NO;
     for (UITouch *t in ts) {
         uint64_t v = [_owner objectForKey:t].unsignedLongLongValue;
-        if (ended && !_suppressNextSwap && (v & 0xff) == C_SWAP && [self inSwap:[t locationInView:self]]) swap = YES;   // layout button: counts only when released on the button
+        if (ended && (v & 0xff) == C_SWAP && [self inSwap:[t locationInView:self]]) swap = YES;   // layout button: counts only when released on the button
         if ((v & 0xff) == C_GAME && (v >> 8) < 16) { _game[v >> 8] = nil; game = YES; }
         [_owner removeObjectForKey:t]; [_faceOf removeObjectForKey:t]; for (int i = 0; i < 2; i++) if (t == _stick[i]) _stick[i] = nil;
     }
     if (game) [self pushGame];
     [self recompute];
-    if (ended) _suppressNextSwap = NO;
     if (swap) [self nextLayout];
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { [self endTouches:ts tapped:YES]; }
@@ -437,7 +416,6 @@ static void read_pad(GCExtendedGamepad *g) {
     g_pad_rx = axis(g.rightThumbstick.xAxis.value); g_pad_ry = axis(g.rightThumbstick.yAxis.value);
     pthread_mutex_unlock(&g_mu);
     publish();
-    [g_view updateSettingsShortcut:g.leftShoulder.isPressed && g.rightShoulder.isPressed && g.buttonMenu.isPressed];
 }
 - (void)padsChanged {
     BOOL any = NO;
