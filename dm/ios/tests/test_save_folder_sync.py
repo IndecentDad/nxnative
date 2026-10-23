@@ -35,8 +35,9 @@ def test_bookmarks_and_coordinated_external_access_are_present():
     assert 'NSUserDefaults.standardUserDefaults dataForKey:kBookmark' in SYNC
     assert 'NSURLBookmarkResolutionWithoutUI' in SYNC
     assert 'NSURLBookmarkResolutionWithoutMounting' in SYNC
-    assert 'NSURLBookmarkCreationWithSecurityScope' in SYNC
-    assert 'NSURLBookmarkResolutionWithSecurityScope' in SYNC
+    assert 'bookmarkDataWithOptions:0' in SYNC
+    assert 'NSURLBookmarkCreationWithSecurityScope' not in SYNC
+    assert 'NSURLBookmarkResolutionWithSecurityScope' not in SYNC
     assert 'securityScopeActive' in SYNC
     assert 'Selected folder is unavailable; choose it again' in SYNC
     assert 'NSFileCoordinator' in SYNC
