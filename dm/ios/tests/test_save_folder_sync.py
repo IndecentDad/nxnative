@@ -23,14 +23,12 @@ def test_title_id_is_the_only_game_folder_component():
 
 def test_local_save_remains_documents_save_and_commit_hook_is_connected():
     assert 'stringByAppendingPathComponent:@"save"' in MAIN
-    assert 'DM_GAME_SAVE_PATH' in MAIN
-    assert 'savePayload' in MAIN
     assert '[g_folder_sync startBeforeGameplay]' in MAIN
     assert '[g_folder_sync saveCommitted]' in MAIN
     assert '@DM_GAME_TITLE_ID' in MAIN
     assert 'bundleIdentifier.lastPathComponent' not in MAIN
     assert 'DM_GAME_TITLE_ID' in GAME
-    assert 'DM_GAME_SAVE_PATH' in GAME
+    assert 'DM_GAME_SAVE_PATH' not in GAME
 
 
 def test_bookmarks_and_coordinated_external_access_are_present():

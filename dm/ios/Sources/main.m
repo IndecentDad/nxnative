@@ -74,10 +74,8 @@ static int boot_env(void) {
     NSString *saveRoot = [doc stringByAppendingPathComponent:@"save"];
     setenv("DM_SAVE", saveRoot.fileSystemRepresentation, 0);
     NSString *titleID = @DM_GAME_TITLE_ID;
-    NSString *savePath = @DM_GAME_SAVE_PATH;
-    NSString *savePayload = savePath.length ? [saveRoot stringByAppendingPathComponent:savePath] : saveRoot;
-    fprintf(stderr, "save-sync: native root %s payload %s\n", saveRoot.fileSystemRepresentation, savePayload.fileSystemRepresentation);
-    g_folder_sync = [[DmSaveFolderSync alloc] initWithLocalSave:[NSURL fileURLWithPath:savePayload isDirectory:YES]
+    fprintf(stderr, "save-sync: native root and payload %s\n", saveRoot.fileSystemRepresentation);
+    g_folder_sync = [[DmSaveFolderSync alloc] initWithLocalSave:[NSURL fileURLWithPath:saveRoot isDirectory:YES]
                                                          titleID:titleID];
     [g_folder_sync startBeforeGameplay];
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
