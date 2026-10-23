@@ -95,7 +95,7 @@ static BOOL validTitleID(NSString *titleID) {
 }
 - (NSString *)fingerprint:(NSURL *)url {
     if (![self hasData:url]) return @"empty";
-    NSMutableData *manifest = [NSMutableData data]; NSFileManager *fm = NSFileManager.defaultManager;
+    NSMutableData *manifest = [NSMutableData data]; NSMutableArray<NSDictionary *> *entries = [NSMutableArray array]; NSFileManager *fm = NSFileManager.defaultManager;
     NSDirectoryEnumerator *e = [fm enumeratorAtURL:url includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLFileSizeKey]
                          options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *u, NSError *err) { return YES; }];
     for (NSURL *item in e) {
@@ -106,8 +106,10 @@ static BOOL validTitleID(NSString *titleID) {
         unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(contents.bytes, (CC_LONG)contents.length, digest);
         NSString *relative = [item.path substringFromIndex:url.path.length];
         while ([relative hasPrefix:@"/"]) relative = [relative substringFromIndex:1];
-        [manifest appendData:[relative dataUsingEncoding:NSUTF8StringEncoding]]; [manifest appendBytes:digest length:sizeof digest];
+        [entries addObject:@{ @"path": relative, @"digest": [NSData dataWithBytes:digest length:sizeof digest] }];
     }
+    [entries sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [a[@"path"] compare:b[@"path"]]; }];
+    for (NSDictionary *entry in entries) { [manifest appendData:[entry[@"path"] dataUsingEncoding:NSUTF8StringEncoding]]; [manifest appendData:entry[@"digest"]]; }
     unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(manifest.bytes, (CC_LONG)manifest.length, digest);
     NSMutableString *out = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2]; for (NSUInteger i = 0; i < sizeof digest; i++) [out appendFormat:@"%02x", digest[i]]; return out;
 }

@@ -77,6 +77,7 @@ def test_first_sync_reports_verified_direction_and_restart_requirement():
     assert 'restartRequired' in SYNC
     assert 'if (!self.enabled || !self.selectedFolder || self.restartRequired)' in SYNC
     assert 'if (!hasLocalBaseline || !hasExternalBaseline) [self syncOnQueue:NO];' in SYNC
+    assert 'entries sortUsingComparator' in SYNC
 
 
 def test_legacy_icloud_synchronizer_and_warning_are_gone():
