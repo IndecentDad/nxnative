@@ -57,13 +57,13 @@ static BOOL validTitleID(NSString *titleID) {
     NSData *data = [NSUserDefaults.standardUserDefaults dataForKey:kBookmark];
     if (!data) return;
     BOOL stale = NO; NSError *error = nil;
-    NSURL *url = [NSURL URLByResolvingBookmarkData:data options:NSURLBookmarkResolutionWithSecurityScope
+    NSURL *url = [NSURL URLByResolvingBookmarkData:data options:(NSURLBookmarkResolutionWithoutUI | NSURLBookmarkResolutionWithoutMounting)
                                       relativeToURL:nil bookmarkDataIsStale:&stale error:&error];
     if (!url || ![url startAccessingSecurityScopedResource]) {
         [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; return;
     }
     if (stale) {
-        NSData *fresh = [url bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
+        NSData *fresh = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
         if (fresh) [NSUserDefaults.standardUserDefaults setObject:fresh forKey:kBookmark];
     }
     _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path;
@@ -150,7 +150,7 @@ static BOOL validTitleID(NSString *titleID) {
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = urls.firstObject; if (!url || ![url startAccessingSecurityScopedResource]) { [self notice:@"Could not access that folder" state:DmSaveFolderSyncStateUnavailable]; return; }
-    NSData *bookmark = [url bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
+    NSData *bookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:nil];
     if (!bookmark) { [self notice:@"Could not persist access to that folder" state:DmSaveFolderSyncStateError]; return; }
     [NSUserDefaults.standardUserDefaults setObject:bookmark forKey:kBookmark]; _selectedFolder = url; _selectedFolderName = url.lastPathComponent ?: url.path; self.state = DmSaveFolderSyncStateReady; self.statusText = @"Folder selected";
     if (self.enabled) [self syncNow];

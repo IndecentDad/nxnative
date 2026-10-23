@@ -21,8 +21,11 @@ def test_local_save_remains_documents_save_and_game_save_is_preserved():
 
 
 def test_bookmarks_and_coordinated_external_access_are_present():
-    assert 'NSURLBookmarkCreationWithSecurityScope' in SYNC
-    assert 'NSURLBookmarkResolutionWithSecurityScope' in SYNC
+    assert 'NSURLBookmarkResolutionWithoutUI' in SYNC
+    assert 'NSURLBookmarkResolutionWithoutMounting' in SYNC
+    assert 'bookmarkDataWithOptions:0' in SYNC
+    assert 'NSURLBookmarkCreationWithSecurityScope' not in SYNC
+    assert 'NSURLBookmarkResolutionWithSecurityScope' not in SYNC
     assert 'NSFileCoordinator' in SYNC
 
 
