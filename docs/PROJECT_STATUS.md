@@ -36,3 +36,5 @@ Remaining: device-test local Files visibility, first upload, offline/unavailable
 ## Save Folder Sync (feature/save-folder-sync)
 
 Added a separate `DmSaveFolderSync` component and native NXNative Settings UI. It preserves GameSave and transactional `Documents/save`, stores security-scoped bookmarks, resolves title-ID folders for NXNative/Eden modes, stages copies, fingerprints content, and stops on conflicts or missing external game directories. Touch long-press and L+R+Plus fallback open settings. Eden automatic synchronization is enabled for device testing; its Metroid Dread round trip remains unverified.
+
+The Tahoe build worktree is clean at the feature commit and Xcode 26.6 is available. IPA generation is currently blocked before shader compilation because Tahoe’s installed `spirv-cross`/Metal tools do not match `dmsh_chain.lock`; no incompatible shader libraries or IPA were produced.
