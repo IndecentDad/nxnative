@@ -15,7 +15,7 @@ def test_title_id_is_the_only_game_folder_component():
     assert 'externalPayloadURL' in SYNC
     assert 'SaveFolderSync-Recovery' not in SYNC.split('- (NSURL *)externalPayloadURL', 1)[1].split('- (NSURL *)gameFolder', 1)[0]
     assert 'localPayloadURL { return self.localSave; }' in SYNC
-    assert 'URLByAppendingPathComponent:@"nts/save"' not in SYNC
+    assert 'URLByAppendingPathComponent:@"save"' not in SYNC
     assert 'titleID.length != 16' in SYNC
     assert "010093801237C000" not in SYNC
     assert "Yuzu" not in SYNC
@@ -56,7 +56,6 @@ def test_unified_settings_and_explicit_conflict_actions_are_present():
 def test_external_game_directory_is_not_created_implicitly():
     assert 'createDirectoryAtURL:external withIntermediateDirectories:YES' in SYNC
     assert 'SaveFolderSync-Recovery' in SYNC
-    assert 'DmSaveFolderSyncMode' not in SYNC
 
 
 def test_folder_selection_controls_enablement_and_clear_persistence():

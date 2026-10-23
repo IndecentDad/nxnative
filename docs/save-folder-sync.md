@@ -4,11 +4,10 @@
 run against the transactional `Documents/save` tree; the bridge only reads a
 complete committed snapshot and exports it after a successful host commit.
 
-The selected folder is held by a security-scoped bookmark. NXNative mode uses
-`<selected folder>/<title ID>/`. Eden mode treats the selected folder as
-`Eden/user/save/0000000000000000/<Profile Folder>/` and uses the same title-ID
-child without adding metadata files. Missing title-ID directories require an
-explicit export choice in Resolve Conflicts.
+The selected folder is held by a security-scoped bookmark. Sync uses
+`<selected folder>/<title ID>/` and copies the committed `Documents/save`
+contents directly beneath that title-ID directory. No emulator-specific layout
+or intermediate save directory is added.
 
 The bridge fingerprints file contents and relative paths rather than relying on
 timestamps. Reads and staged replacements use `NSFileCoordinator` where the
@@ -16,8 +15,6 @@ provider supports it. Provider implementations may not make a directory swap
 atomic, so staging and recovery copies protect the local save but cannot make a
 remote Files provider transactional.
 
-Eden synchronization is implemented for the confirmed working MeloNX profile
-directory, but the Metroid Dread round trip still requires device validation.
 Automatic import/export retains the fingerprint, staging, recovery, and
 conflict checks; divergent saves remain manual-resolution cases.
 

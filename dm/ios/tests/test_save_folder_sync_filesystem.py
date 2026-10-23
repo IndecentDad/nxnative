@@ -17,8 +17,6 @@ def copy_payload(source: Path, destination: Path) -> None:
         relative = item.relative_to(source)
         if any(part in RESERVED or part.startswith((".stage-", ".incoming-", ".old-")) for part in relative.parts):
             continue
-        if relative.parts == ("nts",) or relative.parts[:2] == ("nts", "save"):
-            continue
         target = destination / relative
         if item.is_dir():
             target.mkdir(parents=True, exist_ok=True)
@@ -49,7 +47,7 @@ def test_existing_title_id_folder_is_reused_and_missing_one_is_created(tmp_path)
     assert missing.is_dir()
 
 
-def test_direct_bidirectional_payload_has_no_nts_nesting_or_duplicate_wrappers(tmp_path):
+def test_direct_bidirectional_payload_has_no_extra_save_root_or_duplicate_wrappers(tmp_path):
     local = tmp_path / "Documents" / "save"
     (local / "game" / "slot").mkdir(parents=True)
     (local / "game" / "slot" / "progress.dat").write_text("local")
@@ -57,21 +55,11 @@ def test_direct_bidirectional_payload_has_no_nts_nesting_or_duplicate_wrappers(t
     external = selected / TITLE_ID
     copy_payload(actual_payload(local), external)
     assert (external / "game" / "slot" / "progress.dat").read_text() == "local"
-    assert not (external / "nts" / "save").exists()
+    assert not (external / "save").exists()
     copy_payload(external, local)
     assert (local / "game" / "slot" / "progress.dat").read_text() == "local"
     copy_payload(actual_payload(local), external)
     assert sorted(p.relative_to(external) for p in external.rglob("*")) == [Path("game"), Path("game/slot"), Path("game/slot/progress.dat")]
-
-
-def test_legacy_local_wrapper_is_read_as_payload_but_not_exported(tmp_path):
-    local = tmp_path / "save"
-    (local / "nts" / "save").mkdir(parents=True)
-    (local / "nts" / "save" / "progress.dat").write_text("payload")
-    external = tmp_path / "selected" / TITLE_ID
-    copy_payload(actual_payload(local), external)
-    assert not (external / "progress.dat").exists()
-    assert not (external / "nts").exists()
 
 
 def test_conflict_recovery_is_idempotent_bounded_and_ignores_noops(tmp_path):

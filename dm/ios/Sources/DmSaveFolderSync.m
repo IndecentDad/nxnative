@@ -76,21 +76,13 @@ static BOOL validTitleID(NSString *titleID) {
     return [self.selectedFolder URLByAppendingPathComponent:self.titleID isDirectory:YES];
 }
 - (NSURL *)gameFolder { return [self externalPayloadURL]; }
-- (BOOL)isLegacyNtsSaveWrapper:(NSURL *)url {
-    if (![url.lastPathComponent isEqualToString:@"nts"]) return NO;
-    NSNumber *directory = nil; [url getResourceValue:&directory forKey:NSURLIsDirectoryKey error:nil];
-    if (!directory.boolValue) return NO;
-    NSURL *save = [url URLByAppendingPathComponent:@"save" isDirectory:YES];
-    NSNumber *saveDirectory = nil; [save getResourceValue:&saveDirectory forKey:NSURLIsDirectoryKey error:nil];
-    return saveDirectory.boolValue;
-}
 - (BOOL)isReservedPayloadComponent:(NSString *)name {
     return [name isEqualToString:@"SaveFolderSync-Recovery"] ||
            [name hasPrefix:@".stage-"] || [name hasPrefix:@".incoming-"] || [name hasPrefix:@".old-"];
 }
 - (BOOL)hasData:(NSURL *)url {
     for (NSURL *item in [NSFileManager.defaultManager contentsOfDirectoryAtURL:url includingPropertiesForKeys:nil options:NSDirectoryEnumerationSkipsHiddenFiles error:nil])
-        if (![self isReservedPayloadComponent:item.lastPathComponent] && ![self isLegacyNtsSaveWrapper:item]) return YES;
+        if (![self isReservedPayloadComponent:item.lastPathComponent]) return YES;
     return NO;
 }
 - (NSString *)fingerprint:(NSURL *)url {
@@ -100,7 +92,7 @@ static BOOL validTitleID(NSString *titleID) {
                          options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *u, NSError *err) { return YES; }];
     for (NSURL *item in e) {
         NSNumber *dir = nil; [item getResourceValue:&dir forKey:NSURLIsDirectoryKey error:nil];
-        if ([self isReservedPayloadComponent:item.lastPathComponent] || (dir.boolValue && [self isLegacyNtsSaveWrapper:item])) { if (dir.boolValue) [e skipDescendants]; continue; }
+        if ([self isReservedPayloadComponent:item.lastPathComponent]) { if (dir.boolValue) [e skipDescendants]; continue; }
         if (dir.boolValue) continue;
         NSData *contents = [NSData dataWithContentsOfURL:item options:NSDataReadingMappedIfSafe error:nil]; if (!contents) return nil;
         unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(contents.bytes, (CC_LONG)contents.length, digest);
@@ -117,7 +109,7 @@ static BOOL validTitleID(NSString *titleID) {
     NSUInteger count = 0; NSDirectoryEnumerator *e = [NSFileManager.defaultManager enumeratorAtURL:url includingPropertiesForKeys:@[NSURLIsDirectoryKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *u, NSError *err) { return YES; }];
     for (NSURL *item in e) {
         NSNumber *directory = nil; [item getResourceValue:&directory forKey:NSURLIsDirectoryKey error:nil];
-        if ([self isReservedPayloadComponent:item.lastPathComponent] || (directory.boolValue && [self isLegacyNtsSaveWrapper:item])) { if (directory.boolValue) [e skipDescendants]; continue; }
+        if ([self isReservedPayloadComponent:item.lastPathComponent]) { if (directory.boolValue) [e skipDescendants]; continue; }
         if (!directory.boolValue) count++;
     }
     return count;
@@ -128,7 +120,7 @@ static BOOL validTitleID(NSString *titleID) {
     NSDirectoryEnumerator *e = [fm enumeratorAtURL:source includingPropertiesForKeys:@[NSURLIsDirectoryKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *u, NSError *err) { if (error) *error = err; return NO; }];
     for (NSURL *item in e) {
         NSNumber *reservedDir = nil; [item getResourceValue:&reservedDir forKey:NSURLIsDirectoryKey error:nil];
-        if ([self isReservedPayloadComponent:item.lastPathComponent] || (reservedDir.boolValue && [self isLegacyNtsSaveWrapper:item])) { if (reservedDir.boolValue) [e skipDescendants]; continue; }
+        if ([self isReservedPayloadComponent:item.lastPathComponent]) { if (reservedDir.boolValue) [e skipDescendants]; continue; }
         NSString *rel = [item.path substringFromIndex:source.path.length]; while ([rel hasPrefix:@"/"]) rel = [rel substringFromIndex:1]; NSURL *target = [destination URLByAppendingPathComponent:rel]; NSNumber *dir = nil; [item getResourceValue:&dir forKey:NSURLIsDirectoryKey error:error];
         if (dir.boolValue) { if (![fm createDirectoryAtURL:target withIntermediateDirectories:YES attributes:nil error:error]) return NO; }
         else { if (![fm copyItemAtURL:item toURL:target error:error]) return NO; }
