@@ -27,6 +27,26 @@ static NSUInteger const kRecoverySnapshotLimit = 3;
 
 @implementation DmSaveFolderSync
 
+static NSString *pathForURL(NSURL *url) { return url.path ?: url.absoluteString ?: @"(null)"; }
+
+- (void)logFailure:(NSString *)operation phase:(NSString *)phase source:(NSURL *)source destination:(NSURL *)destination error:(NSError *)error preserved:(BOOL)preserved {
+    NSString *file = error.userInfo[@"DmSaveFolderSyncFile"] ?: @"(root)";
+    NSString *domain = error.domain ?: @"(none)";
+    fprintf(stderr, "[save-sync] %s failed phase=%s file=%s source=%s destination=%s domain=%s code=%ld preserved=%s error=%s\n",
+            operation.UTF8String, phase.UTF8String, file.UTF8String, pathForURL(source).UTF8String, pathForURL(destination).UTF8String,
+            domain.UTF8String, (long)error.code, preserved ? "yes" : "no", error.localizedDescription.UTF8String ?: "(none)");
+}
+
+- (BOOL)ensureSecurityScope:(NSError **)error {
+    if (self.securityScopeActive) return YES;
+    if (!self.selectedFolder || ![self.selectedFolder startAccessingSecurityScopedResource]) {
+        if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:20 userInfo:@{NSLocalizedDescriptionKey: @"Selected folder security scope is unavailable"}];
+        return NO;
+    }
+    self.securityScopeActive = YES;
+    return YES;
+}
+
 static BOOL validTitleID(NSString *titleID) {
     if (titleID.length != 16) return NO;
     NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
@@ -109,7 +129,7 @@ static BOOL validTitleID(NSString *titleID) {
         [item getResourceValue:&downloaded forKey:NSURLUbiquitousItemIsDownloadedKey error:&resourceError];
         if (ubiquitous.boolValue && !downloaded.boolValue) { scanError = [NSError errorWithDomain:@"DmSaveFolderSync" code:11 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is present but not downloaded: %@", item.lastPathComponent]}]; break; }
         NSData *contents = [[NSData alloc] initWithContentsOfURL:item options:NSDataReadingMappedIfSafe error:&resourceError];
-        if (!contents) { scanError = [NSError errorWithDomain:@"DmSaveFolderSync" code:17 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is missing or unreadable: %@%@", item.lastPathComponent, resourceError.localizedDescription.length ? [NSString stringWithFormat:@" (%@)", resourceError.localizedDescription] : @""]}]; break; }
+        if (!contents) { scanError = [NSError errorWithDomain:@"DmSaveFolderSync" code:17 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is missing or unreadable: %@%@", item.lastPathComponent, resourceError.localizedDescription.length ? [NSString stringWithFormat:@" (%@)", resourceError.localizedDescription] : @""], @"DmSaveFolderSyncFile": item.lastPathComponent ?: @"(unknown)"}]; break; }
         unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(contents.bytes, (CC_LONG)contents.length, digest);
         NSString *relative = [item.path substringFromIndex:url.path.length];
         while ([relative hasPrefix:@"/"]) relative = [relative substringFromIndex:1];
@@ -134,7 +154,7 @@ static BOOL validTitleID(NSString *titleID) {
     NSFileManager *fm = NSFileManager.defaultManager;
     BOOL isDirectory = NO;
     if (![fm fileExistsAtPath:source.path isDirectory:&isDirectory] || !isDirectory) {
-        if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:10 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Source save directory does not exist: %@", source.lastPathComponent ?: source.path]}];
+        if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:10 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Source save directory does not exist: %@", source.lastPathComponent ?: source.path], @"DmSaveFolderSyncFile": source.lastPathComponent ?: @"(root)"}];
         return NO;
     }
     if (![fm createDirectoryAtURL:destination withIntermediateDirectories:YES attributes:nil error:error]) return NO;
@@ -150,11 +170,11 @@ static BOOL validTitleID(NSString *titleID) {
             [item getResourceValue:&ubiquitous forKey:NSURLIsUbiquitousItemKey error:&resourceError];
             [item getResourceValue:&downloaded forKey:NSURLUbiquitousItemIsDownloadedKey error:&resourceError];
             if (ubiquitous.boolValue && !downloaded.boolValue) {
-                if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:11 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is present but not downloaded: %@", rel]}];
+                if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:11 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Save file is present but not downloaded: %@", rel], @"DmSaveFolderSyncFile": rel}];
                 return NO;
             }
             if (![fm copyItemAtURL:item toURL:target error:&resourceError]) {
-                if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:12 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not copy save file %@: %@", rel, resourceError.localizedDescription ?: @"unknown file error"]}];
+                if (error) *error = [NSError errorWithDomain:@"DmSaveFolderSync" code:12 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not copy save file %@: %@", rel, resourceError.localizedDescription ?: @"unknown file error"], @"DmSaveFolderSyncFile": rel, NSUnderlyingErrorKey: resourceError ?: [NSNull null]}];
                 return NO;
             }
         }
@@ -179,25 +199,26 @@ static BOOL validTitleID(NSString *titleID) {
     if ([self hasData:external] && ![self copyTree:external to:externalCopy error:error]) return NO;
     return YES;
 }
-- (BOOL)replaceTree:(NSURL *)source destination:(NSURL *)destination error:(NSError **)error {
+- (BOOL)replaceTree:(NSURL *)source destination:(NSURL *)destination error:(NSError **)error backup:(NSURL **)backup {
     NSFileManager *fm = NSFileManager.defaultManager; NSURL *stage = [destination URLByAppendingPathExtension:[NSString stringWithFormat:@"stage-%@", NSUUID.UUID.UUIDString]];
-    __block BOOL copied = NO; __block NSError *copyError = nil;
-    NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-    [coordinator coordinateReadingItemAtURL:source options:0 error:&copyError byAccessor:^(NSURL *u) { copied = [self copyTree:u to:stage error:&copyError]; }];
-    if (!copied) { if (error) *error = copyError ?: [NSError errorWithDomain:@"DmSaveFolderSync" code:13 userInfo:@{NSLocalizedDescriptionKey: @"Could not read the source save files"}]; [fm removeItemAtURL:stage error:nil]; return NO; }
+    __block BOOL copied = NO; __block NSError *copyError = nil; NSNumber *ubiquitous = nil;
+    [source getResourceValue:&ubiquitous forKey:NSURLIsUbiquitousItemKey error:&copyError];
+    if (ubiquitous.boolValue) {
+        NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+        [coordinator coordinateReadingItemAtURL:source options:0 error:&copyError byAccessor:^(NSURL *u) { copied = [self copyTree:u to:stage error:&copyError]; }];
+    } else copied = [self copyTree:source to:stage error:&copyError];
+    if (!copied) { if (error) *error = copyError ?: [NSError errorWithDomain:@"DmSaveFolderSync" code:13 userInfo:@{NSLocalizedDescriptionKey: @"Could not read the source save files", @"DmSaveFolderSyncFile": source.lastPathComponent ?: @"(root)"}]; [fm removeItemAtURL:stage error:nil]; return NO; }
     NSURL *old = [destination URLByAppendingPathExtension:[NSString stringWithFormat:@"old-%@", NSUUID.UUID.UUIDString]];
     if ([fm fileExistsAtPath:destination.path] && ![fm moveItemAtURL:destination toURL:old error:error]) { [fm removeItemAtURL:stage error:nil]; return NO; }
     if (![fm moveItemAtURL:stage toURL:destination error:error]) { if ([fm fileExistsAtPath:old.path]) [fm moveItemAtURL:old toURL:destination error:nil]; return NO; }
-    [fm removeItemAtURL:old error:nil]; return YES;
+    if (backup) *backup = old; else [fm removeItemAtURL:old error:nil]; return YES;
 }
 - (void)syncOnQueue:(BOOL)manual {
     if (!self.enabled || !self.selectedFolder || self.syncing) return; self.syncing = YES;
-    if (!self.securityScopeActive && ![self.selectedFolder startAccessingSecurityScopedResource]) {
-        [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; self.syncing = NO; return;
-    }
-    self.securityScopeActive = YES; NSURL *localPayload = [self localPayloadURL]; NSURL *external = [self externalPayloadURL]; NSError *error = nil; BOOL ok = YES;
+    NSURL *localPayload = [self localPayloadURL]; NSURL *external = [self externalPayloadURL]; NSError *error = nil; BOOL ok = YES;
+    if (![self ensureSecurityScope:&error]) { [self logFailure:@"sync" phase:@"security-scope" source:external destination:external error:error preserved:YES]; [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; self.syncing = NO; return; }
     NSString *localFP = [self fingerprint:localPayload error:&error], *externalFP = [self fingerprint:external error:&error];
-    if (!localFP || !externalFP) { [self notice:error.localizedDescription ?: @"Save files are unavailable; local save preserved" state:DmSaveFolderSyncStateError]; self.syncing = NO; return; }
+    if (!localFP || !externalFP) { [self logFailure:@"sync" phase:@"fingerprint" source:localPayload destination:external error:error preserved:YES]; [self notice:error.localizedDescription ?: @"Save files are unavailable; local save preserved" state:DmSaveFolderSyncStateError]; self.syncing = NO; return; }
     BOOL local = localFP && ![localFP isEqualToString:@"empty"], ext = externalFP && ![externalFP isEqualToString:@"empty"];
     NSString *knownLocal = [NSUserDefaults.standardUserDefaults stringForKey:kLocalFingerprint], *knownExternal = [NSUserDefaults.standardUserDefaults stringForKey:kExternalFingerprint];
     BOOL haveBaseline = knownLocal.length && knownExternal.length;
@@ -205,7 +226,7 @@ static BOOL validTitleID(NSString *titleID) {
     BOOL externalChanged = haveBaseline && ![externalFP isEqualToString:knownExternal];
     if (local && ext && ![localFP isEqualToString:externalFP] && (!haveBaseline || (localChanged && externalChanged) || (!localChanged && !externalChanged))) {
         [self makeRecoverySnapshotForLocal:localPayload external:external localFingerprint:localFP externalFingerprint:externalFP error:nil];
-        [self notice:@"Local and external saves both changed; resolve the conflict" state:DmSaveFolderSyncStateNeedsResolution]; self.syncing = NO; return;
+        [self notice:@"Different saves found on this device and in the selected folder. Choose which saves to use." state:DmSaveFolderSyncStateNeedsResolution]; self.syncing = NO; return;
     }
     BOOL shouldImport = ext && !local;
     if (local && ext && [localFP isEqualToString:externalFP]) shouldImport = NO;
@@ -214,33 +235,39 @@ static BOOL validTitleID(NSString *titleID) {
     if (shouldImport) {
         transferred = [self payloadFileCount:external]; NSString *expected = externalFP;
         if (local && ![self makeRecoverySnapshotForLocal:localPayload external:external localFingerprint:localFP externalFingerprint:externalFP error:&error]) ok = NO;
-        if (ok) ok = [self replaceTree:external destination:localPayload error:&error];
-        NSString *sourceAfter = [self fingerprint:external];
+        NSURL *localBackup = nil;
+        if (ok) ok = [self replaceTree:external destination:localPayload error:&error backup:&localBackup];
+        if (!ok) [self logFailure:@"import" phase:@"stage-and-replace" source:external destination:localPayload error:error preserved:YES];
+        NSString *sourceAfter = [self fingerprint:external error:&error];
+        if (ok && !sourceAfter) { [self logFailure:@"import" phase:@"source-verification" source:external destination:localPayload error:error preserved:YES]; ok = NO; }
         if (ok && ![sourceAfter isEqualToString:expected]) { error = [NSError errorWithDomain:@"DmSaveFolderSync" code:14 userInfo:@{NSLocalizedDescriptionKey: @"Source save changed or disappeared during import; local save preserved"}]; ok = NO; }
-        if (ok && ![[self fingerprint:localPayload] isEqualToString:expected]) { error = [NSError errorWithDomain:@"DmSaveFolderSync" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Imported save verification failed; local save preserved"}]; ok = NO; }
+        NSString *localAfter = [self fingerprint:localPayload error:&error];
+        if (ok && ![localAfter isEqualToString:expected]) { error = [NSError errorWithDomain:@"DmSaveFolderSync" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Imported save verification failed; local save preserved"}]; ok = NO; }
+        if (!ok && localBackup) { [NSFileManager.defaultManager removeItemAtURL:localPayload error:nil]; [NSFileManager.defaultManager moveItemAtURL:localBackup toURL:localPayload error:nil]; }
+        else if (localBackup) [NSFileManager.defaultManager removeItemAtURL:localBackup error:nil];
+        if (!ok && error) [self logFailure:@"import" phase:@"verification" source:external destination:localPayload error:error preserved:YES];
         if (ok) { self.restartRequired = YES; outcome = [NSString stringWithFormat:@"Save files imported. Restart the game to load your updated saves. Avoid saving in-game before restarting. (%lu files)", (unsigned long)transferred]; }
     }
     else if (local && (!ext || localChanged)) {
         transferred = [self payloadFileCount:localPayload]; NSString *expected = localFP;
-        NSURL *stage = [external URLByAppendingPathExtension:[NSString stringWithFormat:@"incoming-%@", NSUUID.UUID.UUIDString]];
         if (ext && ![localFP isEqualToString:externalFP]) ok = [self makeRecoverySnapshotForLocal:localPayload external:external localFingerprint:localFP externalFingerprint:externalFP error:&error];
-        if (ok) ok = [self copyTree:localPayload to:stage error:&error];
-        if (ok) {
-            NSFileManager *fm = NSFileManager.defaultManager; NSURL *old = [external URLByAppendingPathExtension:[NSString stringWithFormat:@"old-%@", NSUUID.UUID.UUIDString]];
-            if ([fm fileExistsAtPath:external.path] && ![fm moveItemAtURL:external toURL:old error:&error]) ok = NO;
-            if (ok && ![fm moveItemAtURL:stage toURL:external error:&error]) { if ([fm fileExistsAtPath:old.path]) [fm moveItemAtURL:old toURL:external error:nil]; ok = NO; }
-            [fm removeItemAtURL:old error:nil];
-        }
-        NSString *sourceAfter = [self fingerprint:localPayload];
+        NSURL *externalBackup = nil;
+        if (ok) ok = [self replaceTree:localPayload destination:external error:&error backup:&externalBackup];
+        if (!ok) [self logFailure:@"export" phase:@"stage-and-replace" source:localPayload destination:external error:error preserved:YES];
+        NSString *sourceAfter = [self fingerprint:localPayload error:&error];
         if (ok && ![sourceAfter isEqualToString:expected]) { error = [NSError errorWithDomain:@"DmSaveFolderSync" code:15 userInfo:@{NSLocalizedDescriptionKey: @"Device save changed during export; folder save preserved"}]; ok = NO; }
-        if (ok && ![[self fingerprint:external] isEqualToString:expected]) { error = [NSError errorWithDomain:@"DmSaveFolderSync" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Exported save verification failed; folder save preserved"}]; ok = NO; }
+        NSString *externalAfter = [self fingerprint:external error:&error];
+        if (ok && ![externalAfter isEqualToString:expected]) { error = [NSError errorWithDomain:@"DmSaveFolderSync" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Exported save verification failed; folder save preserved"}]; ok = NO; }
+        if (!ok && externalBackup) { [NSFileManager.defaultManager removeItemAtURL:external error:nil]; [NSFileManager.defaultManager moveItemAtURL:externalBackup toURL:external error:nil]; }
+        else if (externalBackup) [NSFileManager.defaultManager removeItemAtURL:externalBackup error:nil];
+        if (!ok && error) [self logFailure:@"export" phase:@"verification" source:localPayload destination:external error:error preserved:YES];
         if (ok) outcome = [NSString stringWithFormat:@"Save files exported (%lu files).", (unsigned long)transferred];
     }
     else if (localFP && externalFP && [localFP isEqualToString:externalFP]) outcome = @"Already Up to Date";
     else if (!local && !ext) outcome = @"Already Up to Date";
     if (ok) {
         NSString *l = [self fingerprint:localPayload], *x = [self fingerprint:external]; [NSUserDefaults.standardUserDefaults setObject:l forKey:kLocalFingerprint]; [NSUserDefaults.standardUserDefaults setObject:x forKey:kExternalFingerprint]; self.lastSuccessfulSync = NSDate.date; [NSUserDefaults.standardUserDefaults setObject:self.lastSuccessfulSync forKey:kLastSync]; [self notice:outcome ?: (manual ? @"Already Up to Date" : @"Already Up to Date") state:DmSaveFolderSyncStateReady];
-    } else [self notice:error.localizedDescription ?: @"Save folder is unavailable; local save preserved" state:DmSaveFolderSyncStateError];
+    } else { [self logFailure:manual ? @"sync" : @"sync" phase:@"transfer" source:localPayload destination:external error:error preserved:YES]; [self notice:error.localizedDescription ?: @"Save folder is unavailable; local save preserved" state:DmSaveFolderSyncStateError]; }
     self.syncing = NO;
 }
 - (void)startBeforeGameplay {
@@ -291,12 +318,17 @@ static BOOL validTitleID(NSString *titleID) {
     self.enabled = NO;
     [self.queue addOperationWithBlock:^{
         NSError *e = nil; NSURL *local = [self localPayloadURL], *external = [self externalPayloadURL];
+        if (![self ensureSecurityScope:&e]) { [self logFailure:@"import" phase:@"security-scope" source:external destination:local error:e preserved:YES]; self.enabled = YES; [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; return; }
         NSString *lf = [self fingerprint:local], *xf = [self fingerprint:external]; NSUInteger count = [self payloadFileCount:external];
-        if (!xf || [xf isEqualToString:@"empty"]) { self.enabled = YES; [self notice:@"Folder contains no readable save files; local save preserved" state:DmSaveFolderSyncStateError]; return; }
+        if (!xf || [xf isEqualToString:@"empty"]) { e = e ?: [NSError errorWithDomain:@"DmSaveFolderSync" code:21 userInfo:@{NSLocalizedDescriptionKey: @"Folder contains no readable save files"}]; [self logFailure:@"import" phase:@"fingerprint" source:external destination:local error:e preserved:YES]; self.enabled = YES; [self notice:@"Folder contains no readable save files; local save preserved" state:DmSaveFolderSyncStateError]; return; }
         BOOL ok = [self makeRecoverySnapshotForLocal:local external:external localFingerprint:lf externalFingerprint:xf error:&e];
-        if (ok) ok = [self replaceTree:external destination:local error:&e];
+        NSURL *backup = nil;
+        if (ok) ok = [self replaceTree:external destination:local error:&e backup:&backup];
         if (ok && ![[self fingerprint:external] isEqualToString:xf]) { e = [NSError errorWithDomain:@"DmSaveFolderSync" code:14 userInfo:@{NSLocalizedDescriptionKey: @"Folder save changed or disappeared during import; local save preserved"}]; ok = NO; }
         if (ok && ![[self fingerprint:local] isEqualToString:xf]) { e = [NSError errorWithDomain:@"DmSaveFolderSync" code:4 userInfo:@{NSLocalizedDescriptionKey: @"Folder save verification failed; local save preserved"}]; ok = NO; }
+        if (!ok && backup) { [NSFileManager.defaultManager removeItemAtURL:local error:nil]; [NSFileManager.defaultManager moveItemAtURL:backup toURL:local error:nil]; }
+        else if (backup) [NSFileManager.defaultManager removeItemAtURL:backup error:nil];
+        if (!ok && e) [self logFailure:@"import" phase:@"verification" source:external destination:local error:e preserved:YES];
         self.enabled = YES;
         if (ok) {
             self.restartRequired = YES; [NSUserDefaults.standardUserDefaults setObject:xf forKey:kLocalFingerprint]; [NSUserDefaults.standardUserDefaults setObject:xf forKey:kExternalFingerprint]; self.lastSuccessfulSync = NSDate.date; [NSUserDefaults.standardUserDefaults setObject:self.lastSuccessfulSync forKey:kLastSync];
@@ -308,11 +340,16 @@ static BOOL validTitleID(NSString *titleID) {
     self.enabled = NO;
     [self.queue addOperationWithBlock:^{
         NSError *e = nil; NSURL *local = [self localPayloadURL], *external = [self externalPayloadURL];
+        if (![self ensureSecurityScope:&e]) { [self logFailure:@"export" phase:@"security-scope" source:local destination:external error:e preserved:YES]; self.enabled = YES; [self notice:@"Selected folder is unavailable; choose it again" state:DmSaveFolderSyncStateUnavailable]; return; }
         NSString *lf = [self fingerprint:local], *xf = [self fingerprint:external]; NSUInteger count = [self payloadFileCount:local];
         BOOL ok = (!xf || [xf isEqualToString:@"empty"] || [lf isEqualToString:xf]) ? YES : [self makeRecoverySnapshotForLocal:local external:external localFingerprint:lf externalFingerprint:xf error:&e];
-        if (ok) ok = [self replaceTree:local destination:external error:&e];
+        NSURL *backup = nil;
+        if (ok) ok = [self replaceTree:local destination:external error:&e backup:&backup];
         if (ok && ![[self fingerprint:local] isEqualToString:lf]) { e = [NSError errorWithDomain:@"DmSaveFolderSync" code:15 userInfo:@{NSLocalizedDescriptionKey: @"Device save changed during export; folder save preserved"}]; ok = NO; }
         if (ok && ![[self fingerprint:external] isEqualToString:lf]) { e = [NSError errorWithDomain:@"DmSaveFolderSync" code:5 userInfo:@{NSLocalizedDescriptionKey: @"Device save verification failed; local save preserved"}]; ok = NO; }
+        if (!ok && backup) { [NSFileManager.defaultManager removeItemAtURL:external error:nil]; [NSFileManager.defaultManager moveItemAtURL:backup toURL:external error:nil]; }
+        else if (backup) [NSFileManager.defaultManager removeItemAtURL:backup error:nil];
+        if (!ok && e) [self logFailure:@"export" phase:@"verification" source:local destination:external error:e preserved:YES];
         self.enabled = YES;
         if (ok) {
             [NSUserDefaults.standardUserDefaults setObject:lf forKey:kLocalFingerprint]; [NSUserDefaults.standardUserDefaults setObject:lf forKey:kExternalFingerprint]; self.lastSuccessfulSync = NSDate.date; [NSUserDefaults.standardUserDefaults setObject:self.lastSuccessfulSync forKey:kLastSync];

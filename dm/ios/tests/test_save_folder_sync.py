@@ -90,6 +90,13 @@ def test_first_sync_reports_verified_direction_and_restart_requirement():
     assert 'externalChanged' in SYNC
     assert 'Source save changed or disappeared during import' in SYNC
     assert 'Save file is present but not downloaded' in SYNC
+    assert 'Different saves found on this device and in the selected folder. Choose which saves to use.' in SYNC
+    assert 'NSFileCoordinator' in SYNC
+    assert 'URLIsUbiquitousItemKey' in SYNC
+    assert 'DmSaveFolderSyncFile' in SYNC
+    assert 'preserved=' in SYNC
+    assert 'backup:&localBackup' in SYNC
+    assert 'backup:&externalBackup' in SYNC
 
 
 def test_legacy_icloud_synchronizer_and_warning_are_gone():
