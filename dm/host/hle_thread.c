@@ -586,6 +586,17 @@ static void thr_yield(thr_t *me, const uint64_t *regs) {
     if (!moved) yield_for(me, y0 - me->yrun_t0);
     if (me->handle == 0x1001) { g_main_yield_ns += now_ns() - y0; g_main_yield_n++; }
 }
+// Metroid Dread's known-working 6783602 runtime grouped every consecutive SleepThread yield together. Keep that behavior profile-local while other games use the newer
+// x19–x28 progress signature above. The back-off policy itself is unchanged.
+static void thr_yield_legacy(thr_t *me) {
+    if (!me) { sched_yield(); return; }
+    uint64_t y0 = now_ns();
+    me->nyield++; if (me->yrun_svc + 1 != me->nsvc) me->yrun_t0 = y0; me->yrun_svc = me->nsvc;
+    uint64_t bo = yield_backoff_ns(y0 - me->yrun_t0);
+    if (bo) { me->nbackoff++; me->sleeping = 1; struct timespec ts = {0, (long)bo}; nanosleep(&ts, 0); me->sleeping = 0; }
+    else sched_yield();
+    if (me->handle == 0x1001) { g_main_yield_ns += now_ns() - y0; g_main_yield_n++; }
+}
 // Spin waits (patch_nso.py "Spin waits"): a guest loop that polls memory with no SVC, which the rewriter has made go through a spin gate on every pass after the first. On the Switch
 // such a poll costs nothing while another thread of its core has work (a higher-priority one preempts it); here it takes a host core from the threads doing the work: Paper Mario:
 // The Thousand-Year Door's three job workers (main+0xa8e680) spun at 94% of a core each in Rogueport on an iPhone, which ran at 24 fps. The gate alone slows the poll down, and on the
@@ -717,6 +728,7 @@ static int svc_thread_impl(int num, uint64_t *regs) {
         // Yield (0 / -1 / -2), and sleeps shorter than 20 µs, which sleep_precise would return from at once: Super Mario Galaxy's Hagi polls with SleepThread(100 ns) (main+0x517c),
         // which kept a core at 100% (1.4 billion calls in 200 s); as yields they get the back-off below.
         // Count and time of the main thread's yields are recorded: a render task graph's "wait for everything to finish" is often pure polling + yield; measure how much of a frame it takes
+        else if (DM_GAME_LEGACY_YIELD) thr_yield_legacy(pthread_getspecific(g_keythr));
         else thr_yield(pthread_getspecific(g_keythr), regs);
         return 1;
     }
