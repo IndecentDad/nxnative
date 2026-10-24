@@ -8,7 +8,6 @@
 #include "front.h"
 #include "hle.h"
 #include "dm.h"
-#include "game_profile.h"
 
 UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_reset(void);
@@ -20,7 +19,6 @@ static CAMetalLayer *g_layer;
 static void front_ios_power_watch(void);
 static void front_ios_audio_watch(void);
 static UILabel *front_ios_fps_label(void);
-static BOOL metroid_early_startup(void) { return !strcmp(DM_GAME_ID, "010093801237C000"); }
 
 @interface DmGameView : UIView
 @end
@@ -64,10 +62,9 @@ static void launcher_done(void) { [g_root startGame]; }
         [self.view addSubview:lb]; return;
     }
     front_ios_audio_watch();
-    if (metroid_early_startup()) [self prepareGame];
 }
 // The game view, the pad and the frame-rate counter are made once the launcher has set the switches they read (DM_SHOW_FPS, DM_METAL_HUD); the host's loading began at app launch (main.m)
-- (void)prepareGame {
+- (void)startGame {
     if (self.game) return;
     if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) setenv("MTL_HUD_ENABLED", "1", 0);   // Metal reads it when a device is made: before the game view makes its own (an env file's DM_METAL_HUD sets it in main.m already)
     self.game = [[DmGameView alloc] initWithFrame:self.view.bounds];
@@ -81,9 +78,6 @@ static void launcher_done(void) { [g_root startGame]; }
     if (self.fps) [self.view addSubview:self.fps];
     [self.view setNeedsLayout]; [self.view layoutIfNeeded];
     UIApplication.sharedApplication.idleTimerDisabled = YES;
-}
-- (void)startGame {
-    [self prepareGame];
     front_ios_boot();
 }
 - (void)viewDidLayoutSubviews {
@@ -99,7 +93,6 @@ static void launcher_done(void) { [g_root startGame]; }
 }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
-    if (metroid_early_startup()) { front_ios_boot(); return; }
     if (self.launched || !front_ios_boot_ok()) return;
     self.launched = YES; g_root = self;
     if (!dm_show_launcher((__bridge void *)self, launcher_done)) [self startGame];   // the settings screen first (Launcher.swift), when the app has one
