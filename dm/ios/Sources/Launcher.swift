@@ -74,8 +74,93 @@ private struct SettingRow: View {
     }
 }
 
+private final class SaveFolderSyncModel: ObservableObject {
+    let sync: DmSaveFolderSync
+    @Published private(set) var revision = 0
+    private var notice: NSObjectProtocol?
+
+    init?(_ sync: DmSaveFolderSync?) {
+        guard let sync else { return nil }
+        self.sync = sync
+        notice = NotificationCenter.default.addObserver(forName: Notification.Name(rawValue: DmSaveFolderSyncNotice), object: nil, queue: .main) { [weak self] _ in
+            self?.revision += 1
+        }
+    }
+
+    deinit {
+        if let notice { NotificationCenter.default.removeObserver(notice) }
+    }
+
+    var folderName: String { sync.selectedFolderName ?? "Sync Folder" }
+    var titleID: String { sync.titleID }
+    var status: String { sync.statusText ?? "No folder selected" }
+    var lastSync: String { sync.lastSuccessfulSync?.formatted(date: .abbreviated, time: .shortened) ?? "Never" }
+    var configured: Bool { sync.selectedFolder != nil }
+    var unavailable: Bool { sync.state.rawValue == 3 || sync.state.rawValue == 4 }
+    var conflict: Bool { sync.state.rawValue == 2 }
+
+    func refresh() { revision += 1 }
+}
+
+private struct SaveFolderSyncSection: View {
+    @ObservedObject var model: SaveFolderSyncModel
+    let presenter: () -> UIViewController?
+    @State private var resolvingConflict = false
+
+    var body: some View {
+        Section("Save Folder Sync") {
+            HStack(spacing: 8) {
+                Button {
+                    if let viewController = presenter() { dm_save_folder_sync_present(model.sync, viewController) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.folderName)
+                        Text("Save Format: Selected Folder / \(model.titleID) / Save Files")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                if model.configured {
+                    Button {
+                        dm_save_folder_sync_clear(model.sync)
+                        model.refresh()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear selected folder")
+                }
+            }
+            Button {
+                if model.conflict { resolvingConflict = true } else { dm_save_folder_sync_now(model.sync) }
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Sync Now")
+                    Text("\(model.status)\nLast sync: \(model.lastSync)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .disabled(!model.configured || model.unavailable)
+        }
+        .confirmationDialog("Resolve Conflicts", isPresented: $resolvingConflict) {
+            Button("Use Folder Saves") { dm_save_folder_sync_import(model.sync) }
+            Button("Use Device Saves") { dm_save_folder_sync_export(model.sync) }
+            Button("Preserve Both", role: .cancel) { dm_save_folder_sync_preserve(model.sync) }
+        } message: {
+            Text("Both local and folder saves changed. Choose which complete save to keep.")
+        }
+    }
+}
+
 private struct LauncherView: View {
     @ObservedObject var m: LauncherModel
+    let saveSync: SaveFolderSyncModel?
+    let presenter: () -> UIViewController?
     let play: () -> Void
     @State private var memory = os_proc_available_memory()
 
@@ -93,6 +178,7 @@ private struct LauncherView: View {
             .frame(maxWidth: .infinity)
             Form {
                 ForEach(m.settings) { SettingRow(s: $0, m: m) }
+                if let saveSync { SaveFolderSyncSection(model: saveSync, presenter: presenter) }
                 Section {
                     HStack {
                         Text("Memory available")
@@ -133,8 +219,9 @@ public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @c
     guard let file = try? JSONDecoder().decode(SettingsFile.self, from: data), !file.settings.isEmpty else { fputs("[RED] launcher: dm/launcher.json cannot be read; starting the game\n", stderr); return false }
     let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()
     let model = LauncherModel(file.settings)
+    let saveSync = SaveFolderSyncModel(dm_save_folder_sync())
     var host: UIViewController?
-    let view = LauncherView(m: model) {
+    let view = LauncherView(m: model, saveSync: saveSync, presenter: { host }) {
         guard let h = host else { return }
         host = nil
         model.apply()
