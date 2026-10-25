@@ -17,6 +17,7 @@
 #include "nvn_mtl.h"
 #include "nvn_obj.h"
 #include "../tex/nvn_fmt_mtl.h"
+#include "../tex/bc_soft.h"
 #include "../tex/nvn_deswizzle.h"
 #include "../tex/nvn_deswizzle_gpu.h"
 #include "nvn_builtin.h"
@@ -322,6 +323,11 @@ void mtl_init(void) {
     g_dev = MTLCreateSystemDefaultDevice();
     if (!g_dev) MDIE("no Metal device");
     if (!g_dev.hasUnifiedMemory) MDIE("needs a unified-memory device (zero-copy memory pools)");
+    {   // BC textures on a GPU that cannot sample them (A16 and older iPhone / iPad GPUs): decoded on the CPU at upload into uncompressed formats (bc_soft.c). DM_BC_SOFT=1 forces it, =0 turns it off
+        const char *e = getenv("DM_BC_SOFT");
+        nvn_bc_soft = e ? atoi(e) != 0 : ![g_dev supportsBCTextureCompression];
+        if (nvn_bc_soft) MLOG("BC textures: decoded on the CPU into uncompressed formats (%s)", e ? "DM_BC_SOFT" : "this GPU has no BC texture support");
+    }
     g_q = [g_dev newCommandQueue];
     // A device without Metal 4 (the paravirtualized GPU of a virtual Mac, such as GitHub's macos-26 runner: no residency set, no MTL4CommandQueue) cannot run the NVN layer. The GL and
     // Vulkan layers draw on classic queues of their own and need only the device (mtl_device_classic): there the classic part starts and presents are dropped, which is all a
@@ -1864,15 +1870,17 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
         if (sparse) nvn_sparse_protect(t->pool, (uint64_t)(uintptr_t)t->mem, t->L.size); else nvn_dirty_protect(t->mem, t->L.size); }
     int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
     unsigned layers = (t->d.target == 4 || t->d.target == 9) ? t->d.depth : t->d.target == 8 ? 6 : t->d.target == 3 ? t->d.height : 1;   // a cube array's depth counts layer-faces (tex_desc)
+    // BC blocks on a GPU without BC (nvn_bc_soft): the texture has the uncompressed format bc_soft_target names; each level is deswizzled as blocks, then decoded into the staging buffer
+    int obpp = 0; uint32_t bcs = nvn_fmt_bc_soft(t->d.format); if (bcs) bc_soft_target(bcs, &obpp);
     size_t total = 0;
     for (unsigned l = 0; l < d.mipmapLevelCount; l++) {
         uint32_t w = MAX(t->d.width >> l, 1u), h = MAX(t->d.height >> l, 1u), z = t->d.target == 2 ? MAX(t->d.depth >> l, 1u) : 1;
-        total += (size_t)((w + bw - 1) / bw) * bpb * ((h + bh - 1) / bh) * z * layers;
+        total += bcs ? (size_t)((w + 3) / 4) * 4 * obpp * ((h + 3) / 4) * 4 * z * layers : (size_t)((w + bw - 1) / bw) * bpb * ((h + bh - 1) / bh) * z * layers;
     }
     g_bp_up_bytes += total;
     void *mb; uint64_t mo;
-    int use_gpu = !sparse && g_nvn_deswz_gpu && mtl_addr((uint64_t)t->mem, t->L.size, &mb, &mo);   // a sparse pool's texture is gathered through its page table on the CPU
-    if (g_nvn_deswz_gpu && !use_gpu && !sparse) RED_ONCE(40, "swizzled texture storage is not in a memory pool; falling back to the CPU");
+    int use_gpu = !bcs && !sparse && g_nvn_deswz_gpu && mtl_addr((uint64_t)t->mem, t->L.size, &mb, &mo);   // a sparse pool's texture is gathered through its page table on the CPU; decoded BC on the CPU too
+    if (g_nvn_deswz_gpu && !use_gpu && !sparse && !bcs) RED_ONCE(40, "swizzled texture storage is not in a memory pool; falling back to the CPU");
     if (use_gpu) {
         // The GPU reads the memory pool at execution time, which is closer to a real Switch than a snapshot at CPU upload time; the dirty-page stamp is still taken before encoding, and later writes still trigger a re-upload.
         up_begin();
@@ -1910,9 +1918,22 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
     res_add(stg); [g_up_keep addObject:stg];
     size_t off = 0;
     int zb = zblock_on() && t->d.format >= 0x79 && t->d.format <= 0x94; if (zb) { g_zb_ser = t->serial; g_zb_n = (int)MIN(d.mipmapLevelCount, 16u); memset(g_zb, 0, sizeof g_zb); memset(g_zb_tot, 0, sizeof g_zb_tot); }
+    uint8_t *raw = NULL; size_t raw_n = 0;   // bcs: one level / layer of deswizzled blocks before decoding
     for (unsigned l = 0; l < d.mipmapLevelCount; l++) {
         uint32_t w = MAX(t->d.width >> l, 1u), h = MAX(t->d.height >> l, 1u), z = t->d.target == 2 ? MAX(t->d.depth >> l, 1u) : 1;
         size_t pitch = (size_t)((w + bw - 1) / bw) * bpb, rows = (h + bh - 1) / bh;
+        if (bcs) {
+            size_t dpitch = (size_t)((w + 3) / 4) * 4 * obpp, drows = (size_t)((h + 3) / 4) * 4, need = pitch * rows * z;
+            if (need > raw_n) { free(raw); if (!(raw = malloc(need))) MDIE("BC decode buffer of %zu bytes failed", need); raw_n = need; }
+            for (unsigned y = 0; y < layers; y++) {
+                if (nvn_deswizzle(&t->d, l, y, src, raw, pitch)) { RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
+                for (uint32_t zi = 0; zi < z; zi++)
+                    bc_soft_decode(bcs, raw + zi * pitch * rows, pitch, w, h, (uint8_t *)stg.contents + off + zi * dpitch * drows, dpitch);
+                up_blit_add(stg, off, dpitch, dpitch * drows, MTLSizeMake(w, h, z), mt, y, l);
+                off += dpitch * drows * z;
+            }
+            continue;
+        }
         for (unsigned y = 0; y < layers; y++) {
             if (nvn_deswizzle(&t->d, l, y, src, (uint8_t *)stg.contents + off, pitch)) { RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
             if (zb && l < 16) { const uint64_t *q = (const uint64_t *)((const uint8_t *)stg.contents + off); size_t nb = pitch * rows * z / 16;
@@ -1922,6 +1943,7 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
             off += pitch * rows * z;
         }
     }
+    free(raw);
     free(part);
     up_flush();
     return mt;
@@ -7686,6 +7708,23 @@ static void copy_b2t(const p_copy_b2t *c) {
     if (is3d && passdump()) { const char *dd = getenv("DM_NVN_CBDUMP"); if (dd) {   // the source bytes of a 3D upload, beside the uniform dumps (F<frame>_c3d_<serial>.bin)
         char p[1024]; snprintf(p, sizeof p, "%s/F%llu_c3d_%llu.bin", dd, (unsigned long long)atomic_load(&g_cur_frame), (unsigned long long)c->tex->serial);
         FILE *f = fopen(p, "wb"); if (f) { fwrite((const uint8_t *)((__bridge id<MTLBuffer>)mb).contents + mo, 1, img * nz, f); fclose(f); } } }
+    uint32_t bcs = nvn_fmt_bc_soft(c->tex->d.format);
+    if (bcs) {   // BC blocks into a texture with the decoded format (nvn_bc_soft): decoded on the CPU from the pool's current bytes into a staging buffer, then copied as pixels
+        int obpp = 0; bc_soft_target(bcs, &obpp);
+        uint32_t w = (uint32_t)c->r.width, h = (uint32_t)c->r.height;
+        size_t dpitch = (size_t)((w + 3) / 4) * 4 * obpp, drows = (size_t)((h + 3) / 4) * 4, dimg = dpitch * drows;
+        id<MTLBuffer> stg = [g_dev newBufferWithLength:dimg * nz ? dimg * nz : 16 options:MTLResourceStorageModeShared];
+        if (!stg) { RED_ONCE(85, "buffer→texture copy: no staging buffer for the decoded BC blocks (%zu bytes)", dimg * nz); return; }
+        res_add(stg);
+        const uint8_t *s = (const uint8_t *)((__bridge id<MTLBuffer>)mb).contents + mo;
+        for (int z = 0; z < nz; z++) bc_soft_decode(bcs, s + (size_t)z * img, row, w, h, (uint8_t *)stg.contents + (size_t)z * dimg, dpitch);
+        id<MTL4ComputeCommandEncoder> bb = blit();
+        if (is3d) enc_b_copy_buffer_texture(bb, stg, 0, dpitch, dimg, MTLSizeMake(w, h, nz), t, 0, level, MTLOriginMake(c->r.xoffset, c->r.yoffset, c->r.zoffset));
+        else for (int z = 0; z < nz; z++)
+            enc_b_copy_buffer_texture(bb, stg, (size_t)z * dimg, dpitch, dimg, MTLSizeMake(w, h, 1), t, layer0 + c->r.zoffset + z, level, MTLOriginMake(c->r.xoffset, c->r.yoffset, 0));
+        defer_obj_release(stg);
+        return;
+    }
     id<MTL4ComputeCommandEncoder> b = blit();
     if (is3d)
         enc_b_copy_buffer_texture(b, (__bridge id<MTLBuffer>)mb, mo, row, img, MTLSizeMake(c->r.width, c->r.height, nz), t, 0, level, MTLOriginMake(c->r.xoffset, c->r.yoffset, c->r.zoffset));

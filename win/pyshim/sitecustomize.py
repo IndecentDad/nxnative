@@ -16,6 +16,15 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
     _XCRUN = str(_WIN / 'xcrun.py')
     _BUILD_APP = str(_WIN / 'build_app.py')
 
+    # Text files written as on a Mac: Python on Windows turns '\n' into '\r\n' in text mode, and the host compares lines of the pipeline's tables as they are
+    # (an iPad run refused a shader library because inputs.tsv's "game\t<id>\r" did not match, and took c1_full.tsv as stale). Every text-mode open that names no newline writes '\n'.
+    import builtins, io
+    _open = io.open
+    def _lf_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+        if newline is None and 'b' not in mode and any(c in mode for c in 'wax+'): newline = '\n'
+        return _open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+    io.open = builtins.open = _lf_open
+
     class _NoLib:
         def __getattr__(self, name): raise AttributeError(f'{name} (no process-wide C library on Windows)')
     _CDLL = ctypes.CDLL

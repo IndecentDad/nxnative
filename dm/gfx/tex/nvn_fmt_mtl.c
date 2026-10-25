@@ -1,7 +1,9 @@
 // NVNformat (nvn.h 0x01–0x9C) → Metal. The table is written entry by entry in NVN enum order; unlisted formats (including 0 and out of range) return 0.
 // Component remapping: "no alpha" formats such as RGBX / RGB_DXT1 read a as 1; RGB-family 16-bit packed formats swap r/b; all others are identity.
-// BC1–7 on iOS require GPU BC support (MTLDevice.supportsBCTextureCompression, iOS 16.4+; A19 supports it; device capability is not checked in this table).
+// BC1–7 on iOS require GPU BC support (MTLDevice.supportsBCTextureCompression, iOS 16.4+; A19 supports it). Without it (A16 and older) nvn_bc_soft is set at device creation and
+// nvn_fmt_to_mtl answers each BC format with the uncompressed format bc_soft_target names, which the uploads decode into (bc_soft.c)
 #include "nvn_fmt_mtl.h"
+#include "bc_soft.h"
 
 enum {   // MTLPixelFormat
     R8Unorm = 10, R8Snorm = 12, R8Uint = 13, R8Sint = 14, R16Unorm = 20, R16Snorm = 22, R16Uint = 23, R16Sint = 24, R16Float = 25,
@@ -73,11 +75,17 @@ static const ent T[0x9D] = {
 // NVN ASTC order: 4x4 5x4 5x5 6x5 6x6 8x5 8x6 8x8 10x5 10x6 10x8 10x10 12x10 12x12; Metal skips one number between 6x6 and 8x5
 static const uint8_t astc_off[14] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14};
 
+uint32_t nvn_fmt_bc_soft(int f) {   // the BC Metal format whose blocks an upload must decode (bc_soft_decode), while nvn_bc_soft is set; 0 for any other format
+    if (!nvn_bc_soft || f <= 0 || f >= (int)(sizeof T / sizeof *T) || !T[f].kind) return 0;
+    return bc_soft_target(T[f].mtl, NULL) ? T[f].mtl : 0;
+}
 int nvn_fmt_to_mtl(int f, uint32_t *mtl, uint8_t swz[4]) {
     ent e = {0, 0, 0, 0};
     if (f >= 0x79 && f <= 0x94) { int k = (f - 0x79) % 14; e = (ent){(uint16_t)((f < 0x87 ? ASTC_LDR0 : ASTC_SRGB0) + astc_off[k]), 1, 0, 0}; }
     else if (f > 0 && f < (int)(sizeof T / sizeof *T)) e = T[f];
-    if (mtl) *mtl = e.kind ? e.mtl : 0;
+    int kind = e.kind; uint32_t pf = e.mtl;
+    if (kind && nvn_bc_soft) { uint32_t soft = bc_soft_target(pf, NULL); if (soft) { pf = soft; kind = 2; } }   // a GPU without BC: the uploads decode the blocks into this format (bc_soft.h)
+    if (mtl) *mtl = kind ? pf : 0;
     if (swz) { swz[0] = e.rb ? NVN_SWZ_B : NVN_SWZ_R; swz[1] = NVN_SWZ_G; swz[2] = e.rb ? NVN_SWZ_R : NVN_SWZ_B; swz[3] = e.noalpha ? NVN_SWZ_ONE : NVN_SWZ_A; }
-    return e.kind;
+    return kind;
 }

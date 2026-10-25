@@ -98,6 +98,59 @@ class Xip(unittest.TestCase):
             self.assertEqual((out / 'iPhoneOS.sdk/F.framework/Headers/f.h').read_bytes(), b'int f;')   # a link through a link
 
 
+class BcSoft(unittest.TestCase):
+    """dm/gfx/tex/bc_soft.c, built for this PC as a DLL without a C runtime, against Pillow's BCn decoder: BC1–BC5 within interpolation rounding, BC7 and unsigned BC6H exact.
+    Signed BC6H is checked in its modes without deltas (9, 10, 13) only: in the delta modes Pillow does not wrap an endpoint to the endpoint precision as the format specification does"""
+    @classmethod
+    def setUpClass(cls):
+        import ctypes, shutil
+        clang = shutil.which('clang') or (r'C:\Program Files\LLVM\bin\clang.exe' if os.path.exists(r'C:\Program Files\LLVM\bin\clang.exe') else None)
+        if os.name != 'nt' or not clang: raise unittest.SkipTest('needs clang on Windows')
+        cls.tmp = tempfile.mkdtemp(); crt = Path(cls.tmp) / 'crt.c'; dll = Path(cls.tmp) / 'bc.dll'
+        crt.write_text('#include <stddef.h>\nvoid *memcpy(void *d, const void *s, size_t n){ char *a=d; const char *b=s; while(n--) *a++=*b++; return d; }\n'
+                       'void *memset(void *d, int c, size_t n){ char *a=d; while(n--) *a++=(char)c; return d; }\nint _fltused;\n')
+        tex = REPO / 'dm/gfx/tex'
+        r = subprocess.run([clang, '--target=x86_64-pc-windows-msvc', '-O2', '-ffreestanding', '-fno-builtin', '-nostdlib', '-shared', '-fuse-ld=lld', '-Wl,/NOENTRY',
+                            '-Wl,/EXPORT:bc_soft_block', f'-I{tex}', '-o', str(dll), str(tex / 'bc_soft.c'), str(crt)], capture_output=True, text=True)
+        if r.returncode: raise unittest.SkipTest('could not build bc_soft.c: ' + r.stderr[-300:])
+        cls.lib = ctypes.CDLL(str(dll))
+
+    def block(self, pf, blk, bpp):
+        import ctypes
+        out = (ctypes.c_uint8 * (16 * bpp))()
+        self.assertEqual(self.lib.bc_soft_block(pf, blk, out, 4 * bpp), 0)
+        return bytes(out)
+
+    def test_against_pillow(self):
+        import random, struct
+        from PIL import Image
+        rnd = random.Random(7)
+        def blk(n): return bytes(rnd.getrandbits(8) for _ in range(n))
+        def pil(n, fmt, mode, b): return Image.frombytes(mode, (4, 4), b, 'bcn', (n, fmt)).tobytes()
+        for pf, n, fmt, mode, size, bpp, tol in ((130, 1, 'BC1', 'RGBA', 8, 4, 2), (132, 2, 'BC2', 'RGBA', 16, 4, 2), (134, 3, 'BC3', 'RGBA', 16, 4, 2), (140, 4, 'BC4', 'L', 8, 1, 1)):
+            for _ in range(300):
+                b = blk(size); a, p = self.block(pf, b, bpp), pil(n, fmt, mode, b)
+                self.assertLessEqual(max(abs(x - y) for x, y in zip(a, p)), tol, fmt)
+        for _ in range(300):
+            b = blk(16); a, p = self.block(142, b, 2), pil(5, 'BC5', 'RGB', b)
+            self.assertLessEqual(max(max(abs(a[2 * i] - p[3 * i]), abs(a[2 * i + 1] - p[3 * i + 1])) for i in range(16)), 1, 'BC5')
+        for m in range(8):
+            for _ in range(300):
+                b = bytearray(blk(16)); b[0] = (b[0] & ~((1 << (m + 1)) - 1) & 0xff) | (1 << m)
+                self.assertEqual(self.block(152, bytes(b), 4), pil(7, 'BC7', 'RGBA', bytes(b)), f'BC7 mode {m}')
+        def half(h):
+            s = -1 if h & 0x8000 else 1; e = (h >> 10) & 31; mm = h & 1023
+            return s * (mm / 1024 * 2 ** -14 if e == 0 else float('inf') if e == 31 else (1 + mm / 1024) * 2 ** (e - 15))
+        modes = [0, 1, 0x02, 0x06, 0x0a, 0x0e, 0x12, 0x16, 0x1a, 0x1e, 0x03, 0x07, 0x0b, 0x0f]
+        for pf, fmt, which in ((151, 'BC6H', range(14)), (150, 'BC6HS', (9, 10, 13))):
+            for mi in which:
+                for _ in range(200):
+                    b = bytearray(blk(16)); bits = 2 if mi < 2 else 5; b[0] = (b[0] & ~((1 << bits) - 1) & 0xff) | modes[mi]
+                    hs = struct.unpack('<64H', self.block(pf, bytes(b), 8)); p = pil(6, fmt, 'RGB', bytes(b))
+                    f8 = [max(0, min(255, round(half(hs[4 * i + c]) * 255))) for i in range(16) for c in range(3)]
+                    self.assertLessEqual(max(abs(x - y) for x, y in zip(f8, p)), 1, f'{fmt} mode {mi}')
+
+
 class PackIpa(unittest.TestCase):
     def test_exec_bit_on_windows(self):
         with tempfile.TemporaryDirectory() as d:
