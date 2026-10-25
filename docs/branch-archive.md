@@ -24,6 +24,8 @@ patches and untracked SideStore sources are in:
 Tahoe's independent repositories have verified bundles, original ref inventories
 and source patches under:
 `/Users/kylepyne/nxnative-games/RepositoryArchive-post-celeste-20261025/`.
+A verified Synology copy of all seven Tahoe bundles is also under
+`/volume1/docker/nxnative-history-archive-20261025/tahoe/`.
 Each original repository retains `refs/archive/post-celeste-20261025/`.
 Historical checkout folders, tool environments, inputs, saves and IPAs remain
 in place. They are detached archival sources, not build baselines.
