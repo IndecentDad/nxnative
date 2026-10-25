@@ -61,6 +61,19 @@ E:\ProjectIOS\Games\
 
 ## 4. Build IPA
 
+### Cara mudah: GUI
+
+Klik dua kali **`Build-IPA-GUI.bat`** di folder `E:\ProjectIOS\nxnative-win`. Jendelanya berbahasa Inggris dengan tema hitam-pink. Lalu:
+
+1. **Game files**: klik *Add files* untuk memilih NSP/XCI (base, update, DLC dari satu game), atau *Choose folder*.
+2. **prod.keys**: klik *Choose prod.keys*.
+3. **Options** boleh dibiarkan kosong. Isi *App name* / *Bundle ID* hanya kalau mau mengganti nilai otomatis.
+4. Klik **Build IPA File**. Progres dan log tampil di jendela, dan *Show in folder* membuka lokasi IPA.
+
+Kalau satu folder berisi beberapa game, GUI memisahkan file yang dipilih ke folder `<TitleID>_nxw` lewat hard link. Cara ini tidak memakan ruang disk tambahan.
+
+### Lewat terminal
+
 ```
 cd E:\ProjectIOS\nxnative-win
 python win\build_ipa_windows.py "E:\ProjectIOS\Games" -k "E:\ProjectIOS\Games\prod.keys"

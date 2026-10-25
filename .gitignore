@@ -14,3 +14,4 @@ win/sdk/out/
 win/build/
 __pycache__/
 win/sdk/extract.log
+win/gui_settings.json
