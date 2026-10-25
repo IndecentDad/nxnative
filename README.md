@@ -13,9 +13,17 @@ Current differences from that upstream base:
 | `AGENTS.md` | IndecentDad identity and our permanent development/validation rules. |
 | `docs/build-provenance.md` | Reproduction, isolation, provenance and upstream-update procedure. |
 | `docs/PROJECT_STATUS.md` | Current validation status and next approved step. |
+| `dm/games/game.py` | Expose the profile's title ID to the save bridge. |
+| `dm/host/hle_fs.c` | Notify the iOS bridge after a successful native transactional save commit. |
+| `dm/ios/Sources/DmSaveFolderSync.h`, `DmSaveFolderSync.m`, `DmSaveFolderSyncBridge.h` | Optional Files-provider sync with bookmarks, fingerprints, conflict resolution, staged transfers and recovery snapshots. |
+| `dm/ios/Sources/main.m` | Connect native `Documents/save`, save commits and foreground events without replacing upstream boot/preload. |
+| `dm/ios/Sources/Launcher.swift` | Save Folder Sync section in the existing settings UI. |
+| `dm/ios/project.yml` | Swift-to-Objective-C bridge header for settings. |
+| `dm/ios/tests/test_save_folder_sync.py`, `test_save_folder_sync_filesystem.py` | Focused contract and filesystem regression checks. |
+| `docs/save-folder-sync.md`, `docs/branch-archive.md` | Save format, validation gate and recovery locations for retired work. |
 | `docs/branch-archive.md` | Verified history backups and legacy-work recovery references. |
 
-Metroid Dread 2.1.0 reaches gameplay on iPhone with the Intel launcher change, checkpoint `validated/metroid-dread-ios-6a068772`. Celeste's clean control IPA from `c6f19d5` is also confirmed fully functional on iPhone, checkpoint `validated/celeste-ios-c6f19d5`. Eden Save Folder Sync is **not integrated yet**: `feature/eden-save-folder-sync` stages the focused port and has unsigned Dread/Celeste candidates built from `a51aad6`, awaiting device validation. The immutable `legacy/save-folder-sync-ec440a2` reference and verified archives remain available. No old runtime or integration branch will be merged wholesale.
+Metroid Dread and Celeste Save Folder Sync builds from `a51aad6` are confirmed working on iPhone. The scoped Save Folder Sync implementation is integrated at checkpoint `validated/save-folder-sync-v1`; its source commit is `a51aad6e0ae2fef570a94c05e5291fc0f3b5105e`. Native `Documents/save` contents map directly to `<selected folder>/<title ID>/`. The historical runtime remains an immutable reference; no audio, graphics, scheduler, or game-rewriter changes were included. Continue refinement on `fix/save-sync-polish`.
 
 Build on the existing Intel Tahoe VM through `ssh tahoe` and `zsh -lc`, targeting ARM64 iOS with Xcode 26.6. Use the official `scripts/build_ipa_from_nsp.py` and a fresh input/output directory. The universal launcher enables build tooling on Intel; it does not make the ARM64 Mac game host executable there. Existing .NET 10, xcodegen, spirv-cross, zstd and Python dependencies are required. Upstream's `own_compilers.py` handles local Metal/spirv-cross differences without editing `dmsh_chain.lock`.
 
