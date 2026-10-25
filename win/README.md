@@ -3,7 +3,7 @@
 This folder builds the same IPA as `scripts/build_ipa_from_nsp.py` on a Windows 10/11 PC, with no Mac or Xcode.
 The pipeline itself is unchanged: the upstream script runs as-is. Only the steps that call macOS tools are replaced, at the subprocess boundary.
 
-Status: **experimental.** Nobody has yet installed and played an IPA built this way. See [Open risks](#open-risks).
+Status: **an IPA built this way runs on a device.** Balatro was built on Windows 11, sideloaded and played on an iPad (A16, iPadOS 27); Megabyte Punch is under test. The player-facing guide is the repository's [README.md](../README.md). See also [Open risks](#open-risks).
 
 Verified on Windows 11 with LLVM 23.1.4, Metal Developer Tools for Windows 6.2 (`metal 32023.850`) and the iPhoneOS 27.1 SDK from `Xcode_27.1.xip`:
 
