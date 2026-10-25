@@ -262,7 +262,7 @@ def main():
     (dmres / 'font').mkdir()
     font = tc.std_font() or die('no standard font: set STD_FONT to a TTF with broad Unicode coverage')
     shutil.copy2(font, dmres / 'font/standard.ttf'); t(f'standard font: {font}')
-    py(DM / 'tools/make_ext_font.py', dmres / 'font/nintendo_ext.ttf')
+    py(DM / 'tools/make_ext_font.py', dmres / 'font/nintendo_ext.ttf', tc.letter_font() or die('no bold TTF for the button icons: set LETTER_FONT'))
 
     files, incs = host_sources(gen / 'profile')
     files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), es.resolve()]

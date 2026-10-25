@@ -66,6 +66,41 @@ def main():
     for fn, what in (('build_mac_host', 'the Mac host'), ('capture_glslc', 'GLSLC capture'), ('capture_shaders', 'run-time shader capture'), ('decode_ue_shaders', 'Unreal shader decoding')):
         if hasattr(up, fn): setattr(up, fn, mac_only(what))
 
+    derive = up.derive_profile
+    def derive_profile(g, pdir, ver, d, mods, app=None):
+        """upstream's derived profile, with a RomFS marker this version has: the profile's marker may be a file only its tested version ships (Balatro 1.1.3's NotoSansSC-Bold.ttf,
+        absent from v0), and both the IPA build and the app's start (main.m romfs_locate) look for it. Then main.lua (LÖVE) or the largest RomFS file stands in"""
+        disp = derive(g, pdir, ver, d, mods, app)
+        tsv = pdir / 'game.tsv'; T = '\t'
+        lines = tsv.read_text(encoding='utf-8').splitlines()
+        old = next((l.split(T, 1)[1] for l in lines if l.startswith('romfs_marker' + T)), None)
+        romfs = d / 'RomFS'
+        if old and not (romfs / old).exists():
+            files = [p for p in romfs.rglob('*') if p.is_file()]
+            new = 'main.lua' if (romfs / 'main.lua').exists() else os.path.relpath(max(files, key=lambda p: p.stat().st_size), romfs).replace('\\', '/') if files else None
+            if new:
+                tsv.write_text('\n'.join(f'romfs_marker{T}{new}' if l.startswith('romfs_marker' + T) else l for l in lines) + '\n', encoding='utf-8')
+                up.say(f'romfs_marker: {old} is not in {ver}\'s RomFS; the derived profile uses {new}')
+        return disp
+    up.derive_profile = derive_profile
+
+    import love_shaders
+    refuse_capture = up.capture_shaders
+    def capture_shaders(repo, d, patched, work, env, logs, g, api):
+        """GL capture of a LÖVE game without the Mac host: win/love_shaders.py assembles the GLSL offline from the Lua LÖVE embeds in main (the same text the game hands to glShaderSource)"""
+        if api != 'gl': return refuse_capture(repo, d, patched, work, env, logs, g, api)
+        out, part = d / 'gl_capture', d / 'gl_capture.partial'
+        up.PROG.stage('GL shader reconstruction (LÖVE)')
+        up.rmtree(part)
+        try: table = g.table(up.CAPTURES['gl']['table'])
+        except Exception: table = None
+        r = love_shaders.generate(d / 'ExeFS/main', d / 'RomFS', part, table, log=up.say)
+        if r is None: return refuse_capture(repo, d, patched, work, env, logs, g, api)
+        up.rmtree(out); part.rename(out)
+        up.PROG.end(f'{len(r[0])} shaders')
+        return out
+    up.capture_shaders = capture_shaders
+
     sys.argv[0] = str(REPO / 'scripts/build_ipa_from_nsp.py')
     return up.cli(sys.argv[1:])   # the upstream entry point: argument parsing, error reporting and the exit code
 

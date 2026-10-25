@@ -30,12 +30,22 @@ Verified on Windows 11 with LLVM 23.1.4, Metal Developer Tools for Windows 6.2 (
 
 These steps already run on Windows as they are: `nx_extract` (.NET, LibHac), the NSO rewriter (`patch_nso.py`), shader translation (`dmsh_xlate`), spirv-cross, reflection and tables (`dmsh_build.py`, `c1_guard.py`, `cb_extent.py`), and `pack_ipa.py`.
 
+### LÖVE games without the Mac host
+
+Upstream gets Balatro's shaders by booting it in the Mac host with `DM_GL_CAPTURE`. `win/love_shaders.py` makes them offline instead:
+
+1. It reads LÖVE's `wrap_GraphicsShader.lua`, which love-nx embeds in `main` as text.
+2. It takes the GLSL blocks out of that file.
+3. It assembles the same sources `love.graphics._shaderCodeToGLSL` would: the default shaders, plus one shader per `resources/shaders/*.fs`.
+
+The four default shaders match the hashes in the profile's `gl_capture.tsv` byte for byte. On v0, the 31 game stages differ from the table only because v0's `.fs` files differ from 1.1.3's.
+
 ### What still needs a Mac
 
-Some games make shaders only at run time. To get them, the pipeline boots the game's own arm64 code in the Mac host. No Windows PC can do this, so for these games the Windows build stops with a message:
+Some games make shaders only at run time, and to get them the pipeline boots the game's own arm64 code in the Mac host. No Windows PC can do this, so for these games the Windows build stops with a message:
 
 - GLSLC capture (Fire Emblem: Three Houses)
-- Vulkan or GL capture (Super Mario Galaxy, Balatro)
+- Vulkan capture (Super Mario Galaxy)
 - Unreal and Oodle decoding (Pokémon Legends: Z-A, PlatinumGames PKZ games, DRAGON QUEST XI S, …)
 
 The detection rules are in `dm/games/profile_guess.py`. The other games do not need this step, for example Mario Wonder, Odyssey, Mario Kart 8 Deluxe and Zelda BotW/TotK.

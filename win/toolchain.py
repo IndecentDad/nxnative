@@ -114,6 +114,12 @@ def tool_on_path(name):
     return Path(w) if w else None
 
 
+def letter_font():
+    """The letters of the button-icon font (make_ext_font.py; upstream: macOS's Arial Rounded Bold): LETTER_FONT, toolchain.json letter_font, else Windows' Arial Rounded MT Bold or Arial Bold"""
+    fonts = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
+    return _first([os.environ.get('LETTER_FONT'), setting('letter_font'), fonts / 'ARLRDBD.TTF', fonts / 'arialbd.ttf', fonts / 'arial.ttf'])
+
+
 def std_font():
     """The shared-font stand-in (standard.ttf). Upstream copies macOS's Arial Unicode; on Windows: STD_FONT, toolchain.json std_font, else a broad-coverage Windows font"""
     windir = os.environ.get('WINDIR', r'C:\Windows')
