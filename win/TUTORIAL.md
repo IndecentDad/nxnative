@@ -63,12 +63,21 @@ E:\ProjectIOS\Games\
 
 ### Cara mudah: GUI
 
-Klik dua kali **`Build-IPA-GUI.bat`** di folder `E:\ProjectIOS\nxnative-win`. Jendelanya berbahasa Inggris dengan tema hitam-pink. Lalu:
+Klik dua kali **`Build-IPA-GUI.bat`** di folder `E:\ProjectIOS
+xnative-win`. Jendelanya berbahasa Inggris dengan tema hitam-pink. Lalu:
 
-1. **Game files**: klik *Add files* untuk memilih NSP/XCI (base, update, DLC dari satu game), atau *Choose folder*.
-2. **prod.keys**: klik *Choose prod.keys*.
-3. **Options** boleh dibiarkan kosong. Isi *App name* / *Bundle ID* hanya kalau mau mengganti nilai otomatis.
-4. Klik **Build IPA File**. Progres dan log tampil di jendela, dan *Show in folder* membuka lokasi IPA.
+1. **Game files**: klik kotak bergaris untuk memilih NSP/XCI (base, update, DLC dari satu game), atau pakai *Choose folder*.
+2. **prod.keys**: klik *Browse*.
+3. Klik **Build IPA**. Tombolnya berubah jadi progress bar. Setelah selesai, kartu hijau menampilkan lokasi IPA dan tombol *Show in folder*.
+
+GUI selalu memakai nilai default:
+
+- nama app = nama game
+- bundle ID = `org.nxnativewindows.<title ID>`
+- bahasa = bawaan game
+- IPA disimpan di samping file game (bisa diganti lewat *Change*)
+
+Log tampil di bagian *Details*.
 
 Kalau satu folder berisi beberapa game, GUI memisahkan file yang dipilih ke folder `<TitleID>_nxw` lewat hard link. Cara ini tidak memakan ruang disk tambahan.
 

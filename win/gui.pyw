@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
-# NXNative Windows Builder: a window for win/build_ipa_windows.py. Pick the game's NSP / XCI files (base, update, DLC) and prod.keys, press Build IPA File.
-# It runs the same pipeline as the command line (python win/build_ipa_windows.py <folder> -k <keys> --progress json) and shows its JSON progress events.
+# NXNative Windows Builder: a window for win/build_ipa_windows.py. Pick the game's NSP / XCI files (base, update, DLC) and prod.keys, press Build IPA.
+# It runs the same pipeline as the command line (python win/build_ipa_windows.py <folder> -k <keys> --progress json) with the pipeline's defaults
+# (app name, bundle ID org.nxnativewindows.<title ID>, language, frame-rate counter) and shows its JSON progress events.
 # The pipeline packs every game file in one folder; when the picked files share their folder with other games' files, they are hard-linked (copied on another drive)
 # into a folder of their own first. Start: double-click Build-IPA-GUI.bat in the repository root, or this file (pythonw).
-import json, os, queue, re, shutil, subprocess, sys, threading, time, tkinter as tk
+import json, math, os, queue, re, shutil, subprocess, sys, threading, time, tkinter as tk
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 
 WIN = Path(__file__).resolve().parent
 REPO = WIN.parent
 sys.path.insert(0, str(WIN))
-SETTINGS = WIN / 'gui_settings.json'   # the last paths and options (this PC only; git ignores it)
+SETTINGS = WIN / 'gui_settings.json'   # the last picked files and keys (this PC only; git ignores it)
 GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
-LANGS = ['Auto', 'en-US', 'en-GB', 'ja', 'fr', 'fr-CA', 'de', 'it', 'es', 'es-419', 'nl', 'pt', 'pt-BR', 'ru', 'ko', 'zh-Hans', 'zh-Hant']
-BUNDLE_RE = re.compile(r'^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$')   # what iOS accepts in CFBundleIdentifier: letters, digits, hyphens, at least two dot-separated parts
 
 # ---- theme: black and pink ----
-BG, CARD, FIELD, FIELD_HI, BORDER = '#0a0a0e', '#141419', '#1c1c24', '#24242f', '#2b2b38'
-TEXT, MUTED, FAINT = '#f5f3f7', '#9a97a8', '#5d5a6b'
-PINK, PINK_HI, PINK_LO, PINK_DEEP = '#ff2e88', '#ff5aa3', '#c21a64', '#3a1028'
+BG, CARD, FIELD, FIELD_HI, BORDER = '#09090c', '#131318', '#1b1b22', '#25252f', '#26262f'
+TEXT, MUTED, FAINT = '#f6f4f8', '#a19eaf', '#5f5c6c'
+PINK, PINK_HI, PINK_LO, PINK_DEEP = '#ff2e88', '#ff63a8', '#d81b6e', '#2a0d1d'
+GRAD = ((0xff, 0x2e, 0x88), (0xb4, 0x3c, 0xff))       # pink → violet, the Build button
+GRAD_HI = ((0xff, 0x55, 0xa0), (0xc4, 0x5e, 0xff))
 OK, BAD = '#46e0a0', '#ff5c7a'
-FONT = 'Segoe UI Variable Text' if sys.platform == 'win32' else 'Segoe UI'
-FONT_D = 'Segoe UI Variable Display' if sys.platform == 'win32' else 'Segoe UI'
+FONT = 'Segoe UI Variable Text'
+FONT_D = 'Segoe UI Variable Display'
+MONO = 'Cascadia Mono'
+STAGE_NAMES = {'rewrite': 'Rewriting game code', 'IPA pack': 'Packing the IPA', 'app build': 'Building the app'}
 
 
 def console_python():
@@ -66,249 +69,323 @@ def stage_folder(files):
 
 
 def dark_title_bar(win):
-    """Windows 11: a dark caption with a black background (DWM immersive dark mode, caption colour); ignored elsewhere"""
+    """Windows 11: a dark caption on the window's black, with a pink border (DWM attributes); ignored elsewhere"""
     try:
         import ctypes
         win.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
-        for attr, val in ((20, 1), (35, 0x000E0A0A), (34, 0x00882EFF)):   # dark mode; caption colour BGR(#0a0a0e); border colour BGR(#ff2e88)
+        for attr, val in ((20, 1), (35, 0x000C0909), (34, 0x00882EFF), (36, 0x00F8F4F6)):   # dark mode, caption #09090c, border #ff2e88, caption text (BGR)
             v = ctypes.c_int(val); ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
     except Exception: pass
 
 
-# ---- widgets ----
+def mix(a, b, t): return '#%02x%02x%02x' % tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+def human(n): return f'{n / 2**30:.2f} GB' if n >= 2**30 else f'{n / 2**20:.0f} MB'
+
+
 def rounded(c, x1, y1, x2, y2, r, **kw):
+    r = max(0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
     pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
     return c.create_polygon(pts, smooth=True, **kw)
 
 
-class Button(tk.Canvas):
-    """A rounded, flat button: kind 'primary' (pink), 'ghost' (outlined) or 'subtle'"""
-    def __init__(self, master, text, command, kind='ghost', width=None, height=34, font_size=10, bg=CARD):
-        f = (FONT, font_size, 'bold' if kind == 'primary' else 'normal')
-        w = width or max(90, int(len(text) * font_size * 0.75) + 36)
-        super().__init__(master, width=w, height=height, bg=bg, highlightthickness=0, bd=0, cursor='hand2')
-        self.text, self.command, self.kind, self.f, self.enabled, self.hover = text, command, kind, f, True, False
-        self.bind('<Enter>', lambda e: self._set_hover(True)); self.bind('<Leave>', lambda e: self._set_hover(False))
-        self.bind('<ButtonRelease-1>', self._click); self.bind('<Configure>', lambda e: self._draw())
+# ---- widgets ----
+class Surface(tk.Canvas):
+    """A rounded card: the canvas draws the card, self.body (a Frame) holds the content and sets the card's height"""
+    def __init__(self, master, pad=18, radius=16, fill=CARD, outline=BORDER, bg=BG):
+        super().__init__(master, bg=bg, highlightthickness=0, bd=0, height=10)
+        self.pad, self.radius, self.fill, self.outline = pad, radius, fill, outline
+        self.body = tk.Frame(self, bg=fill)
+        self.win = self.create_window(pad, pad, window=self.body, anchor='nw')
+        self.bind('<Configure>', self._layout); self.body.bind('<Configure>', self._fit)
+
+    def _layout(self, e=None):
+        w, h = self.winfo_width(), self.winfo_height()
+        self.delete('card'); self.itemconfigure(self.win, width=max(1, w - 2 * self.pad))
+        rounded(self, 1, 1, w - 1, h - 1, self.radius, fill=self.fill, outline=self.outline, tags='card'); self.tag_lower('card')
+
+    def _fit(self, e=None):   # the card's height follows its content's requested height (the content of a too-short canvas is unmapped and reports no size)
+        self.body.update_idletasks()
+        h = self.body.winfo_reqheight() + 2 * self.pad
+        if int(float(self['height'])) != h: self.configure(height=h)
+
+    @staticmethod
+    def fit_all(w):
+        for c in w.winfo_children():
+            Surface.fit_all(c)
+            if isinstance(c, Surface): c._fit()
+
+
+class Link(tk.Label):
+    def __init__(self, master, text, command, color=PINK, bg=CARD, size=9):
+        super().__init__(master, text=text, fg=color, bg=bg, font=(FONT, size, 'bold'), cursor='hand2')
+        self.base = color
+        self.bind('<Button-1>', lambda e: command()); self.bind('<Enter>', lambda e: self.configure(fg=PINK_HI)); self.bind('<Leave>', lambda e: self.configure(fg=self.base))
+
+
+class Ghost(tk.Canvas):
+    """A small rounded outline button"""
+    def __init__(self, master, text, command, bg=CARD, height=32):
+        w = int(len(text) * 7.4) + 34
+        super().__init__(master, width=w, height=height, bg=bg, highlightthickness=0, cursor='hand2')
+        self.text, self.command, self.hover = text, command, False
+        self.bind('<Enter>', lambda e: self._h(True)); self.bind('<Leave>', lambda e: self._h(False)); self.bind('<ButtonRelease-1>', lambda e: self.command())
         self._draw()
-
-    def _colors(self):
-        if self.kind == 'primary':
-            if not self.enabled: return PINK_DEEP, PINK_DEEP, FAINT
-            return (PINK_HI if self.hover else PINK), (PINK_HI if self.hover else PINK), '#ffffff'
-        if not self.enabled: return self['bg'], BORDER, FAINT
-        return (FIELD_HI if self.hover else FIELD), (PINK if self.hover else BORDER), TEXT
-
+    def _h(self, v): self.hover = v; self._draw()
     def _draw(self):
-        self.delete('all'); w, h = self.winfo_width() or int(self['width']), self.winfo_height() or int(self['height'])
-        fill, edge, fg = self._colors()
-        if self.kind == 'primary' and self.enabled:   # a soft glow under the pink button
-            rounded(self, 2, 4, w - 2, h - 1, h // 2, fill=PINK_DEEP, outline='')
-        rounded(self, 1, 1, w - 2, h - 3 if self.kind == 'primary' else h - 2, (h - 4) // 2 if self.kind == 'primary' else 9, fill=fill, outline=edge, width=1)
-        self.create_text(w // 2, (h - 3) // 2 if self.kind == 'primary' else h // 2, text=self.text, fill=fg, font=self.f)
-
-    def _set_hover(self, v): self.hover = v and self.enabled; self._draw()
-    def _click(self, e):
-        if self.enabled and 0 <= e.x <= self.winfo_width() and 0 <= e.y <= self.winfo_height(): self.command()
-    def set_enabled(self, v): self.enabled = v; self.configure(cursor='hand2' if v else 'arrow'); self._draw()
-    def set_text(self, t): self.text = t; self._draw()
+        self.delete('all'); w, h = int(self['width']), int(self['height'])
+        rounded(self, 1, 1, w - 1, h - 1, h // 2, fill=FIELD_HI if self.hover else FIELD, outline=PINK if self.hover else BORDER)
+        self.create_text(w // 2, h // 2, text=self.text, fill=TEXT, font=(FONT, 9, 'bold'))
 
 
-class Field(tk.Frame):
-    """A dark text field with a placeholder inside it and a pink focus line. value() never returns the placeholder"""
-    def __init__(self, master, placeholder='', value=''):
-        super().__init__(master, bg=BORDER, padx=1, pady=1)
-        self.ph, self.showing = placeholder, False
-        self.var = tk.StringVar(value=value)
-        self.e = tk.Entry(self, textvariable=self.var, bg=FIELD, fg=TEXT, insertbackground=PINK, relief='flat', bd=0, font=(FONT, 10),
-                          selectbackground=PINK_LO, selectforeground='#fff', highlightthickness=0)
-        self.e.pack(fill='both', expand=True, ipady=7, ipadx=10)
-        self.e.bind('<FocusIn>', self._in); self.e.bind('<FocusOut>', self._out)
-        if not value: self._show()
-
-    def _show(self):
-        if self.ph and not self.var.get(): self.showing = True; self.e.configure(fg=FAINT); self.var.set(self.ph)
-    def _in(self, e):
-        self.configure(bg=PINK)
-        if self.showing: self.showing = False; self.var.set(''); self.e.configure(fg=TEXT)
-    def _out(self, e): self.configure(bg=BORDER); self._show()
-    def value(self): return '' if self.showing else self.var.get().strip()
-    def set(self, v):
-        self.showing = False; self.e.configure(fg=TEXT); self.var.set(v)
-        if not v and self.focus_get() is not self.e: self._show()
+class Badge(tk.Canvas):
+    def __init__(self, master, text, bg=CARD, size=34, fill=PINK_DEEP, fg=PINK):
+        super().__init__(master, width=size, height=size, bg=bg, highlightthickness=0)
+        rounded(self, 1, 1, size - 1, size - 1, 10, fill=fill, outline='')
+        self.create_text(size // 2, size // 2, text=text, fill=fg, font=(FONT_D, 8 if len(text) > 2 else 10, 'bold'))
 
 
-class Toggle(tk.Canvas):
-    def __init__(self, master, text, value=True, bg=CARD):
-        super().__init__(master, width=46 + 8 + int(len(text) * 7.2), height=26, bg=bg, highlightthickness=0, cursor='hand2')
-        self.text, self.on = text, value
-        self.bind('<ButtonRelease-1>', lambda e: self.set(not self.on)); self._draw()
-    def _draw(self):
-        self.delete('all')
-        rounded(self, 1, 3, 43, 23, 10, fill=PINK if self.on else FIELD_HI, outline=PINK if self.on else BORDER)
-        x = 33 if self.on else 13
-        self.create_oval(x - 7, 6, x + 7, 20, fill='#ffffff' if self.on else MUTED, outline='')
-        self.create_text(54, 13, text=self.text, anchor='w', fill=TEXT, font=(FONT, 10))
-    def set(self, v): self.on = v; self._draw()
+class BuildButton(tk.Canvas):
+    """The main action: a pink-to-violet pill that turns into the build's progress bar while it runs"""
+    H = 58
+    def __init__(self, master, command):
+        super().__init__(master, height=self.H, bg=BG, highlightthickness=0, cursor='hand2')
+        self.command, self.hover, self.state, self.frac, self.label, self.sub = command, False, 'ready', 0.0, 'Build IPA', ''
+        self.bind('<Enter>', lambda e: self._h(True)); self.bind('<Leave>', lambda e: self._h(False))
+        self.bind('<ButtonRelease-1>', lambda e: self.state in ('ready', 'done') and self.command()); self.bind('<Configure>', lambda e: self.draw())
 
+    def _h(self, v): self.hover = v; self.draw()
 
-class Card(tk.Frame):
-    def __init__(self, master, number, title, hint=''):
-        super().__init__(master, bg=CARD, highlightbackground=BORDER, highlightthickness=1, padx=16, pady=12)
-        head = tk.Frame(self, bg=CARD); head.pack(fill='x', pady=(0, 8))
-        tk.Label(head, text=number, bg=CARD, fg=PINK, font=(FONT_D, 10, 'bold')).pack(side='left')
-        tk.Label(head, text=title.upper(), bg=CARD, fg=TEXT, font=(FONT_D, 10, 'bold')).pack(side='left', padx=(8, 0))
-        if hint: tk.Label(head, text=hint, bg=CARD, fg=MUTED, font=(FONT, 9)).pack(side='left', padx=(10, 0))
-        self.body = tk.Frame(self, bg=CARD); self.body.pack(fill='both', expand=True)
+    def set(self, state, label=None, frac=None, sub=None):
+        self.state = state
+        if label is not None: self.label = label
+        if frac is not None: self.frac = max(0.0, min(1.0, frac))
+        if sub is not None: self.sub = sub
+        self.configure(cursor='hand2' if state in ('ready', 'done') else 'arrow'); self.draw()
+
+    def _pill(self, w, upto, grad):   # the stadium shape filled with the gradient from x=0 to x=upto, one vertical line per pixel
+        h, r = self.H - 6, (self.H - 6) / 2
+        for x in range(int(upto)):
+            d = r - math.sqrt(max(0.0, r * r - (r - x) ** 2)) if x < r else r - math.sqrt(max(0.0, r * r - (x - (w - r)) ** 2)) if x > w - r else 0
+            self.create_line(x, 3 + d, x, 3 + h - d, fill=mix(grad[0], grad[1], x / max(1, w)))
+
+    def draw(self):
+        self.delete('all'); w = self.winfo_width()
+        if w < 10: return
+        h = self.H - 6
+        if self.state == 'disabled':
+            rounded(self, 0, 3, w - 1, 3 + h, h // 2, fill=FIELD, outline=BORDER)
+            self.create_text(w // 2, self.H // 2, text=self.label, fill=FAINT, font=(FONT, 11, 'bold')); return
+        if self.state == 'running':
+            rounded(self, 0, 3, w - 1, 3 + h, h // 2, fill=FIELD, outline=BORDER)
+            if self.frac > 0: self._pill(w, max(h, w * self.frac), GRAD)
+            self.create_text(24, self.H // 2, text=self.label, anchor='w', fill='#ffffff', font=(FONT, 10, 'bold'))
+            self.create_text(w - 24, self.H // 2, text=f'{int(self.frac * 100)}%', anchor='e', fill='#ffffff', font=(FONT_D, 12, 'bold'))
+            return
+        self._pill(w, w, GRAD_HI if self.hover else GRAD)
+        self.create_text(w // 2, self.H // 2, text=self.label, fill='#ffffff', font=(FONT_D, 13, 'bold'))
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title('NXNative for Windows'); self.configure(bg=BG)
-        self.geometry('980x820'); self.minsize(860, 720)
+        self.geometry('840x900'); self.minsize(720, 680)
         self.s = load_settings()
         self.files = [f for f in self.s.get('files', []) if Path(f).exists()]
-        self.proc, self.q, self.out_ipa, self.started, self.n = None, queue.Queue(), None, 0, 1
-        self._ttk(); self._build(); self._refresh_files()
+        self.keys = self.s.get('keys', '') if Path(self.s.get('keys', '') or '.').is_file() else ''
+        self.out = ''
+        self.proc, self.q, self.out_ipa, self.started, self.n, self.details = None, queue.Queue(), None, 0, 1, False
+        self._ttk(); self._build(); self._toggle_details(); self._intro(); self._refresh()
         threading.Thread(target=self._doctor, daemon=True).start()
-        self.after(100, self._pump); self.after(50, lambda: dark_title_bar(self))
+        self.after(100, self._pump); self.after(60, lambda: dark_title_bar(self))
         self.protocol('WM_DELETE_WINDOW', self._close)
 
     def _ttk(self):
         st = ttk.Style(self); st.theme_use('clam')
-        st.configure('Pink.Horizontal.TProgressbar', troughcolor=FIELD, background=PINK, lightcolor=PINK_HI, darkcolor=PINK_LO, bordercolor=FIELD, thickness=8)
-        st.configure('Dark.TCombobox', fieldbackground=FIELD, background=FIELD_HI, foreground=TEXT, arrowcolor=PINK, bordercolor=BORDER,
-                     lightcolor=FIELD, darkcolor=FIELD, selectbackground=FIELD, selectforeground=TEXT, padding=6)
-        st.map('Dark.TCombobox', fieldbackground=[('readonly', FIELD)], foreground=[('readonly', TEXT)], bordercolor=[('focus', PINK)])
-        st.configure('Dark.Vertical.TScrollbar', background=FIELD_HI, troughcolor=CARD, bordercolor=CARD, arrowcolor=MUTED, lightcolor=FIELD_HI, darkcolor=FIELD_HI)
-        self.option_add('*TCombobox*Listbox.background', FIELD); self.option_add('*TCombobox*Listbox.foreground', TEXT)
-        self.option_add('*TCombobox*Listbox.selectBackground', PINK); self.option_add('*TCombobox*Listbox.font', (FONT, 10))
+        st.configure('Dark.Vertical.TScrollbar', background=FIELD_HI, troughcolor=BG, bordercolor=BG, arrowcolor=FAINT, lightcolor=FIELD_HI, darkcolor=FIELD_HI, gripcount=0)
 
     # ---- layout ----
     def _build(self):
-        # header: a pink gradient line, the name, and the toolchain state
-        hdr = tk.Frame(self, bg=BG); hdr.pack(fill='x', padx=24, pady=(18, 6))
-        left = tk.Frame(hdr, bg=BG); left.pack(side='left')
-        t = tk.Frame(left, bg=BG); t.pack(anchor='w')
-        tk.Label(t, text='NX', bg=BG, fg=PINK, font=(FONT_D, 24, 'bold')).pack(side='left')
-        tk.Label(t, text='Native', bg=BG, fg=TEXT, font=(FONT_D, 24, 'bold')).pack(side='left')
-        tk.Label(t, text='  for Windows', bg=BG, fg=MUTED, font=(FONT_D, 13)).pack(side='left', pady=(10, 0))
-        tk.Label(left, text='NSP / XCI  →  IPA, no Mac needed', bg=BG, fg=MUTED, font=(FONT, 10)).pack(anchor='w')
-        self.pill = tk.Canvas(hdr, width=230, height=30, bg=BG, highlightthickness=0); self.pill.pack(side='right', pady=(8, 0))
-        self._pill('Checking toolchain…', MUTED)
-        line = tk.Canvas(self, height=3, bg=BG, highlightthickness=0); line.pack(fill='x', padx=24, pady=(4, 12))
-        line.bind('<Configure>', lambda e: self._gradient(line))
+        wrap = tk.Frame(self, bg=BG); wrap.pack(fill='both', expand=True, padx=28, pady=(22, 18))
 
-        main = tk.Frame(self, bg=BG); main.pack(fill='both', expand=True, padx=24)
-        top = tk.Frame(main, bg=BG); top.pack(fill='x')
-        top.columnconfigure(0, weight=3); top.columnconfigure(1, weight=2)
+        hdr = tk.Frame(wrap, bg=BG); hdr.pack(fill='x', pady=(0, 18))
+        logo = tk.Canvas(hdr, width=46, height=46, bg=BG, highlightthickness=0); logo.pack(side='left')
+        r = 13   # a gradient tile with rounded corners and the initials
+        for x in range(46):
+            d = r - math.sqrt(max(0.0, r * r - (r - x) ** 2)) if x < r else r - math.sqrt(max(0.0, r * r - (x - (45 - r)) ** 2)) if x > 45 - r else 0
+            logo.create_line(x, d, x, 46 - d, fill=mix(GRAD[0], GRAD[1], x / 46))
+        logo.create_text(23, 23, text='NX', fill='#fff', font=(FONT_D, 15, 'bold'))
+        tt = tk.Frame(hdr, bg=BG); tt.pack(side='left', padx=14)
+        tk.Label(tt, text='NXNative', bg=BG, fg=TEXT, font=(FONT_D, 20, 'bold')).pack(anchor='w')
+        tk.Label(tt, text='Switch games to iPhone & iPad  ·  built on Windows', bg=BG, fg=MUTED, font=(FONT, 10)).pack(anchor='w')
+        self.pill = tk.Canvas(hdr, width=176, height=30, bg=BG, highlightthickness=0); self.pill.pack(side='right')
+        self._pill('Checking tools…', FAINT)
 
-        g = Card(top, '01', 'Game files', 'base, update and DLC of one game'); g.grid(row=0, column=0, sticky='nsew', padx=(0, 8), pady=(0, 10))
-        lf = tk.Frame(g.body, bg=BORDER, padx=1, pady=1); lf.pack(fill='both', expand=True)
-        self.lst = tk.Listbox(lf, height=6, selectmode='extended', activestyle='none', bg=FIELD, fg=TEXT, selectbackground=PINK_LO, selectforeground='#fff',
-                              relief='flat', bd=0, highlightthickness=0, font=(FONT, 10))
-        self.lst.pack(fill='both', expand=True, padx=8, pady=6)
-        self.empty = tk.Label(lf, text='No files yet.  Add files or choose a game folder.', bg=FIELD, fg=FAINT, font=(FONT, 10))
-        bb = tk.Frame(g.body, bg=CARD); bb.pack(fill='x', pady=(10, 0))
-        Button(bb, 'Add files', self._add_files).pack(side='left')
-        Button(bb, 'Choose folder', self._add_folder).pack(side='left', padx=8)
-        Button(bb, 'Remove', self._remove, kind='ghost').pack(side='left')
-        self.size = tk.Label(bb, text='', bg=CARD, fg=MUTED, font=(FONT, 9)); self.size.pack(side='right')
+        # 1. game files
+        self.c1 = Surface(wrap); self.c1.pack(fill='x', pady=(0, 12))
+        b = self.c1.body
+        top = tk.Frame(b, bg=CARD); top.pack(fill='x')
+        self._step(top, '1', 'Game files', 'Base game, plus its update and DLC if you have them')
+        self.more = tk.Frame(top, bg=CARD); self.more.pack(side='right')
+        Link(self.more, 'Add files', self._add_files).pack(side='left', padx=(0, 14))
+        Link(self.more, 'Choose folder', self._add_folder).pack(side='left')
+        self.files_box = tk.Frame(b, bg=CARD); self.files_box.pack(fill='x', pady=(14, 0))
+        self.drop = tk.Canvas(self.files_box, height=118, bg=CARD, highlightthickness=0, cursor='hand2')
+        self.drop.bind('<Configure>', lambda e: self._draw_drop()); self.drop.bind('<Button-1>', lambda e: self._add_files())
+        self.drop.bind('<Enter>', lambda e: self._draw_drop(True)); self.drop.bind('<Leave>', lambda e: self._draw_drop(False))
+        self.rows = tk.Frame(self.files_box, bg=CARD)
 
-        right = tk.Frame(top, bg=BG); right.grid(row=0, column=1, sticky='nsew', pady=(0, 10))
-        k = Card(right, '02', 'prod.keys'); k.pack(fill='x')
-        self.keys = Field(k.body, 'Choose your prod.keys file', self.s.get('keys', '')); self.keys.pack(fill='x')
-        Button(k.body, 'Choose prod.keys', self._pick_keys).pack(anchor='w', pady=(10, 0))
-        info = Card(right, '✦', 'Device'); info.pack(fill='both', expand=True, pady=(10, 0))
-        tk.Label(info.body, text='iOS / iPadOS 26 or later\nA17 Pro / M1 or newer for 3D games\nSign with Sideloadly', bg=CARD, fg=MUTED, justify='left', font=(FONT, 9)).pack(anchor='w')
+        # 2. prod.keys
+        self.c2 = Surface(wrap); self.c2.pack(fill='x', pady=(0, 12))
+        top = tk.Frame(self.c2.body, bg=CARD); top.pack(fill='x')
+        self._step(top, '2', 'prod.keys', 'The keys dumped from your own Switch')
+        Ghost(top, 'Browse', self._pick_keys).pack(side='right')
+        self.key_row = tk.Frame(self.c2.body, bg=CARD); self.key_row.pack(fill='x', pady=(14, 0))
 
-        o = Card(main, '03', 'Options', 'leave empty for automatic values'); o.pack(fill='x', pady=(0, 10))
-        grid = o.body; grid.columnconfigure(1, weight=1); grid.columnconfigure(3, weight=1)
-        def label(r, c, text): tk.Label(grid, text=text, bg=CARD, fg=MUTED, font=(FONT, 9)).grid(row=r, column=c, sticky='w', padx=(0 if c == 0 else 16, 10), pady=5)
-        label(0, 0, 'App name'); self.name = Field(grid, "Auto: the game's name"); self.name.grid(row=0, column=1, sticky='ew', pady=5)
-        label(0, 2, 'Bundle ID'); self.bid = Field(grid, 'Auto: org.nxnativewindows.<title ID>'); self.bid.grid(row=0, column=3, sticky='ew', pady=5)
-        label(1, 0, 'IPA file'); of = tk.Frame(grid, bg=CARD); of.grid(row=1, column=1, columnspan=3, sticky='ew', pady=5)
-        self.out = Field(of, 'Auto: next to the game files'); self.out.pack(side='left', fill='x', expand=True)
-        Button(of, 'Save as', self._pick_out).pack(side='left', padx=(8, 0))
-        label(2, 0, 'Game language'); self.lang = tk.StringVar(value=self.s.get('lang') if self.s.get('lang') in LANGS else LANGS[0])
-        ttk.Combobox(grid, textvariable=self.lang, values=LANGS, width=14, state='readonly', style='Dark.TCombobox', font=(FONT, 10)).grid(row=2, column=1, sticky='w', pady=5)
-        self.fps = Toggle(grid, 'On-screen FPS counter', self.s.get('fps', True)); self.fps.grid(row=2, column=2, columnspan=2, sticky='w', padx=(16, 0), pady=5)
+        # output line
+        out = tk.Frame(wrap, bg=BG); out.pack(fill='x', pady=(2, 14), padx=4)
+        self.out_lbl = tk.Label(out, text='', bg=BG, fg=MUTED, font=(FONT, 9), anchor='w'); self.out_lbl.pack(side='left')
+        self.out_link = Link(out, 'Change', self._pick_out, bg=BG); self.out_link.pack(side='left', padx=8)
+        self.out_reset = Link(out, 'Reset', self._reset_out, bg=BG, color=MUTED)
 
-        act = tk.Frame(main, bg=BG); act.pack(fill='x', pady=(2, 8))
-        self.btn = Button(act, 'Build IPA File', self._start, kind='primary', width=210, height=48, font_size=12, bg=BG); self.btn.pack(side='left')
-        self.cancel = Button(act, 'Cancel', self._cancel, bg=BG, height=40); self.cancel.pack(side='left', padx=(12, 0)); self.cancel.set_enabled(False)
-        self.open_btn = Button(act, 'Show in folder', self._open_out, bg=BG, height=40); self.open_btn.pack(side='left', padx=(8, 0)); self.open_btn.set_enabled(False)
-        st = tk.Frame(act, bg=BG); st.pack(side='left', fill='x', expand=True, padx=(20, 0))
-        self.stage = tk.Label(st, text='Ready.', bg=BG, fg=TEXT, font=(FONT, 10, 'bold'), anchor='w'); self.stage.pack(fill='x')
-        self.bar = ttk.Progressbar(st, maximum=1000, style='Pink.Horizontal.TProgressbar'); self.bar.pack(fill='x', pady=(6, 2))
-        self.detail = tk.Label(st, text='', bg=BG, fg=MUTED, font=(FONT, 9), anchor='w'); self.detail.pack(fill='x')
+        # build
+        self.btn = BuildButton(wrap, self._start); self.btn.pack(fill='x')
+        under = tk.Frame(wrap, bg=BG); under.pack(fill='x', pady=(10, 0), padx=4)
+        self.status = tk.Label(under, text='', bg=BG, fg=MUTED, font=(FONT, 9), anchor='w'); self.status.pack(side='left', fill='x', expand=True)
+        self.cancel = Link(under, 'Cancel', self._cancel, bg=BG, color=BAD)
+        self.det_link = Link(under, 'Show details', self._toggle_details, bg=BG, color=MUTED); self.det_link.pack(side='right')
 
-        lg = Card(main, '04', 'Log'); lg.pack(fill='both', expand=True, pady=(0, 18))
-        self.log = tk.Text(lg.body, height=10, wrap='word', font=('Cascadia Mono', 9), state='disabled', relief='flat', bg='#0e0e13', fg='#d9d6e0',
-                           insertbackground=PINK, selectbackground=PINK_LO, padx=10, pady=8, highlightthickness=0, bd=0)
-        sb = ttk.Scrollbar(lg.body, command=self.log.yview, style='Dark.Vertical.TScrollbar'); self.log.configure(yscrollcommand=sb.set)
+        # result
+        self.result = Surface(wrap, fill='#0f1a15', outline='#1f5a40')
+        rb = self.result.body; rb.configure(bg='#0f1a15')
+        tk.Label(rb, text='✓', bg='#0f1a15', fg=OK, font=(FONT_D, 18, 'bold')).pack(side='left', padx=(0, 12))
+        rt = tk.Frame(rb, bg='#0f1a15'); rt.pack(side='left', fill='x', expand=True)
+        tk.Label(rt, text='Your IPA is ready', bg='#0f1a15', fg=TEXT, font=(FONT, 11, 'bold'), anchor='w').pack(fill='x')
+        self.res_path = tk.Label(rt, text='', bg='#0f1a15', fg=MUTED, font=(FONT, 9), anchor='w', justify='left'); self.res_path.pack(fill='x')
+        tk.Label(rt, text='Sign and install it with Sideloadly.', bg='#0f1a15', fg=FAINT, font=(FONT, 9), anchor='w').pack(fill='x')
+        Ghost(rb, 'Show in folder', self._open_out, bg='#0f1a15').pack(side='right')
+
+        # details (the log)
+        self.det = tk.Frame(wrap, bg=BG)
+        self.log = tk.Text(self.det, height=12, wrap='word', font=(MONO, 9), state='disabled', relief='flat', bg='#0d0d11', fg='#cfccd8',
+                           insertbackground=PINK, selectbackground=PINK_LO, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER, bd=0)
+        sb = ttk.Scrollbar(self.det, command=self.log.yview, style='Dark.Vertical.TScrollbar'); self.log.configure(yscrollcommand=sb.set)
         sb.pack(side='right', fill='y'); self.log.pack(fill='both', expand=True)
         for tag, col in (('red', BAD), ('ok', OK), ('dim', FAINT), ('pink', PINK_HI)): self.log.tag_configure(tag, foreground=col)
 
-    def _gradient(self, c):
-        c.delete('all'); w = c.winfo_width(); steps = 60
-        a, b = (0xff, 0x2e, 0x88), (0x14, 0x14, 0x19)
-        for i in range(steps):
-            t = i / steps; col = '#%02x%02x%02x' % tuple(int(a[j] + (b[j] - a[j]) * t) for j in range(3))
-            c.create_rectangle(w * i / steps, 0, w * (i + 1) / steps + 1, 3, fill=col, outline='')
+    def _intro(self):   # what a build uses when nothing is changed: the pipeline's own defaults
+        self._write('NXNative for Windows\n', 'pink')
+        for k, v in (('App name', "the game's own name"), ('Bundle ID', 'org.nxnativewindows.<title ID>'), ('Language', "the game's default (en-US when it has it)"),
+                     ('IPA', 'saved next to your game files'), ('Signing', 'none: Sideloadly signs it when you install')):
+            self._write(f'  {k:<10}', 'dim'); self._write(f'{v}\n')
+        self._write('\nPick the game files and prod.keys above, then press Build IPA.\n', 'dim')
+
+    def _step(self, parent, n, title, sub):
+        Badge(parent, n).pack(side='left')
+        t = tk.Frame(parent, bg=CARD); t.pack(side='left', padx=12)
+        tk.Label(t, text=title, bg=CARD, fg=TEXT, font=(FONT, 11, 'bold'), anchor='w').pack(fill='x')
+        tk.Label(t, text=sub, bg=CARD, fg=MUTED, font=(FONT, 9), anchor='w').pack(fill='x')
 
     def _pill(self, text, color):
         c = self.pill; c.delete('all'); w = int(c['width'])
-        rounded(c, 1, 2, w - 2, 28, 13, fill=CARD, outline=BORDER)
+        rounded(c, 1, 1, w - 1, 29, 14, fill=CARD, outline=BORDER)
         c.create_oval(14, 11, 22, 19, fill=color, outline='')
-        c.create_text(30, 15, text=text, anchor='w', fill=TEXT if color != MUTED else MUTED, font=(FONT, 9))
+        c.create_text(30, 15, text=text, anchor='w', fill=TEXT if color != FAINT else MUTED, font=(FONT, 9))
+
+    def _draw_drop(self, hover=False):
+        c = self.drop; c.delete('all'); w, h = c.winfo_width(), c.winfo_height()
+        rounded(c, 1, 1, w - 1, h - 1, 14, fill=FIELD if hover else '#16161c', outline=PINK if hover else '#3a3a48', dash=(6, 4), width=1)
+        c.create_oval(w // 2 - 17, 22, w // 2 + 17, 56, fill=PINK_DEEP, outline='')
+        c.create_text(w // 2, 38, text='+', fill=PINK, font=(FONT_D, 18, 'bold'))
+        c.create_text(w // 2, 76, text='Click to choose your NSP / XCI files', fill=TEXT, font=(FONT, 10, 'bold'))
+        c.create_text(w // 2, 96, text='NSZ and XCZ work too', fill=FAINT, font=(FONT, 9))
+
+    def _refresh(self):
+        for wdg in self.rows.winfo_children(): wdg.destroy()
+        if not self.files:
+            self.rows.pack_forget(); self.drop.pack(fill='x'); self.more.pack_forget()
+        else:
+            self.drop.pack_forget(); self.rows.pack(fill='x'); self.more.pack(side='right')
+            for i, f in enumerate(self.files):
+                p = Path(f); r = Surface(self.rows, pad=10, radius=12, fill=FIELD, outline=BORDER, bg=CARD); r.pack(fill='x', pady=(0, 6))
+                rb = r.body; rb.configure(bg=FIELD)
+                tid = title_id([f])   # base titles end in 000, updates in 800, DLC in anything else
+                kind = (p.suffix[1:].upper() if not tid else 'BASE' if tid.endswith('000') else 'UPD' if tid.endswith('800') else 'DLC')
+                Badge(rb, kind, bg=FIELD, size=32).pack(side='left')
+                name = p.name if len(p.name) < 62 else p.name[:58] + '…'
+                tk.Label(rb, text=name, bg=FIELD, fg=TEXT, font=(FONT, 10), anchor='w').pack(side='left', padx=12, fill='x', expand=True)
+                x = tk.Label(rb, text='✕', bg=FIELD, fg=FAINT, font=(FONT, 10), cursor='hand2'); x.pack(side='right', padx=(10, 4))
+                x.bind('<Button-1>', lambda e, i=i: self._remove(i)); x.bind('<Enter>', lambda e, x=x: x.configure(fg=BAD)); x.bind('<Leave>', lambda e, x=x: x.configure(fg=FAINT))
+                tk.Label(rb, text=human(p.stat().st_size) if p.exists() else 'missing', bg=FIELD, fg=MUTED, font=(FONT, 9)).pack(side='right')
+        for wdg in self.key_row.winfo_children(): wdg.destroy()
+        r = Surface(self.key_row, pad=10, radius=12, fill=FIELD, outline=BORDER, bg=CARD); r.pack(fill='x')
+        rb = r.body; rb.configure(bg=FIELD)
+        if self.keys:
+            Badge(rb, 'KEY', bg=FIELD, size=32).pack(side='left')
+            tk.Label(rb, text=self.keys, bg=FIELD, fg=TEXT, font=(FONT, 10), anchor='w').pack(side='left', padx=12, fill='x', expand=True)
+            tk.Label(rb, text='✓', bg=FIELD, fg=OK, font=(FONT, 11, 'bold')).pack(side='right', padx=4)
+        else:
+            Badge(rb, 'KEY', bg=FIELD, size=32, fill=FIELD_HI, fg=FAINT).pack(side='left')
+            tk.Label(rb, text='No prod.keys selected yet', bg=FIELD, fg=FAINT, font=(FONT, 10), anchor='w').pack(side='left', padx=12)
+        if self.out: self.out_lbl.configure(text=f'Saves to  {self.out}'); self.out_reset.pack(side='left')
+        else: self.out_lbl.configure(text='The IPA is saved next to your game files'); self.out_reset.pack_forget()
+        if not self.proc:
+            if self.files and self.keys: self.btn.set('ready', 'Build IPA')
+            else: self.btn.set('disabled', 'Add game files and prod.keys to start')
+        self.after_idle(lambda: Surface.fit_all(self))
 
     # ---- pickers ----
     def _initial(self): return self.s.get('dir') or str(Path.home())
 
     def _add_files(self):
+        if self.proc: return
         fs = filedialog.askopenfilenames(title='Choose game files', initialdir=self._initial(), filetypes=[('Switch games', '*.nsp *.xci *.nsz *.xcz'), ('All files', '*.*')])
         if fs:
             self.s['dir'] = str(Path(fs[0]).parent)
             for f in fs:
                 if str(Path(f)) not in self.files: self.files.append(str(Path(f)))
-            self._refresh_files()
+            self._after_pick()
 
     def _add_folder(self):
+        if self.proc: return
         d = filedialog.askdirectory(title='Choose the game folder', initialdir=self._initial())
         if not d: return
         self.s['dir'] = d
         found = sorted(str(p) for p in Path(d).iterdir() if p.suffix.lower() in GAME_EXT)
         if not found: messagebox.showwarning('No game files', f'No NSP / XCI / NSZ / XCZ files in\n{d}'); return
-        ids = {title_id([f])[:12] for f in found if title_id([f])}
-        if len(ids) > 1: messagebox.showinfo('More than one game', 'This folder holds several games. Remove the files of the other games from the list.')
-        self.files = found; self._refresh_files()
-        if not self.keys.value() and (Path(d) / 'prod.keys').exists(): self.keys.set(str(Path(d) / 'prod.keys'))
+        if len({title_id([f])[:12] for f in found if title_id([f])}) > 1:
+            messagebox.showinfo('More than one game', 'This folder holds several games. Remove the other games\' files from the list (✕).')
+        self.files = found
+        if not self.keys and (Path(d) / 'prod.keys').is_file(): self.keys = str(Path(d) / 'prod.keys')
+        self._after_pick()
 
-    def _remove(self):
-        for i in reversed(self.lst.curselection()): del self.files[i]
-        self._refresh_files()
+    def _after_pick(self):
+        if not self.keys:
+            for f in self.files:
+                k = Path(f).parent / 'prod.keys'
+                if k.is_file(): self.keys = str(k); break
+        self.result.pack_forget(); self._refresh()
 
-    def _refresh_files(self):
-        self.lst.delete(0, 'end'); total = 0
-        for f in self.files:
-            p = Path(f)
-            if p.exists(): total += p.stat().st_size
-            self.lst.insert('end', f'  {p.name}')
-        if self.files: self.empty.place_forget()
-        else: self.empty.place(relx=0.5, rely=0.5, anchor='center')
-        self.size.configure(text=f'{len(self.files)} file(s) · {total / 2**30:.2f} GB' if self.files else '')
+    def _remove(self, i):
+        if self.proc: return
+        del self.files[i]; self._refresh()
 
     def _pick_keys(self):
-        cur = self.keys.value()
-        f = filedialog.askopenfilename(title='Choose prod.keys', initialdir=str(Path(cur).parent) if cur else self._initial(), filetypes=[('Keys', '*.keys'), ('All files', '*.*')])
-        if f: self.keys.set(str(Path(f)))
+        if self.proc: return
+        f = filedialog.askopenfilename(title='Choose prod.keys', initialdir=str(Path(self.keys).parent) if self.keys else self._initial(), filetypes=[('Keys', '*.keys'), ('All files', '*.*')])
+        if f: self.keys = str(Path(f)); self._refresh()
 
     def _pick_out(self):
         f = filedialog.asksaveasfilename(title='Save the IPA as', defaultextension='.ipa', filetypes=[('IPA', '*.ipa')], initialdir=self._initial())
-        if f: self.out.set(str(Path(f)))
+        if f: self.out = str(Path(f)); self._refresh()
+
+    def _reset_out(self): self.out = ''; self._refresh()
+
+    def _toggle_details(self):
+        self.details = not self.details
+        if self.details: self.det.pack(fill='both', expand=True, pady=(12, 0)); self.det_link.configure(text='Hide details')
+        else: self.det.pack_forget(); self.det_link.configure(text='Show details')
 
     # ---- toolchain ----
     def _doctor(self):
@@ -319,37 +396,25 @@ class App(tk.Tk):
 
     # ---- build ----
     def _start(self):
-        if self.proc: return
-        if not self.files: messagebox.showwarning('No game files', "Add the game's NSP / XCI files first."); return
-        keys = self.keys.value()
-        if not keys or not Path(keys).is_file(): messagebox.showwarning('prod.keys', 'Choose a valid prod.keys file.'); return
-        name, bid, out = self.name.value(), self.bid.value(), self.out.value()
-        if bid and not BUNDLE_RE.match(bid):
-            messagebox.showwarning('Invalid bundle ID', 'A bundle ID may hold only letters, digits, hyphens and dots, with at least two parts.\nExample: com.yourname.balatro'); return
+        if self.proc or not (self.files and self.keys): return
+        if not Path(self.keys).is_file(): messagebox.showwarning('prod.keys', 'The prod.keys file is gone. Choose it again.'); return
         try: folder, copied = stage_folder(self.files)
-        except OSError as e: messagebox.showerror('File game', str(e)); return
-        tid = title_id(self.files)
-        cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', keys, '--progress', 'json']
-        if out: cmd += ['-o', out]
-        if name: cmd += ['--app-name', name]
-        if bid: cmd += ['--bundle-id', bid]
-        if self.lang.get() != LANGS[0]: cmd += ['-l', self.lang.get()]
-        cmd += ['--show-fps' if self.fps.on else '--no-show-fps']
-        self.s.update(files=self.files, keys=keys, lang=self.lang.get(), fps=self.fps.on); save_settings(self.s)
+        except OSError as e: messagebox.showerror('Game files', str(e)); return
+        cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', self.keys, '--progress', 'json']
+        if self.out: cmd += ['-o', self.out]
+        self.s.update(files=self.files, keys=self.keys); save_settings(self.s)
         self._clear_log()
-        self._write('App name   ', 'dim'); self._write((name or "auto (the game's name)") + '\n', 'pink')
-        self._write('Bundle ID  ', 'dim'); self._write((bid or f'org.nxnativewindows.{tid.lower() if tid else "<title ID>"}') + '\n', 'pink')
-        self._write('Folder     ', 'dim'); self._write(f'{folder}' + ('  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n')
+        self._write(f'Game folder  {folder}' + ('  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n', 'dim')
         if copied: self._write(f'Copied (another drive, no hard link possible): {", ".join(copied)}\n', 'dim')
-        self._write('\n')
-        self.out_ipa, self.started = None, time.time()
+        self.out_ipa, self.started, self.warn = None, time.time(), []
         env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
         try:
             self.proc = subprocess.Popen(cmd, cwd=str(REPO), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), text=True, encoding='utf-8', errors='replace', bufsize=1)
         except OSError as e: messagebox.showerror('Cannot start the build', str(e)); self.proc = None; return
-        self.btn.set_enabled(False); self.btn.set_text('Building…'); self.cancel.set_enabled(True); self.open_btn.set_enabled(False)
-        self.stage.configure(text='Starting…', fg=TEXT); self.bar.configure(value=0); self.detail.configure(text='')
+        self.result.pack_forget()
+        self.btn.set('running', 'Starting…', 0.0); self.status.configure(text='', fg=MUTED)
+        self.cancel.pack(side='right', padx=(14, 0))
         threading.Thread(target=self._reader, args=(self.proc,), daemon=True).start()
 
     def _reader(self, p):
@@ -363,7 +428,7 @@ class App(tk.Tk):
     def _cancel(self):
         if self.proc and self.proc.poll() is None:
             subprocess.run(['taskkill', '/PID', str(self.proc.pid), '/T', '/F'], capture_output=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            self._write('Cancelled.\n', 'red')
+            self._write('Cancelled.\n', 'red'); self.cancelled = True
 
     def _pump(self):
         try:
@@ -375,58 +440,65 @@ class App(tk.Tk):
                 elif kind == 'exit': self._done(v)
                 elif kind == 'doctor': self._doctor_done(v)
         except queue.Empty: pass
-        self.after(100, self._pump)
+        self.after(80, self._pump)
+
+    def _stage_text(self, k, name, step=''):
+        nice = STAGE_NAMES.get(name, name[:1].upper() + name[1:])
+        return f'{nice}' + (f'  ·  {step}' if step else '') + f'      {k}/{self.n}'
 
     def _event(self, ev):
         e = ev.get('ev')
         if e == 'stage':
-            k, self.n = ev.get('k', 0), max(ev.get('n', 1), 1)
-            self.stage.configure(text=f'{k}/{self.n}   {ev.get("name", "")}' + (f'  ·  {ev["step"]}' if ev.get('step') else ''))
-            self.bar.configure(value=1000 * (k - 1) / self.n); self.detail.configure(text='')
+            k, self.n = ev.get('k', 0), max(ev.get('n', 1), 1); self.k = k
+            self.btn.set('running', self._stage_text(k, ev.get('name', ''), ev.get('step', '')), (k - 1) / self.n); self.status.configure(text='')
         elif e == 'step':
-            self.stage.configure(text=f'{ev.get("k")}/{self.n}   {ev.get("name", "")}  ·  {ev.get("step", "")}')
+            self.btn.set('running', self._stage_text(ev.get('k', 1), ev.get('name', ''), ev.get('step', '')))
         elif e == 'progress':
             k, f = ev.get('k', 1), ev.get('frac')
-            if f is not None: self.bar.configure(value=1000 * (k - 1 + f) / self.n)
+            if f is not None: self.btn.set('running', frac=(k - 1 + f) / self.n)
             parts = []
             if ev.get('done') is not None:
                 d, t, u = ev['done'], ev.get('total'), ev.get('unit') or ''
-                if u == 'B': parts.append(f'{d / 2**20:,.0f}' + (f' / {t / 2**20:,.0f}' if t else '') + ' MB')
-                else: parts.append(f'{d:,}' + (f' / {t:,}' if t else '') + (f' {u}' if u else ''))
-            if ev.get('eta'): parts.append(f'about {int(ev["eta"]) // 60}:{int(ev["eta"]) % 60:02d}')
+                parts.append((human(d) + (f' of {human(t)}' if t else '')) if u == 'B' else f'{d:,}' + (f' of {t:,}' if t else '') + (f' {u}' if u else ''))
+            if ev.get('eta'): parts.append(f'about {int(ev["eta"]) // 60}:{int(ev["eta"]) % 60:02d} left')
             if ev.get('note'): parts.append(ev['note'])
-            self.detail.configure(text='   ·   '.join(parts))
+            self.status.configure(text='   ·   '.join(parts))
         elif e == 'stage_end':
             ok = ev.get('ok', True)
             self._write(f'{"✓" if ok else "✗"}  {ev.get("name", "")}', 'ok' if ok else 'red')
             self._write(f'   {ev.get("elapsed", 0):.0f} s' + (f' · {ev["summary"]}' if ev.get('summary') else '') + '\n', 'dim')
-            self.bar.configure(value=1000 * ev.get('k', 0) / self.n)
+            self.btn.set('running', frac=ev.get('k', 0) / self.n)
         elif e == 'say':
             msg = ev.get('msg', '')
             m = re.search(r'done: (.+?\.ipa)\b', msg)
             if m: self.out_ipa = m.group(1)
+            if '[RED]' in msg: self.warn.append(msg.split('[RED]', 1)[1].strip())
             self._write(msg + '\n', 'red' if '[RED]' in msg else 'dim')
 
     def _done(self, rc):
-        self.proc = None
-        self.btn.set_enabled(True); self.btn.set_text('Build IPA File'); self.cancel.set_enabled(False)
+        self.proc = None; self.cancel.pack_forget()
         took = time.time() - self.started
         if rc == 0 and self.out_ipa:
-            self.bar.configure(value=1000)
-            self.stage.configure(text=f'Done in {int(took) // 60}:{int(took) % 60:02d}', fg=OK); self.detail.configure(text=self.out_ipa)
-            self.open_btn.set_enabled(True)
+            self.btn.set('done', 'Build again'); self.btn.frac = 0
+            self.status.configure(text=f'Finished in {int(took) // 60}:{int(took) % 60:02d}' + (f'   ·   {len(self.warn)} warning(s), see details' if self.warn else ''),
+                                  fg=MUTED)
+            self.res_path.configure(text=self.out_ipa); self.result.pack(fill='x', pady=(14, 0), before=self.det if self.details else None)
             self._write(f'\nIPA ready  →  {self.out_ipa}\n', 'ok')
-            self._write('Install it with Sideloadly. Leave Sideloadly\'s Bundle ID / App Name fields empty, so the values above are kept.\n', 'dim')
-            messagebox.showinfo('Build finished', f'The IPA is ready:\n{self.out_ipa}')
         else:
-            self.stage.configure(text='Build failed: see the red lines in the log.' if rc else 'Finished, but the log did not name the IPA.', fg=BAD)
-            if rc: self._write(f'\nThe build stopped (exit code {rc}). Each stage\'s full log is in <TitleID>_build\\logs next to the game files.\n', 'red')
+            self._refresh()
+            last = self.warn[-1] if self.warn else ''
+            self.status.configure(text=('Build stopped: ' + last[:140] + ('…' if len(last) > 140 else '')) if last else ('Build stopped. See details.' if rc else 'Finished, but the log named no IPA.'), fg=BAD)
+            if rc and not getattr(self, 'cancelled', False):
+                self._write(f'\nThe build stopped (exit code {rc}). Each stage\'s full log is in <TitleID>_build\\logs next to the game files.\n', 'red')
+                if not self.details: self._toggle_details()
+            self.cancelled = False
 
     def _doctor_done(self, bad):
-        if not bad: self._pill('Toolchain ready', OK); return
+        if not bad: self._pill('All tools ready', OK); return
         self._pill(f'{len(bad)} tools missing', BAD)
         self._write('Missing tools (python win\\doctor.py explains each):\n', 'red')
         for r in bad: self._write(f'  • {r["name"]}' + (f' — {r["how"]}' if r.get('how') else '') + '\n', 'red')
+        if not self.details: self._toggle_details()
 
     def _open_out(self):
         if self.out_ipa and Path(self.out_ipa).exists(): subprocess.run(['explorer', '/select,', str(Path(self.out_ipa))])
@@ -441,7 +513,7 @@ class App(tk.Tk):
         if self.proc and self.proc.poll() is None:
             if not messagebox.askyesno('Build running', 'Stop the build and close?'): return
             self._cancel()
-        self.s.update(files=self.files, keys=self.keys.value(), lang=self.lang.get(), fps=self.fps.on); save_settings(self.s)
+        self.s.update(files=self.files, keys=self.keys); save_settings(self.s)
         self.destroy()
 
 
