@@ -123,6 +123,16 @@ CUTS = {
     (0x336bf0, 'e9230b32', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region orr w9,wzr,#0x3fe00000 → mov w9,#0x3e00000'),
     (0x336d5c, 'ea030232', '0a40a052', 'AllocateAddressRegion: alignment of regions of 1 GB and more orr w10,wzr,#0x40000000 → mov w10,#0x2000000 (32 MB, as from 32 MB up)'),
   ],
+  # SDK 8.3.1 sdk 86a2afd863c9 (Megabyte Punch 1.0.0, Unity 2019.2.0f1; NPDM system resource 16 MB, so virtual address memory): the node area cut, and regions of 1 GB and more aligned
+  # to 32 MB, as the SDK 8.2.1 build above, whose AddressRegionManager this is at other offsets (the same instructions at the same distances from the constructor). Without them
+  # nninitStartup (main+0x8ee8e0) broke in StandardAllocator::Initialize (svcBreak at sdk+0xf302c, from sdk+0x4f830) on an iPad. The constructor is at sdk+0xc96e0 (the limit at +0xc96f0
+  # and the occupied length at +0xc9790, both orr w9,wzr,#0x3fe00000); VammManager::AllocateAddressRegion aligns a region by its size: 64 KB under 2 MB, 2 MB under 4 MB, 4 MB under 32 MB,
+  # 32 MB under 1 GB, else 1 GB (+0xc98fc)
+  '86a2afd863c99062d666226a9e7aa764': [
+    (0xc96f0, 'e9230b32', '097ca052', 'AddressRegionManager constructor: node area limit orr w9,wzr,#0x3fe00000 → mov w9,#0x3e00000'),
+    (0xc9790, 'e9230b32', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region orr w9,wzr,#0x3fe00000 → mov w9,#0x3e00000'),
+    (0xc98fc, 'ea030232', '0a40a052', 'AllocateAddressRegion: alignment of regions of 1 GB and more orr w10,wzr,#0x40000000 → mov w10,#0x2000000 (32 MB, as from 32 MB up)'),
+  ],
   # SDK 10.4.1 sdk d9add76fc264 (Advance Wars 1+2: Re-Boot Camp 1.0.0, Unity 2020.2.1f3; The Great Ace Attorney Chronicles 1.0.0, which has no virtual address memory and never makes an
   # address region): the node area cut, and regions of 1 GB and more aligned to 32 MB, as DRAGON QUEST XI S's SDK 7.3.2 build, whose AddressRegionManager this is at other offsets.
   # nninitStartup (main+0x365310) calls StandardAllocator::Initialize(nullptr, pool − used) with virtual address memory, which aborted at its CentralHeap::Init (sdk+0x2ee060), and that region

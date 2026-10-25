@@ -8,7 +8,7 @@
 #   Mac host steps       → refused with a clear message: games whose shaders exist only at run time (GLSLC / Vulkan / GL capture, Unreal and Oodle decoding)
 #                          boot the game's own arm64 code in the Mac host, which no Windows PC can run
 # Usage: python win/build_ipa_windows.py <NSP folder> -k <prod.keys> [the upstream script's other options]   (--platform mac / mac-app and --prepare-xcode are Mac-only)
-import importlib.util, os, subprocess, sys
+import importlib.util, os, subprocess, sys, time
 from pathlib import Path
 
 WIN = Path(__file__).resolve().parent
@@ -58,7 +58,24 @@ def main():
     up.build_nx_extract = build_nx_extract
 
     up.can_clone = lambda d: False
-    up.apple_silicon = lambda: False
+    up.apple_silicon = lambda: True   # only the heap check asks now (the Mac platforms are refused above, the Mac host steps below): it runs heap_estimate instead
+
+    def heap_estimate(repo, d, patched, work, env, logs, g):
+        """The heap check without the Mac host. Upstream boots the game a few seconds to see its heap request and how much of the alias region it maps (profile_guess.py heap_signals).
+        Here: a game with virtual address memory (an NPDM system resource) whose nninitStartup hands pool − used to StandardAllocator as one address region (Unity: Patrick's Parabox,
+        Advance Wars 1+2, Megabyte Punch) gets a 2 GB pool in place of the hardware pool, the size Advance Wars runs with (a 1 GB pool starved its malloc; the 3.2 GB pool filled the
+        alias region beside Unity's own regions). The profile is stamped as upstream's check stamps it, so later builds keep the result"""
+        up.PROG.stage('heap estimate (no Mac host)')
+        sig = {}
+        if int(g.get('sys_resource', '0'), 0) and int(g.get('app_pool', '0'), 0) > 0x80000000:
+            sig['app_pool'] = ('0x80000000', 'virtual address memory and no heap check on Windows: a 2 GB pool, so StandardAllocator\'s region (pool − used) leaves the alias region room for the game\'s own')
+        for k, (v, why) in sig.items(): up.say(f'heap estimate: {k} {v}: {why}')
+        if sig: g = up.set_keys(g, sig, 'Heap estimate on Windows (no Mac host)')
+        p = g.dir / 'game.tsv'
+        p.write_text(p.read_text(encoding='utf-8') + f'\n# heap check: {time.strftime("%Y-%m-%d")}, estimated on Windows without booting the game' + (f'; set {", ".join(sig)}' if sig else '') + '\n', encoding='utf-8')
+        up.PROG.end('set ' + ', '.join(sig) if sig else 'guessed keys kept')
+        return type(g)(g.dir)
+    up.heap_check = heap_estimate
     xc = [sys.executable, str(WIN / 'xcrun.py')]
     up.toolchain = lambda: (('cmd', xc + ['-sdk', 'iphoneos', 'metal', '--version']), ('cmd', xc + ['-sdk', 'macosx', 'metal', '--version']), ('cmd', ['spirv-cross', '--revision']))
 
