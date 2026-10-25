@@ -47,11 +47,16 @@ def test_bookmarks_and_coordinated_external_access_are_present():
 def test_unified_settings_and_explicit_conflict_actions_are_present():
     assert 'SaveFolderSyncSection' in LAUNCHER
     assert 'Section("Save Folder Sync")' in LAUNCHER
-    assert "Sync Folder" in LAUNCHER
-    assert "Save Format: Selected Folder / \\(model.titleID) / Save Files" in LAUNCHER
+    assert 'Save Sync Disabled' in LAUNCHER
+    assert 'Save Sync Enabled' in LAUNCHER
+    assert 'Tap to link folder' in LAUNCHER
+    assert 'Tap to change folder' in LAUNCHER
+    assert 'TitleID-named folder for Eden compatibility' in LAUNCHER
     assert "dm_save_folder_sync_clear" in LAUNCHER
-    assert "Clear selected folder" in LAUNCHER
-    assert "Sync Now" in LAUNCHER
+    assert "Unlink selected folder" in LAUNCHER
+    assert 'Unlink Save Folder?' in LAUNCHER
+    assert "Sync Now" not in LAUNCHER
+    assert "Save Format:" not in LAUNCHER
     assert "Use Folder Saves" in LAUNCHER
     assert "Use Device Saves" in LAUNCHER
     assert "Preserve Both" in LAUNCHER
@@ -71,7 +76,7 @@ def test_folder_selection_controls_enablement_and_clear_persistence():
     assert 'removeObjectForKey:kBookmark' in SYNC
     assert 'self.enabled = NO' in SYNC
     assert 'stopAccessingSecurityScopedResource' in SYNC
-    assert 'Last successful sync:' in LAUNCHER
+    assert 'Last successful sync' in LAUNCHER
     assert 'sync.statusText' in LAUNCHER
     assert 'restartRequired' not in SYNC
     assert SYNC.count('removeObjectForKey:kLocalFingerprint') >= 2
@@ -122,11 +127,31 @@ def test_recovery_is_deduplicated_bounded_and_payload_safe():
 
 
 def test_sync_status_reports_in_progress_last_success_and_operation():
-    assert '[self notice:@"Syncing" state:DmSaveFolderSyncStateReady]' in SYNC
-    assert 'Save files imported successfully' in SYNC
-    assert 'Save files exported' in SYNC
-    assert 'Last successful sync:' in LAUNCHER
-    assert 'lastSuccessfulSync' in LAUNCHER
+    assert 'SaveSyncStatusLabel(state: saveSync.visualState)' in LAUNCHER
+    assert 'Save Sync Details' in LAUNCHER
+    assert 'Last successful sync' in LAUNCHER
+    assert 'Last operation and result' in LAUNCHER
+    assert 'Syncing saves…' in LAUNCHER
+    assert 'Saves synchronized' in LAUNCHER
+    assert 'Save conflict' in LAUNCHER
+    assert 'Save sync unavailable' in LAUNCHER
+    assert 'Save sync failed' in LAUNCHER
+    assert 'model.enabled && model.configured' not in LAUNCHER
+    assert 'if let saveSync, saveSync.showsStatus' in LAUNCHER
+    assert 'UIApplication.didBecomeActiveNotification' in LAUNCHER
+    assert 'if pendingResume { return .syncing }' in LAUNCHER
+    assert 'status.hasPrefix("Save files imported successfully")' in LAUNCHER
+    assert 'dm_save_folder_sync_now' not in LAUNCHER
+
+
+def test_save_sync_details_use_selected_folder_and_title_id_paths_with_copy_actions():
+    assert 'url.resourceValues(forKeys: [.volumeNameKey, .volumeURLKey])' in LAUNCHER
+    assert 'folder.appendingPathComponent(titleID, isDirectory: true)' in LAUNCHER
+    assert 'UIPasteboard.general.string = path' in LAUNCHER
+    assert 'Provider-relative location from iOS Files' in LAUNCHER
+    assert 'Location shown as exposed by iOS Files' in LAUNCHER
+    assert 'Text(path)' in LAUNCHER
+    assert '.fixedSize(horizontal: false, vertical: true)' in LAUNCHER
 
 
 def test_resume_checks_new_folder_sync_without_replacing_upstream_lifecycle():
