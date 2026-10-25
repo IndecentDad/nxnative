@@ -94,7 +94,7 @@ class Love:
                 ('frag', self.stage('PIXEL', d['arraypixel'], target, gles, False, gammacorrect, True))]
 
 
-def key(src): return hashlib.sha256(src.encode('utf-8')).hexdigest()[:16]
+def key(src): return hashlib.sha256(src.encode('utf-8', 'surrogateescape')).hexdigest()[:16]
 
 
 def generate(main, romfs, out, table=None, log=print):
@@ -112,7 +112,7 @@ def generate(main, romfs, out, table=None, log=print):
             if all(f'{key(s)}.{e}' in want for e, s in love.defaults('glsl3', False, g)): gc = g
     cands = [(ext, s, 'LÖVE default') for ext, s in love.defaults('glsl3', False, gc)]
     for fs in sorted((Path(romfs) / 'resources/shaders').glob('*.fs')):
-        code = fs.read_text(encoding='utf-8', errors='surrogateescape')
+        code = fs.read_bytes().decode('utf-8', 'surrogateescape')   # bytes as they are: LÖVE hands the file's CRLF line ends to GL, and read_text would turn them into LF
         v, p = love.to_glsl(False, code, True, gc)
         if v: cands.append(('vert', v, fs.name))
         if p: cands.append(('frag', p, fs.name))
@@ -121,7 +121,7 @@ def generate(main, romfs, out, table=None, log=print):
     for ext, src, what in cands:
         name = f'{key(src)}.{ext}'
         made[name] = what
-        (out / name).write_bytes(src.encode('utf-8'))
+        (out / name).write_bytes(src.encode('utf-8', 'surrogateescape'))
     log(f'love_shaders: {len(made)} sources (gamma correction {"on" if gc else "off"})')
     if want is not None:
         hit = want & set(made)
