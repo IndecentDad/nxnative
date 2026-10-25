@@ -145,7 +145,8 @@ def test_sync_status_reports_in_progress_last_success_and_operation():
 
 
 def test_save_sync_details_use_selected_folder_and_title_id_paths_with_copy_actions():
-    assert 'url.resourceValues(forKeys: [.volumeNameKey, .volumeURLKey])' in LAUNCHER
+    assert 'url.resourceValues(forKeys: [.volumeNameKey])' in LAUNCHER
+    assert 'getResourceValue(&volumeObject, forKey: .volumeURLKey)' in LAUNCHER
     assert 'folder.appendingPathComponent(titleID, isDirectory: true)' in LAUNCHER
     assert 'UIPasteboard.general.string = path' in LAUNCHER
     assert 'Provider-relative location from iOS Files' in LAUNCHER

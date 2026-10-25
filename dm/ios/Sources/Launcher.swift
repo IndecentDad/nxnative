@@ -123,15 +123,20 @@ private final class SaveFolderSyncModel: ObservableObject {
     }
     private func displayPath(_ url: URL) -> (String, Bool) {
         let path = url.standardizedFileURL.path
-        if let values = try? url.resourceValues(forKeys: [.volumeNameKey, .volumeURLKey]),
-           let volumeURL = values.volumeURL, let volumeName = values.volumeName, !volumeName.isEmpty {
-            let root = volumeURL.standardizedFileURL.path
-            let prefix = root.hasSuffix("/") ? root : root + "/"
-            if path.hasPrefix(prefix) {
-                let relative = String(path.dropFirst(prefix.count))
-                if !relative.isEmpty { return ("\(volumeName)/\(relative)", true) }
+        do {
+            let values = try url.resourceValues(forKeys: [.volumeNameKey])
+            var volumeObject: AnyObject?
+            try (url as NSURL).getResourceValue(&volumeObject, forKey: .volumeURLKey)
+            if let volumeURL = volumeObject as? NSURL,
+               let root = volumeURL.path,
+               let volumeName = values.volumeName, !volumeName.isEmpty {
+                let prefix = root.hasSuffix("/") ? root : root + "/"
+                if path.hasPrefix(prefix) {
+                    let relative = String(path.dropFirst(prefix.count))
+                    if !relative.isEmpty { return ("\(volumeName)/\(relative)", true) }
+                }
             }
-        }
+        } catch { }
         return (path, false)
     }
     var linkedFolderPath: String? {
