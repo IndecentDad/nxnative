@@ -8,5 +8,6 @@
   "std_font": "C:\\Windows\\Fonts\\arial.ttf",
   "ios_deployment": "26.0",
   "metal_ios_target": "18.0",
-  "metal_macos_target": "15.0"
+  "metal_macos_target": "15.0",
+  "bundle_prefix": "org.nxnativewindows"
 }

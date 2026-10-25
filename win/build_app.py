@@ -204,6 +204,8 @@ def main():
     r = subprocess.run([sys.executable, str(DM / 'tools/nacp.py'), '--version', str(vnacp)], capture_output=True, text=True)
     version = env.get('DM_APP_VERSION') or (r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else '1.0')
     bundle_id = env.get('DM_BUNDLE_ID') or f'org.nxnative.{game.lower()}'
+    prefix = env.get('NXW_BUNDLE_PREFIX')   # the Windows driver's default prefix (org.nxnativewindows), unless --bundle-id named an ID
+    if prefix and bundle_id.startswith('org.nxnative.'): bundle_id = prefix.rstrip('.') + bundle_id[len('org.nxnative'):]
     show_fps = env.get('DM_SHOW_FPS', '0') in ('1', 'YES')
     lang = env.get('DM_LANG') or 'en-US'
 

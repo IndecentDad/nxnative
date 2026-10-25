@@ -26,6 +26,10 @@ def main():
     # every Python the pipeline starts loads the shim; this one too
     os.environ['PYTHONPATH'] = os.pathsep.join([str(SHIM)] + [p for p in os.environ.get('PYTHONPATH', '').split(os.pathsep) if p])
     os.environ.setdefault('PYTHONUTF8', '1')   # the pipeline reads and writes UTF-8 text without naming the encoding
+    # Windows builds get their own bundle IDs (org.nxnativewindows.<title ID>), so they install beside a Mac-built IPA of the same game; --bundle-id still names any ID
+    if not any(a == '--bundle-id' or a.startswith('--bundle-id=') for a in sys.argv):
+        sys.path.insert(0, str(WIN)); import toolchain as _tc
+        os.environ['NXW_BUNDLE_PREFIX'] = _tc.setting('bundle_prefix', 'org.nxnativewindows')
     sys.path.insert(0, str(SHIM)); import sitecustomize  # noqa: F401
     sys.path.insert(0, str(WIN)); import toolchain as tc, doctor
 
