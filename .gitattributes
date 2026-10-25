@@ -1,0 +1,2 @@
+# Keep every file byte-identical to upstream on Windows: the shader chain hashes sources (dmsh_xlate --source-sha, chain_files, profile digests), and CRLF checkouts break them
+* -text
