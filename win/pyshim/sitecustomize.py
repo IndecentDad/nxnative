@@ -35,6 +35,24 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
         if base == 'which' and len(args) == 2: return [sys.executable, '-c', 'import shutil,sys; p=shutil.which(sys.argv[1]); print(p or ""); sys.exit(0 if p else 1)', args[1]]
         return args
 
+    # NXW_AUTO_SDK_CUTS (a JSON file the Windows driver writes, win/sdk_auto_cuts.py): {sdk build ID: [[offset, old, new, reason], ...]} for sdk builds dm/tools/sdk_patches.py does not
+    # register. patch_nso.py loads sdk_patches.py by its path (importlib.util.spec_from_file_location); its CUTS gain these entries, never replacing a registered build's
+    if os.environ.get('NXW_AUTO_SDK_CUTS'):
+        import importlib.util, json
+        _sffl = importlib.util.spec_from_file_location
+        def _spec_from_file_location(name, location=None, *a, **k):
+            spec = _sffl(name, location, *a, **k)
+            if spec and location and os.fspath(location).replace('\\', '/').endswith('dm/tools/sdk_patches.py'):
+                load = spec.loader.exec_module
+                def exec_module(m):
+                    load(m)
+                    try: extra = json.loads(Path(os.environ['NXW_AUTO_SDK_CUTS']).read_text(encoding='utf-8'))
+                    except (OSError, ValueError): return
+                    for bid, cuts in extra.items(): m.CUTS.setdefault(bid, [tuple(c) for c in cuts])
+                spec.loader.exec_module = exec_module
+            return spec
+        importlib.util.spec_from_file_location = _spec_from_file_location
+
     _init = subprocess.Popen.__init__
     def _popen_init(self, args, *a, **k):
         if os.environ.get('NXW_SHIM_TRACE'): print('nxw shim:', args, '->', _map(args), file=sys.stderr)

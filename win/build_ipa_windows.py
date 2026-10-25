@@ -57,6 +57,34 @@ def main():
         return nx   # Windows starts nx_extract.exe for this path
     up.build_nx_extract = build_nx_extract
 
+    # address-region cuts for an sdk build sdk_patches.py does not register (win/sdk_auto_cuts.py), for a game with virtual address memory: written beside the rewrite, read by the
+    # shim when patch_nso.py imports sdk_patches, and part of the rewrite's cache key (patch_files)
+    import sdk_auto_cuts, json
+    orig_rewrite, orig_patch_files = up.rewrite, up.patch_files
+    def rewrite(py, repo, exe_dir, out, env, logs, g, provisional=False):
+        sdk = exe_dir / 'sdk'
+        jf = out.with_name(out.name + '.auto_sdk_cuts.json')
+        if jf.exists(): jf.unlink()
+        if sdk.is_file() and int(g.get('sys_resource', '0') or '0', 0):
+            sys.path.insert(0, str(REPO / 'dm/tools'))
+            import importlib; registered = importlib.import_module('sdk_patches').CUTS
+            bid = up.build_id(sdk)
+            if bid not in registered:
+                _, cuts = sdk_auto_cuts.for_nso(sdk, log=up.say)
+                if cuts:
+                    jf.parent.mkdir(parents=True, exist_ok=True)
+                    jf.write_text(json.dumps({bid: [list(c) for c in cuts]}, indent=1), encoding='utf-8')
+                    up.say(f'sdk {bid[:12]} is not in dm/tools/sdk_patches.py: {len(cuts)} address-region cut(s) found in its code (win/sdk_auto_cuts.py)')
+        if jf.exists(): os.environ['NXW_AUTO_SDK_CUTS'] = env['NXW_AUTO_SDK_CUTS'] = str(jf)
+        else: os.environ.pop('NXW_AUTO_SDK_CUTS', None); env.pop('NXW_AUTO_SDK_CUTS', None)
+        return orig_rewrite(py, repo, exe_dir, out, env, logs, g, provisional)
+    up.rewrite = rewrite
+    def patch_files(repo, exe_dir, mods, game_id=None):
+        f = orig_patch_files(repo, exe_dir, mods, game_id)
+        j = os.environ.get('NXW_AUTO_SDK_CUTS')
+        return f + [Path(j)] if j and Path(j).exists() else f
+    up.patch_files = patch_files
+
     up.can_clone = lambda d: False
     up.apple_silicon = lambda: True   # only the heap check asks now (the Mac platforms are refused above, the Mac host steps below): it runs heap_estimate instead
 
