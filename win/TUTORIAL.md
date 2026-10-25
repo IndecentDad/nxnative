@@ -63,8 +63,7 @@ E:\ProjectIOS\Games\
 
 ### Cara mudah: GUI
 
-Klik dua kali **`Build-IPA-GUI.bat`** di folder `E:\ProjectIOS
-xnative-win`. Jendelanya berbahasa Inggris dengan tema hitam-pink. Lalu:
+Klik dua kali **`Build-IPA-GUI.bat`** di folder `E:\ProjectIOS\nxnative-win`. Jendelanya berbahasa Inggris dengan tema hitam-pink. Lalu:
 
 1. **Game files**: klik kotak bergaris untuk memilih NSP/XCI (base, update, DLC dari satu game), atau pakai *Choose folder*.
 2. **prod.keys**: klik *Browse*.
