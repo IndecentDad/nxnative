@@ -139,7 +139,7 @@ private struct SaveFolderSyncSection: View {
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Sync Now")
-                    Text("\(model.status)\nLast sync: \(model.lastSync)")
+                    Text("\(model.status)\nLast successful sync: \(model.lastSync)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)

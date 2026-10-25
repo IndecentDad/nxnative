@@ -64,27 +64,43 @@ def test_direct_bidirectional_payload_has_no_extra_save_root_or_duplicate_wrappe
     assert sorted(p.relative_to(external) for p in external.rglob("*")) == [Path("game"), Path("game/slot"), Path("game/slot/progress.dat")]
 
 
-def test_conflict_recovery_is_idempotent_bounded_and_ignores_noops(tmp_path):
+def test_recovery_snapshots_skip_identical_payloads_and_rotate_after_complete_copy(tmp_path):
     local = tmp_path / "local"
     external = tmp_path / "external"
     local.mkdir(); external.mkdir()
     (local / "save.dat").write_text("local")
-    (external / "save.dat").write_text("external")
+    (external / "save.dat").write_text("local")
     recovery = tmp_path / "SaveFolderSync-Recovery" / TITLE_ID
-    for _ in range(5):
-        pair = f"{payload_fingerprint(local)}-{payload_fingerprint(external)}"
-        snapshot = recovery / f"snapshot-{pair}"
-        if payload_fingerprint(local) != payload_fingerprint(external) and not snapshot.exists():
-            snapshots = list(recovery.glob("snapshot-*"))
-            if len(snapshots) < 3:
-                snapshot.mkdir(parents=True)
-                shutil.copy2(local / "save.dat", snapshot / "local-save.dat")
-    assert len(list(recovery.glob("snapshot-*"))) == 1
-    (external / "save.dat").write_text("external-2")
-    for _ in range(5):
-        if len(list(recovery.glob("snapshot-*"))) < 3:
-            (recovery / f"snapshot-{len(list(recovery.glob('snapshot-*')))}").mkdir(parents=True)
+    assert payload_fingerprint(local) == payload_fingerprint(external)
+    assert not list(recovery.glob("snapshot-*"))
+
+    def snapshot_pair(index: int):
+        pair = recovery / f"snapshot-{index}"
+        stage = recovery / f".stage-{index}"
+        stage.mkdir(parents=True)
+        shutil.copytree(local, stage / "local")
+        shutil.copytree(external, stage / "external")
+        stage.rename(pair)
+        return pair
+
+    recovery.mkdir(parents=True)
+    for i in range(3):
+        (local / "save.dat").write_text(f"local-{i}")
+        (external / "save.dat").write_text(f"external-{i}")
+        snapshot_pair(i)
+        (recovery / f"snapshot-{i}").touch()
+    old = sorted(recovery.glob("snapshot-*"), key=lambda p: p.stat().st_mtime)
+    (local / "save.dat").write_text("local-new")
+    (external / "save.dat").write_text("external-new")
+    newest = snapshot_pair(3)
+    snapshots = sorted(recovery.glob("snapshot-*"), key=lambda p: p.stat().st_mtime)
+    while len(snapshots) > 3:
+        shutil.rmtree(snapshots.pop(0))
     assert len(list(recovery.glob("snapshot-*"))) == 3
+    assert not old[0].exists()
+    assert newest.is_dir()
+    assert (newest / "local" / "save.dat").read_text() == "local-new"
+    assert (newest / "external" / "save.dat").read_text() == "external-new"
 
 
 def _sync_fingerprint(root: Path) -> str:

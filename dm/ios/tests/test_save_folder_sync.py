@@ -71,20 +71,20 @@ def test_folder_selection_controls_enablement_and_clear_persistence():
     assert 'removeObjectForKey:kBookmark' in SYNC
     assert 'self.enabled = NO' in SYNC
     assert 'stopAccessingSecurityScopedResource' in SYNC
-    assert 'Last sync:' in LAUNCHER
+    assert 'Last successful sync:' in LAUNCHER
     assert 'sync.statusText' in LAUNCHER
-    assert 'self.restartRequired = NO' in SYNC
+    assert 'restartRequired' not in SYNC
     assert SYNC.count('removeObjectForKey:kLocalFingerprint') >= 2
 
 
 def test_first_sync_reports_verified_direction_and_restart_requirement():
-    assert 'Save files imported. Restart the game to load your updated saves.' in SYNC
+    assert SYNC.count('Save files imported successfully (%lu files).') == 2
+    assert 'Restart the game to load your updated saves' not in SYNC
+    assert 'Avoid saving in-game before restarting' not in SYNC
     assert 'Save files exported' in SYNC
     assert 'Already Up to Date' in SYNC
     assert 'Imported save verification failed' in SYNC
     assert 'Exported save verification failed' in SYNC
-    assert 'restartRequired' in SYNC
-    assert 'if (!self.enabled || !self.selectedFolder || self.restartRequired)' in SYNC
     assert 'if (!hasLocalBaseline || !hasExternalBaseline) [self syncOnQueue:NO];' in SYNC
     assert 'entries sortUsingComparator' in SYNC
     assert 'localChanged' in SYNC
@@ -112,10 +112,21 @@ def test_legacy_icloud_synchronizer_and_warning_are_gone():
 
 def test_recovery_is_deduplicated_bounded_and_payload_safe():
     assert 'kRecoverySnapshotLimit = 3' in SYNC
-    assert 'snapshots >= kRecoverySnapshotLimit' in SYNC
+    assert '[localFP isEqualToString:externalFP]' in SYNC
+    assert '@".stage-%@"' in SYNC
+    assert 'while (snapshots.count > kRecoverySnapshotLimit)' in SYNC
+    assert '[fm removeItemAtURL:oldest error:error]' in SYNC
     assert 'snapshot-%@-%@' in SYNC
     assert 'isReservedPayloadComponent' in SYNC
     assert 'localPayloadURL' in SYNC and 'externalPayloadURL' in SYNC
+
+
+def test_sync_status_reports_in_progress_last_success_and_operation():
+    assert '[self notice:@"Syncing" state:DmSaveFolderSyncStateReady]' in SYNC
+    assert 'Save files imported successfully' in SYNC
+    assert 'Save files exported' in SYNC
+    assert 'Last successful sync:' in LAUNCHER
+    assert 'lastSuccessfulSync' in LAUNCHER
 
 
 def test_resume_checks_new_folder_sync_without_replacing_upstream_lifecycle():
