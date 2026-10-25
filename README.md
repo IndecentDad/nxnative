@@ -13,8 +13,9 @@ Current differences from that upstream base:
 | `AGENTS.md` | IndecentDad identity and our permanent development/validation rules. |
 | `docs/build-provenance.md` | Reproduction, isolation, provenance and upstream-update procedure. |
 | `docs/PROJECT_STATUS.md` | Current validation status and next approved step. |
+| `docs/branch-archive.md` | Verified history backups and legacy-work recovery references. |
 
-Metroid Dread 2.1.0 reaches gameplay on iPhone with the Intel launcher change, checkpoint `validated/metroid-dread-ios-6a068772`. Celeste's clean control IPA was built from `c6f19d5` and awaits device validation. Eden Save Folder Sync is **not integrated yet**: its legacy reference is preserved for a later focused port of native `Documents/save`, Eden-compatible folders, transactional saves and launcher settings. No old runtime or integration branch will be merged wholesale.
+Metroid Dread 2.1.0 reaches gameplay on iPhone with the Intel launcher change, checkpoint `validated/metroid-dread-ios-6a068772`. Celeste's clean control IPA from `c6f19d5` is also confirmed fully functional on iPhone, checkpoint `validated/celeste-ios-c6f19d5`. Eden Save Folder Sync is **not integrated yet**: `feature/eden-save-folder-sync` stages the focused port and has unsigned Dread/Celeste candidates built from `a51aad6`, awaiting device validation. The immutable `legacy/save-folder-sync-ec440a2` reference and verified archives remain available. No old runtime or integration branch will be merged wholesale.
 
 Build on the existing Intel Tahoe VM through `ssh tahoe` and `zsh -lc`, targeting ARM64 iOS with Xcode 26.6. Use the official `scripts/build_ipa_from_nsp.py` and a fresh input/output directory. The universal launcher enables build tooling on Intel; it does not make the ARM64 Mac game host executable there. Existing .NET 10, xcodegen, spirv-cross, zstd and Python dependencies are required. Upstream's `own_compilers.py` handles local Metal/spirv-cross differences without editing `dmsh_chain.lock`.
 
