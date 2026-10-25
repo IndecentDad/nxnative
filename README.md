@@ -13,8 +13,16 @@ Current differences from that upstream base:
 | `AGENTS.md` | IndecentDad identity and our permanent development/validation rules. |
 | `docs/build-provenance.md` | Reproduction, isolation, provenance and upstream-update procedure. |
 | `docs/PROJECT_STATUS.md` | Current validation status and next approved step. |
+| `dm/games/game.py` | Expose the profile's title ID to the save bridge. |
+| `dm/host/hle_fs.c` | Notify the iOS bridge after a successful native transactional save commit. |
+| `dm/ios/Sources/DmSaveFolderSync.h`, `DmSaveFolderSync.m`, `DmSaveFolderSyncBridge.h` | Optional Files-provider sync with bookmarks, fingerprints, conflict resolution, staged transfers and recovery snapshots. |
+| `dm/ios/Sources/main.m` | Connect native `Documents/save`, save commits and foreground events without replacing upstream boot/preload. |
+| `dm/ios/Sources/Launcher.swift` | Save Folder Sync section in the existing settings UI. |
+| `dm/ios/project.yml` | Swift-to-Objective-C bridge header for settings. |
+| `dm/ios/tests/test_save_folder_sync.py`, `test_save_folder_sync_filesystem.py` | Focused contract and filesystem regression checks. |
+| `docs/save-folder-sync.md`, `docs/branch-archive.md` | Save format, validation gate and recovery locations for retired work. |
 
-Metroid Dread 2.1.0 reaches gameplay on iPhone with the Intel launcher change, checkpoint `validated/metroid-dread-ios-6a068772`. Celeste's clean control IPA was built from `c6f19d5` and awaits device validation. Eden Save Folder Sync is **not integrated yet**: its legacy reference is preserved for a later focused port of native `Documents/save`, Eden-compatible folders, transactional saves and launcher settings. No old runtime or integration branch will be merged wholesale.
+Metroid Dread 2.1.0 and Celeste's clean control IPA are confirmed working on iPhone, checkpoints `validated/metroid-dread-ios-6a068772` and `validated/celeste-ios-c6f19d5`. This temporary `feature/eden-save-folder-sync` branch ports Eden-compatible synchronization onto that validated runtime; `integration` remains the Intel-only baseline until both games pass device validation with sync enabled. Native `Documents/save` contents map directly to `<selected folder>/<title ID>/`, with no extra save directory. Upstream transactional saves and the normal launcher lifecycle remain in place. The historical runtime was not merged; `legacy/save-folder-sync-ec440a2` remains an immutable reference.
 
 Build on the existing Intel Tahoe VM through `ssh tahoe` and `zsh -lc`, targeting ARM64 iOS with Xcode 26.6. Use the official `scripts/build_ipa_from_nsp.py` and a fresh input/output directory. The universal launcher enables build tooling on Intel; it does not make the ARM64 Mac game host executable there. Existing .NET 10, xcodegen, spirv-cross, zstd and Python dependencies are required. Upstream's `own_compilers.py` handles local Metal/spirv-cross differences without editing `dmsh_chain.lock`.
 

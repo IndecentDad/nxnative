@@ -29,7 +29,7 @@ The Tahoe toolchain is x86_64 macOS 26.7.1, Xcode 26.6 (17F113), .NET 10. Metal 
 
 Keep alongside every IPA: exact upstream/integration SHA and custom commits; clean Git state; invocation and sanitized environment; original input names, sizes and SHA-256; extracted module build IDs; Python packages, Xcode/.NET/Metal and translator fingerprints; complete build log/exit status; rewrite source stamps and gate counts; shader chain/input stamps and generated-table headers; IPA size and SHA-256. Never record key contents or tokens.
 
-Before delivery verify embedded ARM64 code sections and packaged rewriter tables against that build's fresh outputs, and shader stamps/tables against the compiled host's chain. Verify no bundled `env.txt`, provisioning profile, signature or optional custom integration. Verify the copied NAS IPA checksum. Preserve the manifest and log; do not claim gameplay from successful packaging. Device `Documents/env.txt` and launcher preferences persist independently of the IPA and should be checked before device validation without deleting saves.
+Before delivery verify embedded ARM64 code sections and packaged rewriter tables against that build's fresh outputs, and shader stamps/tables against the compiled host's chain. Verify no bundled `env.txt`, provisioning profile or signature, and that custom functionality matches the declared source (Intel-only controls exclude Save Sync; sync candidates include its compiled bridge). Verify the copied NAS IPA checksum. Preserve the manifest and log; do not claim gameplay from successful packaging. Device `Documents/env.txt` and launcher preferences persist independently of the IPA and should be checked before device validation without deleting saves.
 
 ## Updating upstream
 
@@ -38,4 +38,4 @@ Before delivery verify embedded ARM64 code sections and packaged rewriter tables
 3. Check the translator/lock, profiles and artifact-generation requirements. Use isolated directories and the official pipeline for affected games. Preserve the old validated artifacts.
 4. After successful device validation, fast-forward/merge the validated candidate into `integration`, create a new immutable annotated checkpoint tag, and retire the temporary feature branch. Only then is the upstream update complete.
 
-Eden Save Folder Sync follows the same feature/validation gate, with both Dread and Celeste tested before integration. Do not start migration or old-branch cleanup before the current Celeste control is device-confirmed.
+Eden Save Folder Sync follows the same feature/validation gate, with both Dread and Celeste tested before integration. Both Intel-only controls are device-confirmed; sync candidates are built from the temporary feature branch and record its exact commit. Integration and control IPAs remain unchanged until both candidates pass device validation.
