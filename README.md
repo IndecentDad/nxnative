@@ -1,5 +1,27 @@
 # nxnative
 
+## IndecentDad integration
+
+`main` exactly mirrors `seedds/nxnative/main`. `integration` is the maintained branch for our development and IPA builds; it starts at the iPhone-validated upstream revision `6a0687721a1da9a6a0273c6ce2f11eedcf4af445`. Temporary feature branches return to `integration` only after validation. Known-working checkpoints use immutable annotated tags; never move a validated tag.
+
+Current differences from that upstream base:
+
+| File | Purpose |
+|---|---|
+| `dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate` | Universal ARM64/x86_64 .NET launcher required on the Intel Tahoe build VM; exact launcher used for the successful Metroid build. Translator DLLs, runtime code, profiles and shader lock are unchanged. |
+| `README.md` | Fork modifications, branch policy and build instructions. |
+| `AGENTS.md` | IndecentDad identity and our permanent development/validation rules. |
+| `docs/build-provenance.md` | Reproduction, isolation, provenance and upstream-update procedure. |
+| `docs/PROJECT_STATUS.md` | Current validation status and next approved step. |
+
+Metroid Dread 2.1.0 reaches gameplay on iPhone with the Intel launcher change, checkpoint `validated/metroid-dread-ios-6a068772`. Celeste is the next clean validation. Eden Save Folder Sync is **not integrated yet**: its legacy reference is preserved for a later focused port of native `Documents/save`, Eden-compatible folders, transactional saves and launcher settings. No old runtime or integration branch will be merged wholesale.
+
+Build on the existing Intel Tahoe VM through `ssh tahoe` and `zsh -lc`, targeting ARM64 iOS with Xcode 26.6. Use the official `scripts/build_ipa_from_nsp.py` and a fresh input/output directory. The universal launcher enables build tooling on Intel; it does not make the ARM64 Mac game host executable there. Existing .NET 10, xcodegen, spirv-cross, zstd and Python dependencies are required. Upstream's `own_compilers.py` handles local Metal/spirv-cross differences without editing `dmsh_chain.lock`.
+
+See [reproduction and provenance](docs/build-provenance.md) and [current status](docs/PROJECT_STATUS.md). When upstream advances, fast-forward `main`, integrate it into a temporary branch from `integration`, resolve conflicts while retaining documented changes, then validate before advancing `integration`. An update is incomplete until integration and its artifacts pass validation. Configure repository-local identity as `IndecentDad <338341614+IndecentDad@users.noreply.github.com>`; never use KylePyne for this project.
+
+## Upstream project
+
 Play your own Nintendo Switch games natively on iPhone and iPad. Bring your game (its NSP files) and your `prod.keys`; one script turns them into an IPA that you sideload.
 
 It is not an emulator: the game's own code runs directly on the Apple chip, with Switch graphics rebuilt on Metal. Nothing from any game is in this repository, and the project is not affiliated with Nintendo or any game publisher.

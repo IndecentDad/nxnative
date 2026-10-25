@@ -15,4 +15,9 @@
 
   The translator is `dm/gfx/tools/dmsh_xlate_bin`, which matches `dmsh_chain.lock`; a fresh `dotnet publish` does not.
 - iOS builds are unsigned IPAs that the user sideloads and tests; diagnostics come back as the app's `Documents/log.txt`. Do not sign or install builds on the user's devices.
-- Commit only when asked, with `git -c user.name=seedds -c user.email=seedds@gmail.com commit`.
+- NXNative's repository-local author and committer identity is `IndecentDad <338341614+IndecentDad@users.noreply.github.com>`; verify it before commits and verify the active GitHub account before remote writes. Never use KylePyne or fall back to global identity. Commit and push only within the user's authorized scope.
+- Permanent branches: `main` is an exact upstream mirror; `integration` carries our documented custom functionality and is the source for future development/builds. Keep feature branches temporary and create immutable annotated tags for device-validated checkpoints. No permanent Intel or game-specific development branches.
+- Preserve unique history with backup refs before restructuring. Preserve legacy Save Folder Sync for reference; port only its functionality onto current integration, never merge historical runtime code wholesale. Use native `Documents/save`, Eden-compatible Save Folder Sync and transactional saves.
+- Every IPA records upstream revision, custom commits, game version, toolchain, input hashes and generated-artifact provenance. Use clean isolated build directories and the official top-level script; never silently reuse mismatched historical artifacts. Produce unsigned IPAs; device validation belongs to the user.
+- An upstream update is incomplete until integration is updated and validated. Stage updates on temporary branches and preserve the last known-working integration checkpoint until validation succeeds. See `docs/build-provenance.md` and keep `docs/PROJECT_STATUS.md` current.
+- Current execution gate: validate Celeste on the Intel-only Metroid baseline before branch cleanup or Save Folder Sync migration. Preserve all existing branches/worktrees and Metroid artifacts until that gate passes.
