@@ -48,7 +48,8 @@ def metal_tool(sdk, name):
     root = metal_tools_root()
     if not root: return None
     sub = 'ios' if sdk.startswith('iphone') else 'macos'
-    for pat in (f'{sub}/bin/{name}.exe', f'{sub}/**/bin/{name}.exe', f'**/{sub}/**/{name}.exe'):
+    # 4.x shipped one toolchain per OS (ios/, macos/); 5.x and 6.x ship one for every target in bin/ (the -target triple picks the OS)
+    for pat in (f'{sub}/bin/{name}.exe', f'{sub}/**/bin/{name}.exe', f'**/{sub}/**/{name}.exe', f'bin/{name}.exe'):
         hits = sorted(glob.glob(str(root / pat), recursive=True))
         if hits: return Path(hits[0])
     return None

@@ -74,6 +74,10 @@ class Xip(unittest.TestCase):
         cpio = (odc('./Xcode.app/Contents/Info.plist', 0o100644, b'skip me') + odc(sdk + 'iPhoneOS.sdk', 0o040755) +
                 odc(sdk + 'iPhoneOS.sdk/SDKSettings.json', 0o100644, b'{"Version": "26.0"}', ino=7) +
                 odc(sdk + 'iPhoneOS.sdk/usr/lib/libz.tbd', 0o120755, b'libz.1.tbd') + odc(sdk + 'iPhoneOS.sdk/usr/lib/libz.1.tbd', 0o100644, b'tbd', ino=8) +
+                odc(sdk + 'iPhoneOS.sdk/usr/include/canary.h', 0o100644, b'NULLcanary' + b'\0' * 6, ino=9) +   # Xcode 27: a hard link whose bytes another entry carries
+                odc('./Xcode.app/Contents/Developer/Platforms/MacOSX.platform/x/canary.h', 0o100644, b'#define REAL 1\n\0', ino=9) +
+                odc(sdk + 'iPhoneOS.sdk/F.framework/Versions/Current', 0o120755, b'A') + odc(sdk + 'iPhoneOS.sdk/F.framework/Headers', 0o120755, b'Versions/Current/Headers') +
+                odc(sdk + 'iPhoneOS.sdk/F.framework/Versions/A/Headers/f.h', 0o100644, b'int f;', ino=10) +
                 odc(sdk + 'iPhoneOS26.0.sdk', 0o120755, b'iPhoneOS.sdk') + odc('TRAILER!!!', 0))
         half = len(cpio) // 2
         body = b'pbzx' + struct.pack('>Q', 1 << 24)
@@ -90,6 +94,8 @@ class Xip(unittest.TestCase):
             self.assertEqual((out / 'iPhoneOS.sdk/SDKSettings.json').read_bytes(), b'{"Version": "26.0"}')
             self.assertEqual((out / 'iPhoneOS.sdk/usr/lib/libz.tbd').read_bytes(), b'tbd')
             self.assertFalse((out / 'Info.plist').exists()); self.assertFalse((out / 'iPhoneOS26.0.sdk').exists())
+            self.assertEqual((out / 'iPhoneOS.sdk/usr/include/canary.h').read_bytes(), b'#define REAL 1\n\0')
+            self.assertEqual((out / 'iPhoneOS.sdk/F.framework/Headers/f.h').read_bytes(), b'int f;')   # a link through a link
 
 
 class PackIpa(unittest.TestCase):

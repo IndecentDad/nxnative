@@ -94,45 +94,94 @@ def entries(r):
         yield name, mode, ino, size, pad
 
 
+CANARY = b'NULLcanary'   # the data of a hard link whose bytes another entry of the same inode carries (Xcode 27's sorted, deduplicated cpio: Metadata xbs_sortcpio)
+
+
+def is_canary(head, size): return size >= len(CANARY) and head.startswith(CANARY) and not head[len(CANARY):].strip(b'\0')
+
+
+def scan(f, start, length):
+    """Pass 1: for each SDK file whose data is a canary, the inode key (ino, size) it needs, and which keys some entry carries real bytes for"""
+    need, have, r = {}, set(), Reader(stream(f, start, length, os.cpu_count() or 4))
+    for name, mode, ino, size, pad in entries(r):
+        if mode & 0o170000 == 0o100000 and size:
+            head = r.read(min(size, 64)); r.skip(size - len(head))
+            i = name.find(WANT)
+            if is_canary(head, size):
+                if i >= 0: need.setdefault((ino, size), []).append(name[i + len(WANT):])
+            else: have.add((ino, size))
+        else: r.skip(size)
+        r.skip(pad)
+    return need, have
+
+
+def materialize(out, links):
+    """write each symlink as a copy of its target, resolving links through links (Versions/Current → A) until nothing more resolves"""
+    todo = [(rel, t) for rel, t in links if '/' in rel.rstrip('/')]   # not the SDK-name alias next to the SDK folder
+    while True:
+        left = []
+        for rel, target in todo:
+            dst = out / rel
+            src = (dst.parent / target) if not target.startswith('/') else None
+            if src is None: print(f'  link {rel} → {target}: absolute, skipped'); continue
+            if dst.exists(): continue
+            if not src.exists(): left.append((rel, target)); continue
+            if src.is_dir(): shutil.copytree(src, dst)
+            else: dst.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(src, dst)
+        if len(left) == len(todo):
+            for rel, target in left: print(f'  link {rel} → {target}: target not in the SDK, skipped')
+            return
+        todo = left
+
+
 def main():
     if len(sys.argv) < 2: sys.exit(__doc__ or 'usage: extract_xip.py <Xcode.xip> [out]')
     xip = Path(sys.argv[1]); out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).resolve().parent / 'out'
     out.mkdir(parents=True, exist_ok=True)
-    t0, n, links, seen = time.time(), 0, [], {}
+    t0, n, links = time.time(), 0, []
     with open(xip, 'rb') as f:
         start, length, enc = xar_content(f)
         print(f'xip: Content {length / 2**30:.1f} GB ({enc or "raw"}); writing the iPhoneOS SDK to {out}', flush=True)
+        need, have = scan(f, start, length)
+        lost = sum(len(v) for k, v in need.items() if k not in have)
+        print(f'  pass 1: {sum(map(len, need.values()))} SDK files are hard links whose bytes another entry carries' + (f' ({lost} with no carrier)' if lost else ''), flush=True)
         r = Reader(stream(f, start, length, os.cpu_count() or 4))
-        last = time.time()
+        last, done = time.time(), set()
         for name, mode, ino, size, pad in entries(r):
             i = name.find(WANT)
             rel = name[i + len(WANT):] if i >= 0 else None
-            kind = mode & 0o170000
+            kind, key = mode & 0o170000, (ino, size)
             if rel and kind == 0o120000:   # symlink: its target is the data
                 links.append((rel, r.read(size).decode('utf-8', 'surrogateescape')))
-            elif rel and kind == 0o100000:
-                dst = out / rel; dst.parent.mkdir(parents=True, exist_ok=True)
-                if size == 0 and ino in seen and seen[ino] != dst: shutil.copyfile(seen[ino], dst)   # a hard link whose data came with an earlier entry
-                else:
-                    with open(dst, 'wb') as o:
-                        left = size
-                        while left: b = r.read(min(left, 1 << 22)); o.write(b); left -= len(b)
-                    if size: seen[ino] = dst
-                n += 1
+            elif kind == 0o100000:
+                head = r.read(min(size, 64))
+                canary = is_canary(head, size)
+                dsts = [out / rel] if rel and not canary else []
+                if not canary and key in need and key not in done: dsts += [out / p for p in need[key]]; done.add(key)   # the carrier: also every canary link of this inode
+                if dsts:
+                    for d in dsts: d.parent.mkdir(parents=True, exist_ok=True)
+                    for d in dsts: d.write_bytes(head)
+                    if size > len(head):
+                        fs = [open(d, 'ab') for d in dsts]
+                        try:
+                            left = size - len(head)
+                            while left:
+                                b = r.read(min(left, 1 << 22))
+                                if not b: sys.exit('the cpio stream ended inside a file')
+                                for o in fs: o.write(b)
+                                left -= len(b)
+                        finally:
+                            for o in fs: o.close()
+                    n += len(dsts)
+                else: r.skip(size - len(head))
             else:
                 if rel and kind == 0o040000: (out / rel).mkdir(parents=True, exist_ok=True)
                 r.skip(size)
             r.skip(pad)
             if time.time() - last > 10: last = time.time(); print(f'  {r.total / 2**30:.1f} GB read, {n} SDK files', flush=True)
-    for rel, target in sorted(links, key=lambda x: x[0].count('/')):   # parents first
-        dst = out / rel
-        if '/' not in rel.rstrip('/'): continue   # the SDK-name alias next to the SDK folder
-        src = (dst.parent / target).resolve() if not target.startswith('/') else None
-        if not src or not src.exists(): print(f'  link {rel} → {target}: target not in the SDK, skipped'); continue
-        if dst.exists(): continue
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.is_dir(): shutil.copytree(src, dst)
-        else: shutil.copyfile(src, dst)
+    materialize(out, links)
+    bad = [p for p in out.rglob('*') if p.is_file() and p.stat().st_size >= len(CANARY) and is_canary(p.open('rb').read(64), p.stat().st_size)]
+    if bad: print(f'  WARNING: {len(bad)} files still hold a canary, e.g. {bad[0]}')
     sdks = sorted(p for p in out.iterdir() if p.suffix == '.sdk' and p.is_dir())
     print(f'done in {time.time() - t0:.0f} s: {n} files; SDK folders: {", ".join(p.name for p in sdks) or "none"}')
     if sdks: print(f'set it with: NXW_IOS_SDK={sdks[-1]}  (or "ios_sdk" in win/toolchain.json)')

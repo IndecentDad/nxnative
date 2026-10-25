@@ -13,3 +13,4 @@ win/toolchain.json
 win/sdk/out/
 win/build/
 __pycache__/
+win/sdk/extract.log

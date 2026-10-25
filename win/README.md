@@ -3,7 +3,14 @@
 This folder builds the same IPA as `scripts/build_ipa_from_nsp.py` on a Windows 10/11 PC, with no Mac or Xcode.
 The pipeline itself is unchanged: the upstream script runs as-is. Only the steps that call macOS tools are replaced, at the subprocess boundary.
 
-Status: **experimental, not yet verified end to end.** The Python parts have unit tests (`win/tests/test_win.py`). Nobody has yet compiled, installed and played an IPA built this way. See [Open risks](#open-risks).
+Status: **experimental.** Nobody has yet installed and played an IPA built this way. See [Open risks](#open-risks).
+
+Verified on Windows 11 with LLVM 23.1.4, Metal Developer Tools for Windows 6.2 (`metal 32023.850`) and the iPhoneOS 27.1 SDK from `Xcode_27.1.xip`:
+
+- **Shaders:** a test MSL shader compiles to `.metallib` for both `air64-apple-ios18.0` and macOS.
+- **Compile:** `win/compile_check.py` compiles all 134 app sources: host, NVN-on-Metal 4, libvpx, the iOS front end and `Launcher.m`.
+- **Link:** `ld64.lld` links the app with no undefined symbols. The SDK's stubs list only `arm64e`, and `arm64` links against them. With a synthetic rewritten module, `gen_embed.py`'s sections and the `-segprot` W segment come out as on a Mac.
+- **Unit tests:** `win/tests/test_win.py` passes.
 
 ## How each macOS step is replaced
 
@@ -57,14 +64,19 @@ python win/build_ipa_windows.py D:\Games\MarioWonder -k D:\keys\prod.keys
 
 The options are the upstream script's (`-h`). Only `--platform ios` exists here. The IPA is unsigned, as upstream: sign it with your sideloading tool (Sideloadly on Windows, AltStore, …), with the Increased Memory Limit capability where the tool offers it.
 
+### Notes on the tools
+
+- **Metal Developer Tools for Windows 5.x and 6.x** ship one toolchain in `bin/` for every target, and the `-target` triple picks the OS. 4.x had separate `ios/` and `macos/` folders. `win/toolchain.py` finds either layout.
+- **Xcode 27's `.xip`** is a sorted, deduplicated cpio (Metadata `xbs_sortcpio`). Only one entry of each hard-linked inode carries the bytes; the others hold a `NULLcanary` placeholder of the same size. `extract_xip.py` reads the archive twice: the first pass finds the entry that carries each inode's bytes, the second writes them to every SDK path. The extractor also resolves symlinks that point through other symlinks (`Headers → Versions/Current/Headers`).
+- **Line endings:** the checkout must keep LF (see `.gitattributes`). The shader chain hashes source bytes, so a CRLF checkout breaks `dmsh_xlate --source-sha`.
+
 ## Open risks
 
-These risks are untested until a real build runs. Check each one in this order:
+These risks remain until a real game is built and played. Check each one in this order:
 
-1. **Windows Metal compiler output**: the shader libraries must load on iOS 26 (`MTLDevice newLibraryWithURL`). The Windows tools' version must accept `-target air64-apple-ios18.0` and the MSL that spirv-cross emits.
-2. **clang and the iOS 26 SDK headers**: open-source clang must parse Apple's SDK, which uses Apple-clang-only attributes in places. `-mcpu=apple-a18` needs LLVM 20 or later.
-3. **ld64.lld**: it must accept `-segprot` for the rewritten modules' W segments (`gen_embed.py`), the SDK's `.tbd` stubs (TAPI v5), and the very large `__TEXT` sections.
-4. **Icons without an asset catalog** on iOS 26.
-5. **The launcher port** (`Launcher.m`) behaving like `Launcher.swift`.
+1. **Shader libraries on the device:** they come from the Windows compiler (`32023.850`; upstream locks Xcode's `32023.921`). They must load and render on iOS 26+ (`newLibraryWithURL`). `own_compilers.py` accepts the different compiler.
+2. **The real game modules:** sections hundreds of MB large, linked by `ld64.lld`, then signed by the sideloading tool.
+3. **Icons without an asset catalog** on iOS 26.
+4. **The launcher port** (`Launcher.m`) must behave like `Launcher.swift`.
 
 The `rea` MCP (github.com/morluto/rea) is optional. It helps compare a Windows-built Mach-O with a Mac-built one (load commands, sections, symbols) when a step above fails.
