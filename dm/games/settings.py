@@ -35,6 +35,7 @@ def build(gid, patched, control):
 
     def shown(cond, n):
         if cond == 'always': return True
+        if cond.startswith('always/'): return True   # listed for every game; usable() says where it does anything
         if cond == 'languages>1': return len(langs) > 1
         if cond.startswith('fixups:'): return cond[7:] in keys
         if cond.startswith('gfxapi:'): return os.environ.get('GFXAPI', '') == cond[7:]
@@ -43,6 +44,7 @@ def build(gid, patched, control):
         sys.exit(f'settings.tsv:{n}: unknown condition {cond}')
 
     def value(d, n):
+        if d == 'docked_unless_touch': return '0' if macro('DM_GAME_PAD_LAYOUT', n) == '2' else '1'   # a touch game's touches reach it only in handheld mode
         if d.startswith('DM_GAME_'): return macro(d, n)
         if d.startswith('build:'):
             v = os.environ.get(d[6:], '')
@@ -53,6 +55,8 @@ def build(gid, patched, control):
     for n, (var, kind, values, default, cond, label, note) in rows():
         if not shown(cond, n): continue
         s = {'env': var, 'kind': kind, 'label': label, 'note': note, 'default': value(default, n)}
+        if cond.startswith('always/') and not shown(cond[7:], n):   # listed, but this game has nothing it acts on: shown disabled
+            s['disabled'] = True; s['note'] = (note + ' ' if note else '') + 'No effect in this game.'
         if kind == 'choice':
             opts = [list(l) for l in langs] if values == 'languages' else [v.split('=', 1) for v in values.split(',')]
             if any(len(o) != 2 for o in opts): sys.exit(f'settings.tsv:{n}: choice values are value=label,...')

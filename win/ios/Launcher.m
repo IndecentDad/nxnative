@@ -1,8 +1,11 @@
 // Launcher for the Windows build: a UIKit port of dm/ios/Sources/Launcher.swift (SwiftUI), so the app builds with clang alone (no Swift toolchain).
-// Same contract as the Swift one: dm_show_launcher(view controller, done) shows the settings screen over the root view controller, puts every setting into the environment when Play
-// is pressed and then calls done; it returns false (done is not called) when there is no launcher (no dm/launcher.json, DM_LAUNCHER=0, or a file it cannot read).
-// Settings come from the app's dm/launcher.json (dm/games/settings.py): kind "choice" (options [[value, label]]), "range" (min / max / step, shown as a percentage) or a toggle ("1" / "0").
-// A variable an env file set (DM_ENV_FILE_KEYS, main.m) is shown but kept. Choices are kept in NSUserDefaults under "launcher.<ENV>", as the Swift launcher does.
+// Its look follows the SwiftUI launcher's Form (upstream 2f69480): the game card on the left half; on the right half every setting in a section of its own
+// (a separate rounded row, its note as the section footer), choices as a menu button, ranges as an inline slider with a percentage, toggles as switches,
+// and the memory available. Same contract: dm_show_launcher(view controller, done) shows the screen over the root view controller, puts every setting into
+// the environment when Play is pressed and then calls done; it returns false (done is not called) when there is no launcher (no dm/launcher.json,
+// DM_LAUNCHER=0, or a file it cannot read). Settings come from the app's dm/launcher.json (dm/games/settings.py): kind "choice" (options [[value, label]]),
+// "range" (min / max / step, shown as a percentage) or a toggle ("1" / "0"). A variable an env file set (DM_ENV_FILE_KEYS, main.m) is shown but kept.
+// Choices are kept in NSUserDefaults under "launcher.<ENV>", as the Swift launcher does.
 #import <UIKit/UIKit.h>
 #include <os/proc.h>
 #include <stdio.h>
@@ -13,6 +16,7 @@
 @property (copy) NSString *env, *kind, *label, *note, *def;
 @property (copy) NSArray<NSArray<NSString *> *> *options;   // choice: [value, label]
 @property double min, max, step; @property BOOL hasMin, hasMax, hasStep;
+@property BOOL disabled;   // listed for every game, but this one has nothing it acts on (settings.tsv always/<condition>): shown greyed out, never applied
 @end
 @implementation DmSetting
 @end
@@ -39,6 +43,7 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
         if ([d[@"min"] isKindOfClass:NSNumber.class]) { s.min = [d[@"min"] doubleValue]; s.hasMin = YES; }
         if ([d[@"max"] isKindOfClass:NSNumber.class]) { s.max = [d[@"max"] doubleValue]; s.hasMax = YES; }
         if ([d[@"step"] isKindOfClass:NSNumber.class]) { s.step = [d[@"step"] doubleValue]; s.hasStep = YES; }
+        s.disabled = [d[@"disabled"] isKindOfClass:NSNumber.class] && [d[@"disabled"] boolValue];
         [out addObject:s];
     }
     return out;
@@ -69,9 +74,9 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
     return self;
 }
 - (NSString *)value:(DmSetting *)s { return self.values[s.env] ?: s.def; }
-- (BOOL)locked:(DmSetting *)s { return [self.fromFile containsObject:s.env]; }
+- (BOOL)locked:(DmSetting *)s { return s.disabled || [self.fromFile containsObject:s.env]; }
 - (NSString *)note:(DmSetting *)s {
-    if (![self locked:s]) return s.note;
+    if (s.disabled || ![self.fromFile containsObject:s.env]) return s.note;
     return [NSString stringWithFormat:@"%@Set by an env file", s.note.length ? [s.note stringByAppendingString:@" · "] : @""];
 }
 - (double)rangeValue:(DmSetting *)s {
@@ -79,10 +84,16 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
     return ([sc scanDouble:&d] && sc.isAtEnd) ? d : (s.hasMax ? s.max : 1);
 }
 - (NSString *)percentage:(DmSetting *)s { return [NSString stringWithFormat:@"%ld %%", lround([self rangeValue:s] * 100)]; }
+- (NSString *)choiceLabel:(DmSetting *)s {
+    NSString *cur = [self value:s];
+    for (NSArray *o in s.options) if ([o[0] isEqualToString:cur]) return o[1];
+    return cur;
+}
 - (void)apply {   // before the game starts: every setting not set by an env file goes into the environment (DM_LANG replaces the packed language main.m set as a default)
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
     for (DmSetting *s in self.settings) {
         NSString *v = [self value:s];
+        if (s.disabled) continue;   // nothing in this game reads it
         if ([self locked:s]) { fprintf(stderr, "launcher: %s kept at %s (env file)\n", s.env.UTF8String, v.UTF8String); continue; }
         [ud setObject:v forKey:[@"launcher." stringByAppendingString:s.env]];
         setenv(s.env.UTF8String, v.UTF8String, 1); fprintf(stderr, "launcher: %s=%s\n", s.env.UTF8String, v.UTF8String);
@@ -90,140 +101,126 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
 }
 @end
 
-static UIView *label_stack(NSString *title, NSString *note) {
-    UILabel *a = [UILabel new]; a.text = title; a.numberOfLines = 0; a.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    UIStackView *st = [[UIStackView alloc] initWithArrangedSubviews:@[a]]; st.axis = UILayoutConstraintAxisVertical; st.spacing = 4;
-    if (note.length) {
-        UILabel *b = [UILabel new]; b.text = note; b.numberOfLines = 0; b.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote]; b.textColor = UIColor.secondaryLabelColor;
-        [st addArrangedSubview:b];
-    }
-    st.translatesAutoresizingMaskIntoConstraints = NO;
-    return st;
-}
-
-static UITableViewCell *cell_with(UIView *left, UIView *right) {
-    UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    [c.contentView addSubview:left];
-    UILayoutGuide *m = c.contentView.layoutMarginsGuide;
-    [NSLayoutConstraint activateConstraints:@[[left.leadingAnchor constraintEqualToAnchor:m.leadingAnchor], [left.topAnchor constraintEqualToAnchor:m.topAnchor],
-                                              [left.bottomAnchor constraintEqualToAnchor:m.bottomAnchor]]];
-    if (right) {
-        right.translatesAutoresizingMaskIntoConstraints = NO; [c.contentView addSubview:right];
-        [right setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-        [NSLayoutConstraint activateConstraints:@[[right.trailingAnchor constraintEqualToAnchor:m.trailingAnchor], [right.centerYAnchor constraintEqualToAnchor:c.contentView.centerYAnchor],
-                                                  [left.trailingAnchor constraintLessThanOrEqualToAnchor:right.leadingAnchor constant:-8]]];
-    } else [left.trailingAnchor constraintEqualToAnchor:m.trailingAnchor].active = YES;
-    return c;
-}
-
-static UILabel *detail_label(NSString *text) {
-    UILabel *l = [UILabel new]; l.text = text; l.textColor = UIColor.secondaryLabelColor;
-    l.font = [UIFont monospacedDigitSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightRegular];
+static UILabel *body_label(NSString *text) {
+    UILabel *l = [UILabel new]; l.text = text; l.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; l.textColor = UIColor.labelColor;
+    l.translatesAutoresizingMaskIntoConstraints = NO; [l setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     return l;
 }
 
-// ---- a choice's options ----
-@interface DmChoiceVC : UITableViewController
-@property (strong) DmLauncherModel *m; @property (strong) DmSetting *s; @property (copy) void (^changed)(void);
-@end
-@implementation DmChoiceVC
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return self.s.options.count; }
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    NSArray *o = self.s.options[ip.row]; c.textLabel.text = o[1];
-    c.accessoryType = [o[0] isEqualToString:[self.m value:self.s]] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    return c;
+static UILabel *value_label(NSString *text) {
+    UILabel *l = [UILabel new]; l.text = text; l.textColor = UIColor.secondaryLabelColor; l.textAlignment = NSTextAlignmentRight;
+    l.font = [UIFont monospacedDigitSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightRegular];
+    l.translatesAutoresizingMaskIntoConstraints = NO;
+    return l;
 }
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec { NSString *n = [self.m note:self.s]; return n.length ? n : nil; }
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    self.m.values[self.s.env] = self.s.options[ip.row][0];
-    [tv reloadData]; if (self.changed) self.changed();
-    [self.navigationController popViewControllerAnimated:YES];
-}
-@end
 
-// ---- a range's slider ----
-@interface DmRangeVC : UITableViewController
-@property (strong) DmLauncherModel *m; @property (strong) DmSetting *s; @property (copy) void (^changed)(void);
-@property (strong) UILabel *pct;
-@end
-@implementation DmRangeVC
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return 2; }
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    if (ip.row == 0) { self.pct = detail_label([self.m percentage:self.s]); UITableViewCell *c = cell_with(label_stack(self.s.label, nil), self.pct); c.selectionStyle = UITableViewCellSelectionStyleNone; return c; }
-    UISlider *sl = [UISlider new];
-    sl.minimumValue = self.s.hasMin ? self.s.min : 0; sl.maximumValue = self.s.hasMax ? self.s.max : 1; sl.value = [self.m rangeValue:self.s];
-    sl.enabled = ![self.m locked:self.s]; sl.accessibilityLabel = self.s.label;
-    [sl addTarget:self action:@selector(slid:) forControlEvents:UIControlEventValueChanged];
-    sl.translatesAutoresizingMaskIntoConstraints = NO;
-    UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil]; c.selectionStyle = UITableViewCellSelectionStyleNone;
-    [c.contentView addSubview:sl]; UILayoutGuide *g = c.contentView.layoutMarginsGuide;
-    [NSLayoutConstraint activateConstraints:@[[sl.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [sl.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
-                                              [sl.topAnchor constraintEqualToAnchor:g.topAnchor], [sl.bottomAnchor constraintEqualToAnchor:g.bottomAnchor]]];
-    return c;
-}
-- (void)slid:(UISlider *)sl {
-    double step = self.s.hasStep ? self.s.step : 0.05, lo = self.s.hasMin ? self.s.min : 0;
-    double v = step > 0 ? lo + round((sl.value - lo) / step) * step : sl.value;   // SwiftUI's Slider(step:) snaps the same way
-    sl.value = v;
-    self.m.values[self.s.env] = [NSString stringWithFormat:@"%.2f", v];
-    self.pct.text = [self.m percentage:self.s]; sl.accessibilityValue = self.pct.text;
-    if (self.changed) self.changed();
-}
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec { NSString *n = [self.m note:self.s]; return n.length ? n : nil; }
-@end
-
-// ---- the settings list ----
+// ---- the settings: one section per setting, as SwiftUI's Form draws a Section per row ----
 @interface DmSettingsVC : UITableViewController
 @property (strong) DmLauncherModel *m; @property (strong) NSTimer *timer; @property (strong) UILabel *memory;
 @end
 @implementation DmSettingsVC
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.tableView.backgroundColor = UIColor.clearColor;
+    self.tableView.rowHeight = UITableViewAutomaticDimension; self.tableView.estimatedRowHeight = 56;
+    self.tableView.sectionHeaderTopPadding = 0;
     __weak DmSettingsVC *w = self;
     self.timer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *t) { w.memory.text = [NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]; }];
 }
-- (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; [self.navigationController setNavigationBarHidden:YES animated:a]; [self.tableView reloadData]; }
 - (void)dealloc { [self.timer invalidate]; }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 2; }
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return sec == 0 ? self.m.settings.count : 1; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.m.settings.count + 1; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return 1; }
+- (CGFloat)tableView:(UITableView *)tv heightForHeaderInSection:(NSInteger)sec { return sec == 0 ? 20 : 12; }
+- (UIView *)tableView:(UITableView *)tv viewForHeaderInSection:(NSInteger)sec { return [UIView new]; }
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec {
+    if (sec >= (NSInteger)self.m.settings.count) return nil;
+    NSString *n = [self.m note:self.m.settings[sec]]; return n.length ? n : nil;
+}
+- (CGFloat)tableView:(UITableView *)tv heightForFooterInSection:(NSInteger)sec {
+    if (sec < (NSInteger)self.m.settings.count && [self.m note:self.m.settings[sec]].length) return UITableViewAutomaticDimension;
+    return 12;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    if (ip.section == 1) {
-        self.memory = detail_label([NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]);
-        UITableViewCell *c = cell_with(label_stack(@"Memory available", nil), self.memory); c.selectionStyle = UITableViewCellSelectionStyleNone; return c;
+    UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    c.selectionStyle = UITableViewCellSelectionStyleNone;
+    UIView *v = c.contentView; UILayoutGuide *g = v.layoutMarginsGuide;
+    if (ip.section == (NSInteger)self.m.settings.count) {   // Memory available
+        UILabel *l = body_label(@"Memory available");
+        self.memory = value_label([NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]);
+        [v addSubview:l]; [v addSubview:self.memory];
+        [NSLayoutConstraint activateConstraints:@[[l.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [l.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+            [self.memory.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [self.memory.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+            [v.heightAnchor constraintGreaterThanOrEqualToConstant:56]]];
+        return c;
     }
-    DmSetting *s = self.m.settings[ip.row]; BOOL locked = [self.m locked:s]; UITableViewCell *c;
-    if ([s.kind isEqualToString:@"choice"]) {
-        NSString *cur = [self.m value:s];
-        for (NSArray *o in s.options) if ([o[0] isEqualToString:cur]) cur = o[1];
-        c = cell_with(label_stack(s.label, [self.m note:s]), detail_label(cur)); c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else if ([s.kind isEqualToString:@"range"]) {
-        c = cell_with(label_stack(s.label, [self.m note:s]), detail_label([self.m percentage:s])); c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    DmSetting *s = self.m.settings[ip.section]; BOOL locked = [self.m locked:s];
+    UILabel *l = body_label(s.label); [v addSubview:l];
+    NSMutableArray *cs = [@[[l.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [l.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+                            [v.heightAnchor constraintGreaterThanOrEqualToConstant:56]] mutableCopy];
+    if ([s.kind isEqualToString:@"choice"]) {   // SwiftUI's default Picker in a Form: the value with up / down chevrons, opening a menu
+        UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration];
+        cfg.title = [self.m choiceLabel:s]; cfg.baseForegroundColor = UIColor.secondaryLabelColor;
+        cfg.image = [UIImage systemImageNamed:@"chevron.up.chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]];
+        cfg.imagePlacement = NSDirectionalRectEdgeTrailing; cfg.imagePadding = 5; cfg.contentInsets = NSDirectionalEdgeInsetsMake(6, 6, 6, 0);
+        cfg.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *a) { NSMutableDictionary *m = [a mutableCopy]; m[NSFontAttributeName] = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; return m; };
+        UIButton *b = [UIButton buttonWithConfiguration:cfg primaryAction:nil];
+        b.showsMenuAsPrimaryAction = YES; b.changesSelectionAsPrimaryAction = NO; b.enabled = !locked;
+        b.menu = [self menuFor:s button:b];
+        b.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:b];
+        [cs addObjectsFromArray:@[[b.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [b.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+                                  [b.leadingAnchor constraintGreaterThanOrEqualToAnchor:l.trailingAnchor constant:12]]];
+    } else if ([s.kind isEqualToString:@"range"]) {   // label, slider, percentage in one row
+        UISlider *sl = [UISlider new]; sl.translatesAutoresizingMaskIntoConstraints = NO;
+        sl.minimumValue = s.hasMin ? s.min : 0; sl.maximumValue = s.hasMax ? s.max : 1; sl.value = [self.m rangeValue:s];
+        sl.enabled = !locked; sl.accessibilityLabel = s.label; sl.tag = ip.section;
+        [sl addTarget:self action:@selector(slid:) forControlEvents:UIControlEventValueChanged];
+        UILabel *pct = value_label([self.m percentage:s]); pct.tag = 1000 + ip.section;
+        [v addSubview:sl]; [v addSubview:pct];
+        [cs addObjectsFromArray:@[[sl.leadingAnchor constraintEqualToAnchor:l.trailingAnchor constant:12], [sl.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+                                  [pct.leadingAnchor constraintEqualToAnchor:sl.trailingAnchor constant:12], [pct.widthAnchor constraintEqualToConstant:56],
+                                  [pct.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [pct.centerYAnchor constraintEqualToAnchor:v.centerYAnchor]]];
     } else {
-        UISwitch *sw = [UISwitch new]; sw.on = [[self.m value:s] isEqualToString:@"1"]; sw.enabled = !locked; sw.tag = ip.row;
+        UISwitch *sw = [UISwitch new]; sw.on = [[self.m value:s] isEqualToString:@"1"]; sw.enabled = !locked; sw.tag = ip.section;
+        sw.translatesAutoresizingMaskIntoConstraints = NO;
         [sw addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
-        c = cell_with(label_stack(s.label, [self.m note:s]), sw); c.selectionStyle = UITableViewCellSelectionStyleNone;
+        [v addSubview:sw];
+        [cs addObjectsFromArray:@[[sw.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [sw.centerYAnchor constraintEqualToAnchor:v.centerYAnchor]]];
     }
-    if (locked) { c.userInteractionEnabled = NO; c.contentView.alpha = 0.5; }
+    [NSLayoutConstraint activateConstraints:cs];
+    if (locked) l.textColor = UIColor.tertiaryLabelColor;
     return c;
 }
-- (void)toggled:(UISwitch *)sw { DmSetting *s = self.m.settings[sw.tag]; self.m.values[s.env] = sw.on ? @"1" : @"0"; }
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tv deselectRowAtIndexPath:ip animated:YES];
-    if (ip.section != 0) return;
-    DmSetting *s = self.m.settings[ip.row];
-    __weak UITableView *wt = tv; void (^changed)(void) = ^{ [wt reloadData]; };
-    UITableViewController *vc;
-    if ([s.kind isEqualToString:@"choice"]) { DmChoiceVC *c = [[DmChoiceVC alloc] initWithStyle:UITableViewStyleInsetGrouped]; c.m = self.m; c.s = s; c.changed = changed; vc = c; }
-    else if ([s.kind isEqualToString:@"range"]) { DmRangeVC *r = [[DmRangeVC alloc] initWithStyle:UITableViewStyleInsetGrouped]; r.m = self.m; r.s = s; r.changed = changed; vc = r; }
-    else return;
-    vc.title = s.label; vc.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
-    [self.navigationController setNavigationBarHidden:NO animated:YES];
-    [self.navigationController pushViewController:vc animated:YES];
+
+- (UIMenu *)menuFor:(DmSetting *)s button:(UIButton *)b {
+    NSMutableArray *items = [NSMutableArray array];
+    NSString *cur = [self.m value:s];
+    __weak DmSettingsVC *w = self; __weak UIButton *wb = b;
+    for (NSArray *o in s.options) {
+        UIAction *a = [UIAction actionWithTitle:o[1] image:nil identifier:nil handler:^(UIAction *act) {
+            DmSettingsVC *me = w; if (!me) return;
+            me.m.values[s.env] = o[0];
+            UIButtonConfiguration *cfg = wb.configuration; cfg.title = o[1]; wb.configuration = cfg;
+            wb.menu = [me menuFor:s button:wb];
+        }];
+        a.state = [o[0] isEqualToString:cur] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [items addObject:a];
+    }
+    return [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:items];
 }
+
+- (void)slid:(UISlider *)sl {
+    DmSetting *s = self.m.settings[sl.tag];
+    double step = s.hasStep ? s.step : 0.05, lo = s.hasMin ? s.min : 0;
+    double v = step > 0 ? lo + round((sl.value - lo) / step) * step : sl.value;   // SwiftUI's Slider(step:) snaps the same way
+    self.m.values[s.env] = [NSString stringWithFormat:@"%.2f", v];
+    UILabel *pct = [sl.superview viewWithTag:1000 + sl.tag];
+    pct.text = [self.m percentage:s]; sl.accessibilityValue = pct.text;
+}
+- (void)toggled:(UISwitch *)sw { DmSetting *s = self.m.settings[sw.tag]; self.m.values[s.env] = sw.on ? @"1" : @"0"; }
 @end
 
-// ---- the screen: game card on the left third, settings on the right two thirds ----
+// ---- the screen: game card on the left half, settings on the right half ----
 @interface DmLauncherVC : UIViewController
 @property (strong) DmLauncherModel *m; @property (copy) void (^play)(void);
 @end
@@ -232,12 +229,13 @@ static id info(NSString *k) { return [NSBundle.mainBundle objectForInfoDictionar
 static UIImage *app_icon(void) {
     UIImage *i = [UIImage imageNamed:@"AppIcon"]; if (i) return i;
     NSDictionary *icons = info(@"CFBundleIcons"); NSArray *files = [icons isKindOfClass:NSDictionary.class] ? icons[@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"] : nil;
-    return [files isKindOfClass:NSArray.class] && [files.lastObject isKindOfClass:NSString.class] ? [UIImage imageNamed:files.lastObject] : nil;
+    for (NSString *f in [files reverseObjectEnumerator]) { UIImage *im = [f isKindOfClass:NSString.class] ? [UIImage imageNamed:f] : nil; if (im) return im; }
+    return [UIImage imageNamed:@"AppIcon60x60"];
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.view.backgroundColor = UIColor.blackColor;
     UIStackView *card = [UIStackView new]; card.axis = UILayoutConstraintAxisVertical; card.alignment = UIStackViewAlignmentCenter; card.spacing = 16;
     UIImage *icon = app_icon();
     if (icon) {
@@ -254,27 +252,29 @@ static UIImage *app_icon(void) {
     SEL glass = NSSelectorFromString(@"prominentGlassButtonConfiguration");   // iOS 26's .glassProminent, as Launcher.swift; the filled style before it
     if ([UIButtonConfiguration respondsToSelector:glass]) cfg = ((UIButtonConfiguration *(*)(id, SEL))[UIButtonConfiguration methodForSelector:glass])(UIButtonConfiguration.class, glass);
     if (!cfg) cfg = [UIButtonConfiguration filledButtonConfiguration];
-    cfg.buttonSize = UIButtonConfigurationSizeLarge;
-    cfg.attributedTitle = [[NSAttributedString alloc] initWithString:@"Play" attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleTitle3].pointSize weight:UIFontWeightSemibold]}];
+    cfg.buttonSize = UIButtonConfigurationSizeLarge; cfg.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+    UIFontDescriptor *pd = [[UIFont preferredFontForTextStyle:UIFontTextStyleTitle3].fontDescriptor fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitBold];
+    cfg.attributedTitle = [[NSAttributedString alloc] initWithString:@"Play" attributes:@{NSFontAttributeName: [UIFont fontWithDescriptor:pd size:0]}];
     __weak DmLauncherVC *w = self;
     UIButton *b = [UIButton buttonWithConfiguration:cfg primaryAction:[UIAction actionWithHandler:^(UIAction *a) { if (w.play) w.play(); }]];
     [b.widthAnchor constraintEqualToConstant:220].active = YES; [card addArrangedSubview:b];
+    [card setCustomSpacing:20 afterView:ver];
     card.translatesAutoresizingMaskIntoConstraints = NO; [self.view addSubview:card];
 
     DmSettingsVC *list = [[DmSettingsVC alloc] initWithStyle:UITableViewStyleInsetGrouped]; list.m = self.m;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:list];
-    [self addChildViewController:nav]; nav.view.translatesAutoresizingMaskIntoConstraints = NO; [self.view addSubview:nav.view]; [nav didMoveToParentViewController:self];
+    [self addChildViewController:list]; list.view.translatesAutoresizingMaskIntoConstraints = NO; [self.view addSubview:list.view]; [list didMoveToParentViewController:self];
     UIView *v = self.view;
-    UILayoutGuide *left = [UILayoutGuide new]; [v addLayoutGuide:left];   // the card is centered in the left third, 16 points from its edges
+    UILayoutGuide *left = [UILayoutGuide new]; [v addLayoutGuide:left];   // two equal halves, as the SwiftUI HStack of two maxWidth: .infinity views
     [NSLayoutConstraint activateConstraints:@[
-        [nav.view.topAnchor constraintEqualToAnchor:v.topAnchor], [nav.view.bottomAnchor constraintEqualToAnchor:v.bottomAnchor],
-        [nav.view.trailingAnchor constraintEqualToAnchor:v.trailingAnchor], [nav.view.widthAnchor constraintEqualToAnchor:v.widthAnchor multiplier:2.0 / 3.0],
-        [left.leadingAnchor constraintEqualToAnchor:v.leadingAnchor], [left.trailingAnchor constraintEqualToAnchor:nav.view.leadingAnchor],
+        [list.view.topAnchor constraintEqualToAnchor:v.topAnchor], [list.view.bottomAnchor constraintEqualToAnchor:v.bottomAnchor],
+        [list.view.trailingAnchor constraintEqualToAnchor:v.safeAreaLayoutGuide.trailingAnchor], [list.view.widthAnchor constraintEqualToAnchor:v.safeAreaLayoutGuide.widthAnchor multiplier:0.5],
+        [left.leadingAnchor constraintEqualToAnchor:v.safeAreaLayoutGuide.leadingAnchor], [left.trailingAnchor constraintEqualToAnchor:list.view.leadingAnchor],
         [card.centerXAnchor constraintEqualToAnchor:left.centerXAnchor], [card.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
-        [card.widthAnchor constraintLessThanOrEqualToAnchor:left.widthAnchor constant:-32]]];
+        [card.widthAnchor constraintLessThanOrEqualToAnchor:left.widthAnchor constant:-48]]];
 }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
 - (BOOL)prefersStatusBarHidden { return YES; }
+- (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 @end
 
 bool dm_show_launcher(void *view_controller, void (*done)(void)) {
