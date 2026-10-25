@@ -16,6 +16,7 @@ CHUNK = 16 << 20
 L32, L16 = 0xFFFFFFFF, 0xFFFF
 DIR_MODE = stat.S_IFDIR | 0o755   # a parent folder no source folder stands for (Payload/, msl/)
 Entry = collections.namedtuple('Entry', 'name path st')   # st None: such a parent folder
+EXEC = set()   # --exec: archive paths that get mode 755 when packing on Windows (the app's executable)
 
 
 def entries(maps, skip):
@@ -79,6 +80,8 @@ class Zip:
         z = [v for v in (usize, csize, off) if v >= L32]   # zip64 extra: the fields that do not fit, in this order
         ext = struct.pack(f'<HH{len(z)}Q', 1, 8 * len(z), *z) if z else b''
         mode = e.st.st_mode if e.st else DIR_MODE
+        if os.name == 'nt' and e.st:   # Windows has no Unix modes (files read as 0o666 without x): folders 755, the --exec files 755, everything else 644, as Info-ZIP on a Mac writes them
+            mode = DIR_MODE if stat.S_ISDIR(mode) else stat.S_IFREG | (0o755 if e.name in EXEC else 0o644)
         self.cd.append(struct.pack('<IHHHHHHIIIHHHHHII', 0x02014B50, 0x031E, 45 if z else 20 if method == 8 else 10, fl, method, t, d, crc, min(csize, L32), min(usize, L32),
                                    len(nb), len(ext), 0, 0, 0, (mode << 16) | (0x10 if stat.S_ISDIR(mode) else 0), min(off, L32)) + nb + ext)
 
@@ -127,7 +130,9 @@ def main():
     ap.add_argument('out'); ap.add_argument('maps', nargs='+', metavar='archive_path=folder')
     ap.add_argument('--store', default='', help='suffixes stored without compressing, separated by ":"')
     ap.add_argument('--skip', action='append', default=[], help='an archive path left out of the folder walk that would add it')
+    ap.add_argument('--exec', action='append', default=[], help='an archive path packed with mode 755 on Windows, which has no x bit (the app executable)')
     a = ap.parse_args()
+    EXEC.update(p.strip('/') for p in a.exec)
     maps = []
     for m in a.maps:
         arc, sep, src = m.partition('=')
