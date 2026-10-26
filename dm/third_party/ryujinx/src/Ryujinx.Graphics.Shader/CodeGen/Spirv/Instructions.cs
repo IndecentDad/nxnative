@@ -623,11 +623,9 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             SpvInstruction image = declaration.Image;
 
             bool bounded = context.HostCapabilities.Msl23ImageAtomics;
-            if (bounded && ((texOp.Flags & TextureFlags.AtomicBoundsMask) != 0 ||
-                !texOp.Flags.HasFlag(TextureFlags.AtomicDiscardResult)))
-            {
-                throw new NotSupportedException("MSL 2.3 image atomics require IGN with a discarded result; TRAP/returning semantics are not implemented.");
-            }
+            // Returning atomics and the other bound modes: an access outside the image does nothing and returns 0, as IGN does (a TRAP or clamp access reads no texel
+            // here either). The result is a phi of the atomic's value and 0, so a shader that uses it (Octopath Traveler 0: 2,077 of its shaders) translates
+            bool returns = bounded && !texOp.Flags.HasFlag(TextureFlags.AtomicDiscardResult);
             if (bounded && (declaration.IsIndexed ||
                 (texOp.Type != SamplerType.TextureBuffer && texOp.Type != SamplerType.Texture2D &&
                  texOp.Type != (SamplerType.Texture2D | SamplerType.Array)) ||
@@ -672,7 +670,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
             SpvInstruction value = Src(componentType);
 
-            SpvInstruction merge = null;
+            SpvInstruction merge = null, pre = null, validLabel = null;
             if (bounded)
             {
                 // Test each original coordinate, including the array layer, before
@@ -693,9 +691,13 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
                 SpvInstruction valid = context.Label();
                 merge = context.Label();
+                pre = context.Label();   // a block of its own for the test, whose label the phi names as the out-of-bounds edge
+                context.Branch(pre);
+                context.AddLabel(pre);
                 context.SelectionMerge(merge, SelectionControlMask.MaskNone);
                 context.BranchConditional(inside, valid, merge);
                 context.AddLabel(valid);
+                validLabel = valid;
 
 
             }
@@ -727,9 +729,9 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             {
                 context.Branch(merge);
                 context.AddLabel(merge);
-                // The source instruction discards this result. This constant is
-                // IR plumbing, not an invented OOB return value for SUATOM.
-                result = context.Constant(resultType, 0);
+                SpvInstruction zeroResult = context.Constant(resultType, 0);
+                // Discarded: the constant is IR plumbing. Returned: the atomic's old value inside the image, 0 outside it
+                result = returns ? context.Phi(resultType, result, validLabel, zeroResult, pre) : zeroResult;
             }
             return new OperationResult(componentType, result);
         }

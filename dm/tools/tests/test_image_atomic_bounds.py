@@ -362,14 +362,16 @@ class Compiler(unittest.TestCase):
                         self.assertIn('.get_height()', source)
                         if array: self.assertIn('.get_array_size()', source)
                         self.compile_metal(msl, work, job['key'])
+            # Returning atomics and the other bound modes translate: outside the image the atomic does nothing and returns 0 (a phi of its value and 0)
             for mode, discard in [(1, True), (2, True), (3, True), (0, False)]:
-                key = 'reject_%d_%d' % (mode, discard)
+                key = 'bound_%d_%d' % (mode, discard)
                 code=work/(key+'.bin'); code.write_bytes(synthetic_shader(0,0,mode=mode,discard=discard))
                 jp.write_text(json.dumps([dict(key=key,stage='cs',code=str(code),img={'0':dict(type='2darray',fmt='R32Uint')},local=[1,1,1],debug=True)]))
                 result=subprocess.run([os.environ['DMSH_TEST_XLATE'],str(jp),str(work)],capture_output=True,text=True)
-                self.assertNotEqual(result.returncode,0)
-                self.assertIn('require IGN with a discarded result',result.stderr)
-                self.assertFalse((work/(key+'.spv')).exists())
+                self.assertEqual(result.returncode,0,result.stderr)
+                spv=work/(key+'.spv'); self.assertTrue(spv.exists())
+                subprocess.run(['spirv-val','--target-env','vulkan1.1',str(spv)],check=True)
+                if not discard: self.assertTrue(any(op == 245 for op, _ in instructions(spv)))   # OpPhi
 
 
 if __name__ == '__main__': unittest.main()
