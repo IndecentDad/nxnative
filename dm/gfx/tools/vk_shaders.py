@@ -136,7 +136,7 @@ def one(path, tmp, root):
     if stage == 'frag' and '[[color(1)]]' in src:   # dual-source variant vk_<key>_d: the output at location 1 becomes the second blend source of attachment 0
         msl_d = os.path.join(tmp, key + '_d.metal'); msls.append(msl_d)
         open(msl_d, 'w').write(src.replace(f'vk_{key}', f'vk_{key}_d').replace('[[color(1)]]', '[[color(0), index(1)]]'))
-    return key, stage, res, msls, '/' + os.path.relpath(path, root)
+    return key, stage, res, msls, '/' + os.path.relpath(path, root).replace(os.sep, '/')
 
 def metallib(msls, out, sdk, extra):
     os.makedirs(out, exist_ok=True)
