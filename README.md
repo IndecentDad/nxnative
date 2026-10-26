@@ -37,7 +37,7 @@ This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnativ
 |---|---|
 | **Verified** | **Balatro** built on Windows 11, sideloaded, and played on an iPad (Apple A16 GPU, iPadOS 27). |
 | **Built, under test** | **Megabyte Punch** (Unity 2019.2, no upstream profile yet). Its 3,498 NVN shaders compile with the Windows Metal compiler. The latest IPA has the SDK 8.3.1 address-region fix for its first crash. |
-| **A16 and older GPUs** | Their GPUs cannot read BC-compressed textures, which most 3D Switch games ship. This fork decodes BC1–BC7 on the CPU at upload into uncompressed textures (`dm/gfx/tex/bc_soft.c`, checked block by block against a reference decoder). The upstream host stopped on them (`MTLTextureDescriptor has invalid pixelFormat`). Decoded textures take 4–8× the memory of the BC data, and big games may need *Increased Memory Limit*. |
+| **A16 and older GPUs** | Their GPUs cannot read BC-compressed textures, which most 3D Switch games ship. This fork decodes BC1–BC7 on the CPU at upload into uncompressed textures, using every core (`dm/gfx/tex/bc_soft.c`, checked block by block against a reference decoder). A 2048×2048 BC7 texture takes about 65 ms on one PC core. The upstream host stopped on these textures (`MTLTextureDescriptor has invalid pixelFormat`). Only GPUs without BC take this path: A17 Pro / M1 and newer read BC directly, at no cost. On an A16, decoded textures take 2–8× the memory of the BC data, so big games may need *Increased Memory Limit*. |
 | **Checked on Windows** | All 134 app sources compile against the iPhoneOS 27.1 SDK, and `ld64.lld` links the app with no undefined symbols. The shader chain's translator matches upstream's lock. Unit tests pass (`python win/tests/test_win.py`). |
 | **Needs a Mac** | Games whose shaders exist only at run time, which upstream gets by booting the game in its Mac host: GLSLC capture, Vulkan capture, Unreal / Oodle decoding. See [Which games build on Windows](#which-games-build-on-windows). |
 
@@ -266,7 +266,7 @@ cd E:\ProjectIOS\nxnative-win
 python win\build_ipa_windows.py "E:\ProjectIOS\Games\MarioWonder" -k "E:\ProjectIOS\Games\prod.keys"
 ```
 
-Put one game per folder. The IPA appears in that folder (for example `SMBWMobile.ipa`). The work folder `<title ID>_build\` stays next to it, so later builds of the same game take seconds to minutes, and each stage writes its full log to `<title ID>_build\logs\`.
+Put one game per folder. The IPA appears in that folder (for example `SMBWMobile.ipa`). The work folder `<title ID>_build\` stays next to it, so later builds of the same game reuse its shader cache and take seconds to minutes. Each stage writes its full log to `<title ID>_build\logs\`. A first build compiles every shader with the Windows Metal compiler: Megabyte Punch's 3,498 shaders take about 3.5 minutes on a 12-thread PC.
 
 The options are upstream's (`-h` lists them all):
 

@@ -6,6 +6,9 @@
 // Checked against a reference decoder (Pillow's) block by block: win/tests/test_win.py builds this file for the PC and compares random blocks of every format and mode.
 #include "bc_soft.h"
 #include <string.h>
+#ifdef __APPLE__
+#include <dispatch/dispatch.h>
+#endif
 
 int nvn_bc_soft;
 
@@ -31,14 +34,12 @@ uint32_t bc_soft_target(uint32_t pf, int *bpp) {
 // ---- bit reading, LSB first over 128 bits ----
 typedef struct { uint64_t lo, hi; int pos; } bits_t;
 static void bits_init(bits_t *b, const uint8_t *p) { memcpy(&b->lo, p, 8); memcpy(&b->hi, p + 8, 8); b->pos = 0; }
-static uint32_t bits_get(bits_t *b, int n) {
-    uint32_t v = 0;
-    for (int i = 0; i < n; i++, b->pos++) {
-        int p = b->pos;
-        uint32_t bit = p < 64 ? (uint32_t)(b->lo >> p) & 1 : p < 128 ? (uint32_t)(b->hi >> (p - 64)) & 1 : 0;
-        v |= bit << i;
-    }
-    return v;
+static uint32_t bits_get(bits_t *b, int n) {   // n ≤ 32
+    if (n <= 0) return 0;
+    int p = b->pos; b->pos += n;
+    if (p >= 128) return 0;
+    uint64_t v = p >= 64 ? b->hi >> (p - 64) : p == 0 ? b->lo : (b->lo >> p) | (b->hi << (64 - p));
+    return (uint32_t)(v & ((1ull << n) - 1));
 }
 
 // ---- BC1–BC5 ----
@@ -241,12 +242,25 @@ int bc_soft_block(uint32_t pf, const uint8_t *p, uint8_t *out, size_t pitch) {
     return -1;
 }
 
+static void decode_rows(uint32_t pf, const uint8_t *src, size_t src_pitch, uint32_t bw, uint32_t by0, uint32_t by1, uint8_t *dst, size_t dst_pitch, int bpp, size_t bsz) {
+    for (uint32_t by = by0; by < by1; by++)
+        for (uint32_t bx = 0; bx < bw; bx++)
+            bc_soft_block(pf, src + by * src_pitch + bx * bsz, dst + (size_t)by * 4 * dst_pitch + (size_t)bx * 4 * bpp, dst_pitch);
+}
 int bc_soft_decode(uint32_t pf, const uint8_t *src, size_t src_pitch, uint32_t w, uint32_t h, uint8_t *dst, size_t dst_pitch) {
     int bpp; if (!bc_soft_target(pf, &bpp)) return -1;
     size_t bsz = (pf == BC1 || pf == BC1_S || pf == BC4_U || pf == BC4_S) ? 8 : 16;
     uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
-    for (uint32_t by = 0; by < bh; by++)
-        for (uint32_t bx = 0; bx < bw; bx++)
-            bc_soft_block(pf, src + by * src_pitch + bx * bsz, dst + (size_t)by * 4 * dst_pitch + (size_t)bx * 4 * bpp, dst_pitch);
+#ifdef __APPLE__
+    if ((uint64_t)bw * bh >= 1024) {   // big levels on every core: block rows in bands of 8 (a 2048² level is 512 rows; the decode is otherwise the upload's longest step)
+        uint32_t bands = (bh + 7) / 8;
+        dispatch_apply(bands, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t i) {
+            uint32_t a = (uint32_t)i * 8, b = a + 8 < bh ? a + 8 : bh;
+            decode_rows(pf, src, src_pitch, bw, a, b, dst, dst_pitch, bpp, bsz);
+        });
+        return 0;
+    }
+#endif
+    decode_rows(pf, src, src_pitch, bw, 0, bh, dst, dst_pitch, bpp, bsz);
     return 0;
 }

@@ -25,6 +25,22 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
         return _open(file, mode, buffering, encoding, errors, newline, closefd, opener)
     io.open = builtins.open = _lf_open
 
+    # os.replace as on a Mac: Windows refuses to replace a file another thread has open, which POSIX rename allows. The shader build's content-addressed caches
+    # (dmsh_mtlcache.py) have threads finish the same entry at once; a replace that keeps failing onto an existing file of the same size is that race, and the copy goes
+    import time as _time
+    _replace = os.replace
+    def _win_replace(src, dst, *a, **k):
+        for i in range(20):
+            try: return _replace(src, dst, *a, **k)
+            except PermissionError:
+                if i == 19:
+                    try:
+                        if os.path.isfile(dst) and os.path.getsize(dst) == os.path.getsize(src): os.remove(src); return None
+                    except OSError: pass
+                    raise
+                _time.sleep(0.05 * (i + 1))
+    os.replace = _win_replace
+
     class _NoLib:
         def __getattr__(self, name): raise AttributeError(f'{name} (no process-wide C library on Windows)')
     _CDLL = ctypes.CDLL
@@ -32,12 +48,26 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
         return _NoLib() if name is None else _CDLL(name, *a, **k)
     ctypes.CDLL = _cdll
 
+    _XC = {}
+    def _xcrun_direct(rest):
+        """xcrun -sdk <sdk> metal / metallib ... straight to the Windows Metal tool, without a Python per call (a shader build makes thousands of them: about 0.1 s each).
+        None for anything else, which goes through win/xcrun.py"""
+        if len(rest) < 3 or rest[0] not in ('-sdk', '--sdk') or rest[2] not in ('metal', 'metallib'): return None
+        if 'mod' not in _XC:
+            sys.path.insert(0, str(_WIN)); import xcrun as _x, toolchain as _t; _XC['mod'] = (_x, _t)
+        x, t = _XC['mod']; sdk, tool = rest[1], rest[2]
+        key = (sdk, tool)
+        if key not in _XC: _XC[key] = t.metal_tool(sdk, tool)
+        exe = _XC[key]
+        if not exe: return None
+        return [str(exe)] + (x.metal_args(sdk, rest[3:]) if tool == 'metal' else rest[3:])
+
     def _map(args):
         if isinstance(args, (str, bytes)) or not args: return args
         args = [os.fspath(a) if isinstance(a, os.PathLike) else a for a in args]
         if not isinstance(args[0], str): return args
         head = args[0].replace('\\', '/'); base = head.rsplit('/', 1)[-1].lower()
-        if base in ('xcrun', 'xcrun.exe'): return [sys.executable, _XCRUN] + args[1:]
+        if base in ('xcrun', 'xcrun.exe'): return _xcrun_direct(args[1:]) or [sys.executable, _XCRUN] + args[1:]
         if base == 'dmsh_xlate' and '/dmsh_xlate_bin/' in head: return [shutil.which('dotnet') or 'dotnet', args[0] + '.dll'] + args[1:]
         if base in ('python3', 'python3.exe'): return [sys.executable] + args[1:]
         if base in ('bash', 'bash.exe') and len(args) > 1 and args[1].replace('\\', '/').endswith('dm/ios/tools/build_ipa.sh'): return [sys.executable, _BUILD_APP] + args[2:]
