@@ -59,7 +59,7 @@ static void launcher_done(void) { [g_root startGame]; }
         UILabel *lb = [[UILabel alloc] initWithFrame:CGRectInset(self.view.bounds, 40, 40)];
         lb.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         lb.numberOfLines = 0; lb.textAlignment = NSTextAlignmentCenter; lb.textColor = UIColor.whiteColor;
-        lb.text = @"Game files not found.\nPut the RomFS folder into this App's Documents as \"romfs\" (Files app), then restart.";
+        lb.text = @"Game files not found.\n\nCopy the game's data folder (romfs, msl, aoc) into this App's Documents with the Files app or the Apple Devices app, then fully close and reopen the App.";
         [self.view addSubview:lb]; return;
     }
     front_ios_audio_watch();

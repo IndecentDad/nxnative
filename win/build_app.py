@@ -179,6 +179,30 @@ def make_icons(src, app):
     return True
 
 
+def split_data(data, parts, stamp, name):
+    """Fill the data folder of a split build: {path inside it: source folder}. Files are hard-linked (no disk space, instant) and copied where links fail
+    (another drive). The folder is rebuilt each time, so it never mixes files from two builds"""
+    if data.exists(): shutil.rmtree(data)
+    t(f'split build: game files and shader libraries go to {data}')
+    n = size = 0
+    for rel, src in parts.items():
+        for f in src.rglob('*'):
+            if f.is_dir(): continue
+            dst = data / rel / f.relative_to(src); dst.parent.mkdir(parents=True, exist_ok=True)
+            try: os.link(f, dst)
+            except OSError: shutil.copy2(f, dst)
+            n += 1; size += f.stat().st_size
+    (data / 'nxw_data.tsv').write_text(stamp, encoding='utf-8')
+    (data / 'README.txt').write_text(
+        f'{name}: game data for the split IPA\n\n'
+        'Install the IPA, open it once, then copy this whole folder (or its contents) into the app\'s Documents:\n'
+        '  - Windows: Apple Devices app (or iTunes) > your iPhone/iPad > Files > the app > drag this folder in\n'
+        '  - iPhone/iPad: Files app > On My iPhone/iPad > the app (from a USB drive, a network share or iCloud Drive)\n'
+        'Then fully close and reopen the app. Re-signing the IPA later does not touch these files.\n'
+        'Copy the data folder again only after a new build of the same game (nxw_data.tsv names the build).\n', encoding='utf-8')
+    t(f'data folder: {n} files, {size / 2**30:.2f} GB')
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == '--prepare-xcode': die('--prepare-xcode makes an Xcode project: it needs a Mac (this Windows build packs the IPA directly)')
     env = os.environ
@@ -289,14 +313,25 @@ def main():
         plistlib.dump(info_plist(bundle_id, name, version, gp('app_category'), show_fps, lang, sdk_ver, sdk_build, icons), f, fmt=plistlib.FMT_BINARY)
     (app / 'PkgInfo').write_bytes(b'APPL????')
 
-    maps = [f'Payload/DmIOS.app={app}', f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}']
-    if aoc and aoc.is_dir() and any(aoc.iterdir()): maps.append(f'Payload/DmIOS.app/aoc={aoc}'); t('add-on content: ' + ' '.join(sorted(p.name for p in aoc.iterdir())))
-    maps.append(f'Payload/DmIOS.app/romfs={romfs}')
+    has_aoc = bool(aoc and aoc.is_dir() and any(aoc.iterdir()))
+    if has_aoc: t('add-on content: ' + ' '.join(sorted(p.name for p in aoc.iterdir())))
+    split = env.get('NXW_SPLIT_DATA', '')
+    maps = [f'Payload/DmIOS.app={app}']
+    if split and split != '0':
+        # Split build: the IPA holds only the app (small, quick to sign and install); the game files and shader libraries go to a data folder the player copies
+        # into the app's Documents (dm/ios/Sources/main.m looks for <Documents>/romfs and <Documents>/<folder>/romfs, and takes msl/ and aoc/ beside it)
+        data = Path(split) if split not in ('1', 'YES') else out_ipa.with_name(out_ipa.stem + '-data')
+        split_data(data, {'romfs': romfs, f'msl/{msldir}': msl_ios / msldir, **({'aoc': aoc} if has_aoc else {})},
+                   f'game\t{game}\nbundle_id\t{bundle_id}\nversion\t{version}\nchain\t{v}\ngfx\t{gfx}\n', name)
+    else:
+        maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}')
+        if has_aoc: maps.append(f'Payload/DmIOS.app/aoc={aoc}')
+        maps.append(f'Payload/DmIOS.app/romfs={romfs}')
     t('pack IPA (already-compressed game files stored, everything else deflated)')
     r = subprocess.run([sys.executable, str(IOS / 'tools/pack_ipa.py'), str(out_ipa), '--store', ':'.join(gp('zip_store').split(':')),
                         '--exec', 'Payload/DmIOS.app/DmIOS', '--skip', 'Payload/DmIOS.app/msl', '--skip', 'Payload/DmIOS.app/aoc', '--skip', 'Payload/DmIOS.app/romfs', *maps])
     if r.returncode: die('pack_ipa')
-    t(f'done: {out_ipa} ({out_ipa.stat().st_size / 2**30:.1f} GB)')
+    sz = out_ipa.stat().st_size; t(f'done: {out_ipa} ({sz / 2**30:.1f} GB)' if sz >= 2**30 else f'done: {out_ipa} ({sz / 2**20:.1f} MB)')
 
 
 if __name__ == '__main__':

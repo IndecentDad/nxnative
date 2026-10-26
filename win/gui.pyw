@@ -18,8 +18,8 @@ GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
 BG, CARD, FIELD, FIELD_HI, BORDER = '#09090c', '#131318', '#1b1b22', '#25252f', '#26262f'
 TEXT, MUTED, FAINT = '#f6f4f8', '#a19eaf', '#5f5c6c'
 PINK, PINK_HI, PINK_LO, PINK_DEEP = '#ff2e88', '#ff63a8', '#d81b6e', '#2a0d1d'
-GRAD = ((0xff, 0x2e, 0x88), (0xb4, 0x3c, 0xff))       # pink → violet, the Build button
-GRAD_HI = ((0xff, 0x55, 0xa0), (0xc4, 0x5e, 0xff))
+GRAD = ((0xff, 0x2e, 0x88), (0xe8, 0x1c, 0x78))       # the Build button: pink with a slight fall-off, no second hue
+GRAD_HI = ((0xff, 0x4d, 0x9a), (0xf2, 0x2c, 0x86))
 OK, BAD = '#46e0a0', '#ff5c7a'
 FONT = 'Segoe UI Variable Text'
 FONT_D = 'Segoe UI Variable Display'
@@ -145,8 +145,29 @@ class Badge(tk.Canvas):
         self.create_text(size // 2, size // 2, text=text, fill=fg, font=(FONT_D, 8 if len(text) > 2 else 10, 'bold'))
 
 
+class Choice(Surface):
+    """A selectable tile: a radio mark, a title and one line; the selected one has a pink outline"""
+    def __init__(self, master, title, sub, command):
+        super().__init__(master, pad=14, radius=12, fill=FIELD, outline=BORDER, bg=CARD)
+        self.command = command
+        b = self.body
+        self.mark = tk.Canvas(b, width=18, height=18, bg=FIELD, highlightthickness=0); self.mark.pack(side='left', anchor='n', pady=(1, 0))
+        t = tk.Frame(b, bg=FIELD); t.pack(side='left', padx=(10, 0), fill='x', expand=True)
+        t1 = tk.Label(t, text=title, bg=FIELD, fg=TEXT, font=(FONT, 10, 'bold'), anchor='w'); t1.pack(fill='x')
+        t2 = tk.Label(t, text=sub, bg=FIELD, fg=MUTED, font=(FONT, 9), anchor='w', justify='left', wraplength=290); t2.pack(fill='x')
+        for w in (self, b, self.mark, t, t1, t2):
+            w.configure(cursor='hand2'); w.bind('<Button-1>', lambda e: self.command())
+        self.select(False)
+
+    def select(self, on):
+        self.outline = PINK if on else BORDER; self._layout()
+        m = self.mark; m.delete('all')
+        m.create_oval(2, 2, 16, 16, outline=PINK if on else FAINT, width=1.5)
+        if on: m.create_oval(6, 6, 12, 12, fill=PINK, outline='')
+
+
 class BuildButton(tk.Canvas):
-    """The main action: a pink-to-violet pill that turns into the build's progress bar while it runs"""
+    """The main action: a pink pill that turns into the build's progress bar while it runs"""
     H = 58
     def __init__(self, master, command):
         super().__init__(master, height=self.H, bg=BG, highlightthickness=0, cursor='hand2')
@@ -190,7 +211,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title('NXNative for Windows'); self.configure(bg=BG)
-        self.geometry('840x900'); self.minsize(720, 680)
+        self.geometry('840x980'); self.minsize(720, 760)
         self.s = load_settings()
         self.files = [f for f in self.s.get('files', []) if Path(f).exists()]
         self.keys = self.s.get('keys', '') if Path(self.s.get('keys', '') or '.').is_file() else ''
@@ -211,14 +232,11 @@ class App(tk.Tk):
 
         hdr = tk.Frame(wrap, bg=BG); hdr.pack(fill='x', pady=(0, 18))
         logo = tk.Canvas(hdr, width=46, height=46, bg=BG, highlightthickness=0); logo.pack(side='left')
-        r = 13   # a gradient tile with rounded corners and the initials
-        for x in range(46):
-            d = r - math.sqrt(max(0.0, r * r - (r - x) ** 2)) if x < r else r - math.sqrt(max(0.0, r * r - (x - (45 - r)) ** 2)) if x > 45 - r else 0
-            logo.create_line(x, d, x, 46 - d, fill=mix(GRAD[0], GRAD[1], x / 46))
-        logo.create_text(23, 23, text='NX', fill='#fff', font=(FONT_D, 15, 'bold'))
+        rounded(logo, 1, 1, 45, 45, 12, fill=PINK_DEEP, outline=PINK, width=1)   # a flat monogram tile
+        logo.create_text(23, 23, text='NX', fill=PINK, font=(FONT_D, 15, 'bold'))
         tt = tk.Frame(hdr, bg=BG); tt.pack(side='left', padx=14)
         tk.Label(tt, text='NXNative', bg=BG, fg=TEXT, font=(FONT_D, 20, 'bold')).pack(anchor='w')
-        tk.Label(tt, text='Switch games to iPhone & iPad  ·  built on Windows', bg=BG, fg=MUTED, font=(FONT, 10)).pack(anchor='w')
+        tk.Label(tt, text='Native iPhone & iPad builds, made on Windows', bg=BG, fg=MUTED, font=(FONT, 10)).pack(anchor='w')
         self.pill = tk.Canvas(hdr, width=176, height=30, bg=BG, highlightthickness=0); self.pill.pack(side='right')
         self._pill('Checking tools…', FAINT)
 
@@ -243,11 +261,20 @@ class App(tk.Tk):
         Ghost(top, 'Browse', self._pick_keys).pack(side='right')
         self.key_row = tk.Frame(self.c2.body, bg=CARD); self.key_row.pack(fill='x', pady=(14, 0))
 
-        # output line
-        out = tk.Frame(wrap, bg=BG); out.pack(fill='x', pady=(2, 14), padx=4)
-        self.out_lbl = tk.Label(out, text='', bg=BG, fg=MUTED, font=(FONT, 9), anchor='w'); self.out_lbl.pack(side='left')
-        self.out_link = Link(out, 'Change', self._pick_out, bg=BG); self.out_link.pack(side='left', padx=8)
-        self.out_reset = Link(out, 'Reset', self._reset_out, bg=BG, color=MUTED)
+        # 3. package: one IPA, or a small app IPA plus a data folder
+        self.c3 = Surface(wrap); self.c3.pack(fill='x', pady=(0, 16))
+        top = tk.Frame(self.c3.body, bg=CARD); top.pack(fill='x')
+        self._step(top, '3', 'Package', 'How the game reaches your iPhone or iPad')
+        tiles = tk.Frame(self.c3.body, bg=CARD); tiles.pack(fill='x', pady=(14, 0))
+        tiles.columnconfigure(0, weight=1, uniform='t'); tiles.columnconfigure(1, weight=1, uniform='t')
+        self.split = bool(self.s.get('split', False))
+        self.tiles = [Choice(tiles, 'Single IPA', 'Everything in one file. Simplest to install.', lambda: self._set_split(False)),
+                      Choice(tiles, 'App + data folder', 'Small IPA that signs in seconds. Copy the data into the app once.', lambda: self._set_split(True))]
+        self.tiles[0].grid(row=0, column=0, sticky='nsew', padx=(0, 6)); self.tiles[1].grid(row=0, column=1, sticky='nsew', padx=(6, 0))
+        out = tk.Frame(self.c3.body, bg=CARD); out.pack(fill='x', pady=(12, 0))
+        self.out_lbl = tk.Label(out, text='', bg=CARD, fg=MUTED, font=(FONT, 9), anchor='w'); self.out_lbl.pack(side='left')
+        self.out_link = Link(out, 'Change', self._pick_out); self.out_link.pack(side='left', padx=8)
+        self.out_reset = Link(out, 'Reset', self._reset_out, color=MUTED)
 
         # build
         self.btn = BuildButton(wrap, self._start); self.btn.pack(fill='x')
@@ -263,7 +290,7 @@ class App(tk.Tk):
         rt = tk.Frame(rb, bg='#0f1a15'); rt.pack(side='left', fill='x', expand=True)
         tk.Label(rt, text='Your IPA is ready', bg='#0f1a15', fg=TEXT, font=(FONT, 11, 'bold'), anchor='w').pack(fill='x')
         self.res_path = tk.Label(rt, text='', bg='#0f1a15', fg=MUTED, font=(FONT, 9), anchor='w', justify='left'); self.res_path.pack(fill='x')
-        tk.Label(rt, text='Sign and install it with Sideloadly.', bg='#0f1a15', fg=FAINT, font=(FONT, 9), anchor='w').pack(fill='x')
+        self.res_hint = tk.Label(rt, text='', bg='#0f1a15', fg=FAINT, font=(FONT, 9), anchor='w', justify='left'); self.res_hint.pack(fill='x')
         Ghost(rb, 'Show in folder', self._open_out, bg='#0f1a15').pack(side='right')
 
         # details (the log)
@@ -277,13 +304,13 @@ class App(tk.Tk):
     def _intro(self):   # what a build uses when nothing is changed: the pipeline's own defaults
         self._write('NXNative for Windows\n', 'pink')
         for k, v in (('App name', "the game's own name"), ('Bundle ID', 'org.nxnativewindows.<title ID>'), ('Language', "the game's default (en-US when it has it)"),
-                     ('IPA', 'saved next to your game files'), ('Signing', 'none: Sideloadly signs it when you install')):
+                     ('IPA', 'saved next to your game files'), ('Package', 'one IPA, or app + data folder (step 03)'), ('Signing', 'none: Sideloadly signs it when you install')):
             self._write(f'  {k:<10}', 'dim'); self._write(f'{v}\n')
         self._write('\nPick the game files and prod.keys above, then press Build IPA.\n', 'dim')
 
     def _step(self, parent, n, title, sub):
-        Badge(parent, n).pack(side='left')
-        t = tk.Frame(parent, bg=CARD); t.pack(side='left', padx=12)
+        tk.Label(parent, text=f'{int(n):02d}', bg=CARD, fg=PINK, font=(MONO, 10, 'bold')).pack(side='left', anchor='n', pady=(2, 0))
+        t = tk.Frame(parent, bg=CARD); t.pack(side='left', padx=(10, 12))
         tk.Label(t, text=title, bg=CARD, fg=TEXT, font=(FONT, 11, 'bold'), anchor='w').pack(fill='x')
         tk.Label(t, text=sub, bg=CARD, fg=MUTED, font=(FONT, 9), anchor='w').pack(fill='x')
 
@@ -328,8 +355,10 @@ class App(tk.Tk):
         else:
             Badge(rb, 'KEY', bg=FIELD, size=32, fill=FIELD_HI, fg=FAINT).pack(side='left')
             tk.Label(rb, text='No prod.keys selected yet', bg=FIELD, fg=FAINT, font=(FONT, 10), anchor='w').pack(side='left', padx=12)
+        for i, tl in enumerate(self.tiles): tl.select(i == int(self.split))
+        what = 'The IPA and its data folder are' if self.split else 'The IPA is'
         if self.out: self.out_lbl.configure(text=f'Saves to  {self.out}'); self.out_reset.pack(side='left')
-        else: self.out_lbl.configure(text='The IPA is saved next to your game files'); self.out_reset.pack_forget()
+        else: self.out_lbl.configure(text=f'{what} saved next to your game files'); self.out_reset.pack_forget()
         if not self.proc:
             if self.files and self.keys: self.btn.set('ready', 'Build IPA')
             else: self.btn.set('disabled', 'Add game files and prod.keys to start')
@@ -382,6 +411,10 @@ class App(tk.Tk):
 
     def _reset_out(self): self.out = ''; self._refresh()
 
+    def _set_split(self, v):
+        if self.proc: return
+        self.split = v; self.s['split'] = v; save_settings(self.s); self._refresh()
+
     def _toggle_details(self):
         self.details = not self.details
         if self.details: self.det.pack(fill='both', expand=True, pady=(12, 0)); self.det_link.configure(text='Hide details')
@@ -402,6 +435,7 @@ class App(tk.Tk):
         except OSError as e: messagebox.showerror('Game files', str(e)); return
         cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', self.keys, '--progress', 'json']
         if self.out: cmd += ['-o', self.out]
+        if self.split: cmd += ['--split-data']
         self.s.update(files=self.files, keys=self.keys); save_settings(self.s)
         self._clear_log()
         self._write(f'Game folder  {folder}' + ('  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n', 'dim')
@@ -482,7 +516,13 @@ class App(tk.Tk):
             self.btn.set('done', 'Build again'); self.btn.frac = 0
             self.status.configure(text=f'Finished in {int(took) // 60}:{int(took) % 60:02d}' + (f'   ·   {len(self.warn)} warning(s), see details' if self.warn else ''),
                                   fg=MUTED)
-            self.res_path.configure(text=self.out_ipa); self.result.pack(fill='x', pady=(14, 0), before=self.det if self.details else None)
+            data = Path(self.out_ipa).with_name(Path(self.out_ipa).stem + '-data')
+            if self.split and data.is_dir():
+                self.res_path.configure(text=f'{self.out_ipa}\n{data}')
+                self.res_hint.configure(text="Install the IPA with Sideloadly, then copy the data folder into the app's Documents\n(Apple Devices app > Files, or the Files app). README.txt inside it explains.")
+            else:
+                self.res_path.configure(text=self.out_ipa); self.res_hint.configure(text='Sign and install it with Sideloadly.')
+            self.result.pack(fill='x', pady=(14, 0), before=self.det if self.details else None)
             self._write(f'\nIPA ready  →  {self.out_ipa}\n', 'ok')
         else:
             self._refresh()

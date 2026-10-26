@@ -1,5 +1,6 @@
 // iOS App entry: set the environment (game files, saves, shader libraries), write the host log to Documents/log.txt, create the window (front_ios.m), then run the host's dm_main on a big-stack thread.
 // The game files (RomFS) ship inside the App at <App>/romfs; Documents/romfs placed through the Files app is also accepted (lets you swap them without reinstalling).
+// A split build (win/build_app.py, NXW_SPLIT_DATA) ships no game files: its "<Game>-data" folder (romfs/, msl/, aoc/) goes into Documents, whole or its contents.
 #import <UIKit/UIKit.h>
 #include <pthread.h>
 #include <signal.h>
@@ -14,12 +15,32 @@ void front_ios_focus_event(int ev);
 
 static char *g_argv[4]; static int g_argc;
 
+// The data root: the folder holding romfs/ (and, for a split build, msl/ and aoc/). Looked for in Documents, then in each folder directly inside Documents
+// (a split build's "<Game>-data" folder copied over whole), then in the App. Only a romfs/ containing the game profile's romfs_marker path counts (Mario: System/Resource)
+static NSString *g_data_root;
 static NSString *romfs_locate(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
-    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]])
-        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;   // only a directory containing the game profile's romfs_marker path counts (Mario: System/Resource, the resource size table)
+    NSMutableArray<NSString *> *roots = [NSMutableArray arrayWithObject:doc];
+    for (NSString *n in [[fm contentsOfDirectoryAtPath:doc error:nil] sortedArrayUsingSelector:@selector(compare:)]) {
+        BOOL isdir = NO; NSString *p = [doc stringByAppendingPathComponent:n];
+        if (![n isEqualToString:@"romfs"] && ![n hasPrefix:@"."] && [fm fileExistsAtPath:p isDirectory:&isdir] && isdir) [roots addObject:p];
+    }
+    [roots addObject:NSBundle.mainBundle.resourcePath];
+    for (NSString *r in roots) {
+        NSString *d = [r stringByAppendingPathComponent:@"romfs"];
+        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) { g_data_root = r; return d; }
+    }
     return nil;
+}
+// <data root>/<name> when it exists and is not empty (a split build's msl/ and aoc/), else <App>/<name>
+static NSString *data_dir(NSString *name) {
+    NSString *res = NSBundle.mainBundle.resourcePath;
+    if (g_data_root && ![g_data_root isEqualToString:res]) {
+        NSString *p = [g_data_root stringByAppendingPathComponent:name];
+        if ([[NSFileManager.defaultManager contentsOfDirectoryAtPath:p error:nil] count]) return p;
+    }
+    return [res stringByAppendingPathComponent:name];
 }
 
 // Boot prerequisites (done before UIApplicationMain): directories / environment variables / log -- the host's early load reads these
@@ -56,16 +77,19 @@ static int boot_env(void) {
     if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
     fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
     NSString *romfs = romfs_locate();
-    if (!romfs) { fprintf(stderr, "boot: game files not found (<App>/romfs or Documents/romfs)\n"); return 0; }
+    if (!romfs) { fprintf(stderr, "boot: game files not found (<App>/romfs, Documents/romfs or Documents/<folder>/romfs)\n"); return 0; }
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
+    for (NSString *d in @[romfs, data_dir(@"msl"), data_dir(@"aoc")])   // a split build's game files in Documents stay out of device backups too
+        if ([d hasPrefix:doc] && [fm fileExistsAtPath:d]) [[NSURL fileURLWithPath:d isDirectory:YES] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
-    setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
+    setenv("DM_MSL_DIR", data_dir(@"msl").fileSystemRepresentation, 0);   // a split build keeps the shader libraries with the game files
+    fprintf(stderr, "boot: shader libraries %s\n", data_dir(@"msl").fileSystemRepresentation);
     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
-    NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // add-on content: build_ipa.sh puts the RomFS extracted from the player's DLC NSPs at <App>/aoc/<index>/
+    NSString *aoc = data_dir(@"aoc");   // add-on content: build_ipa.sh puts the RomFS extracted from the player's DLC NSPs at <App>/aoc/<index>/
     if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 0);
     chdir(doc.fileSystemRepresentation);
     g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;

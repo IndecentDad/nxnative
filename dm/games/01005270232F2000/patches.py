@@ -9,4 +9,8 @@ CUTS = {
   '9fe60a212cff9b9a3656ab63d4f882e5': [
     (0x12e40, '90310294', '1f2003d5', 'nninitStartup: bl 0x9f480 (FMallocBinned3 constructor, 37 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)'),
   ],
+  # 1.0.0 (v0, the cartridge) main: the same call at the same place (the object moved to main+0x68082c8, hle_uemalloc.c)
+  '5069fe9069984e0cbf1c7f439501538b': [
+    (0x12e40, '90310294', '1f2003d5', 'nninitStartup: bl 0x9f480 (FMallocBinned3 constructor, 37 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)'),
+  ],
 }
