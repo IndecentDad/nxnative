@@ -16,7 +16,9 @@ static id info(NSString *k) { return [NSBundle.mainBundle objectForInfoDictionar
 @property (copy) NSString *status, *importStatus;
 @property (strong) UIProgressView *bar;
 @property BOOL importing, imported;
+@property (copy) NSString *localZip;   // a ZIP the player put into this app's Documents (Files app / Apple Devices): imported without the picker
 - (void)refreshImportFooter;
+- (void)beginImport:(NSURL *)url scoped:(BOOL)scoped total:(uint64_t)total;
 - (void)runImport:(NSURL *)url scoped:(BOOL)scoped total:(uint64_t)total task:(BGTask *)task;
 @end
 
@@ -44,7 +46,11 @@ static void import_progress(void *ctx, uint64_t done, uint64_t total, uint64_t f
     [super viewDidLoad];
     self.tableView.backgroundColor = UIColor.clearColor;
     self.tableView.rowHeight = UITableViewAutomaticDimension; self.tableView.estimatedRowHeight = 64;
-    self.importStatus = @"Pick the data ZIP made on the PC (the data folder zipped, e.g. with 7-Zip). The app extracts it into its own Documents; keep the app open while it runs.";
+    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+    for (NSString *n in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:doc error:nil] sortedArrayUsingSelector:@selector(compare:)])
+        if ([n.pathExtension.lowercaseString isEqualToString:@"zip"]) { self.localZip = [doc stringByAppendingPathComponent:n]; break; }
+    if (self.localZip) fprintf(stderr, "import: found %s in Documents\n", self.localZip.lastPathComponent.UTF8String);
+    self.importStatus = @"Pick the data ZIP made on the PC, or put it into this app's folder in the Files app (On My iPad › this app) and it is found by itself. The app extracts it into its own Documents.";
 }
 // Sections: 0 import, 1 the manual steps, 2 check again, 3 free space
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 4; }
@@ -74,7 +80,7 @@ static void import_progress(void *ctx, uint64_t done, uint64_t total, uint64_t f
     }
     if (ip.section == 0 || ip.section == 2) {
         UIListContentConfiguration *cfg = [UIListContentConfiguration cellConfiguration];
-        cfg.text = ip.section == 2 ? @"Check again" : self.imported ? @"Close the app" : self.importing ? @"Cancel" : @"Import ZIP…";
+        cfg.text = ip.section == 2 ? @"Check again" : self.imported ? @"Close the app" : self.importing ? @"Cancel" : self.localZip ? [NSString stringWithFormat:@"Import %@", self.localZip.lastPathComponent] : @"Import ZIP…";
         cfg.textProperties.color = self.importing && ip.section == 0 ? UIColor.systemRedColor : UIColor.systemPinkColor;
         cfg.textProperties.alignment = UIListContentTextAlignmentCenter;
         if (ip.section == 0 && !self.importing && !self.imported) { cfg.image = [UIImage systemImageNamed:@"doc.zipper"]; cfg.imageProperties.tintColor = UIColor.systemPinkColor; }
@@ -100,9 +106,13 @@ static void import_progress(void *ctx, uint64_t done, uint64_t total, uint64_t f
     if (ip.section == 0 && ip.row == 0) {
         if (self.imported) { fprintf(stderr, "import: closing the app to start the game on the next launch\n"); exit(0); }
         if (self.importing) { g_cancel = 1; self.importStatus = @"Cancelling…"; [self refreshImportFooter]; return; }
-        UIDocumentPickerViewController *pk = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[[UTType typeWithIdentifier:@"public.zip-archive"]] asCopy:NO];
+        if (self.localZip) { [self documentPicker:nil didPickDocumentsAtURLs:@[[NSURL fileURLWithPath:self.localZip]]]; return; }
+        UIDocumentPickerViewController *pk = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeZIP, UTTypeArchive, UTTypeData, UTTypeItem] asCopy:NO];   // any file can be picked (a ZIP from another app may carry another type, and was greyed out); nxw_unzip checks it
         pk.delegate = self; pk.allowsMultipleSelection = NO;
-        [self presentViewController:pk animated:YES completion:nil];
+        UIViewController *top = self.parentViewController ?: self; while (top.presentedViewController) top = top.presentedViewController;
+        pk.modalPresentationStyle = UIModalPresentationFormSheet; pk.shouldShowFileExtensions = YES;
+        fprintf(stderr, "import: showing the file picker\n");
+        [top presentViewController:pk animated:YES completion:nil];
         return;
     }
     if (ip.section != 2) return;
@@ -110,23 +120,37 @@ static void import_progress(void *ctx, uint64_t done, uint64_t total, uint64_t f
                                    : @"Not found yet. A large folder can take several minutes to copy; check that romfs is inside it.";
     [tv reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
 }
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)pk { fprintf(stderr, "import: picker cancelled\n"); }
 - (void)documentPicker:(UIDocumentPickerViewController *)pk didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    NSURL *url = urls.firstObject; if (!url) return;
+    NSURL *url = urls.firstObject;
+    fprintf(stderr, "import: picked %s\n", url ? url.fileSystemRepresentation : "(nothing)");
+    if (!url) return;
     BOOL scoped = [url startAccessingSecurityScopedResource];
+    self.importStatus = @"Reading the ZIP…"; [self.tableView reloadData];
     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
-    NSString *stage = [doc stringByAppendingPathComponent:@".nxw_import"];
-    char err[512] = ""; uint64_t total = 0;
-    if (nxw_unzip(url.fileSystemRepresentation, stage.fileSystemRepresentation, 1, NULL, NULL, NULL, &total, err, sizeof err)) {
-        if (scoped) [url stopAccessingSecurityScopedResource];
-        self.importStatus = [NSString stringWithFormat:@"This ZIP cannot be read: %s", err]; [self.tableView reloadData]; return;
-    }
-    long long fr = [[NSFileManager.defaultManager attributesOfFileSystemForPath:doc error:nil][NSFileSystemFreeSize] longLongValue];
-    if ((long long)total + (512ll << 20) > fr) {
-        if (scoped) [url stopAccessingSecurityScopedResource];
-        self.importStatus = [NSString stringWithFormat:@"Not enough space: the data needs %@, this device has %@ free. Free some space (the ZIP itself can stay until the import ends).",
-                             [NSByteCountFormatter stringFromByteCount:(long long)total countStyle:NSByteCountFormatterCountStyleFile], [NSByteCountFormatter stringFromByteCount:fr countStyle:NSByteCountFormatterCountStyleFile]];
-        [self.tableView reloadData]; return;
-    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{   // the central directory of a large ZIP (TotK: 374,588 entries) is read off the main thread
+        char err[512] = ""; uint64_t total = 0;
+        int rc = nxw_unzip(url.fileSystemRepresentation, [doc stringByAppendingPathComponent:@".nxw_import"].fileSystemRepresentation, 1, NULL, NULL, NULL, &total, err, sizeof err);
+        long long fr = [[NSFileManager.defaultManager attributesOfFileSystemForPath:doc error:nil][NSFileSystemFreeSize] longLongValue];
+        fprintf(stderr, "import: %s: %s, %.2f GB to extract, %.2f GB free\n", url.lastPathComponent.UTF8String, rc ? err : "readable", total / 1073741824.0, fr / 1073741824.0);
+        NSString *why = @(err);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (rc) {
+                if (scoped) [url stopAccessingSecurityScopedResource];
+                self.importStatus = [NSString stringWithFormat:@"This file cannot be imported: %@", why]; [self.tableView reloadData]; return;
+            }
+            if ((long long)total + (512ll << 20) > fr) {
+                if (scoped) [url stopAccessingSecurityScopedResource];
+                self.importStatus = [NSString stringWithFormat:@"Not enough space: the data needs %@, this device has %@ free. Free some space (the ZIP itself can stay until the import ends).",
+                                     [NSByteCountFormatter stringFromByteCount:(long long)total countStyle:NSByteCountFormatterCountStyleFile], [NSByteCountFormatter stringFromByteCount:fr countStyle:NSByteCountFormatterCountStyleFile]];
+                [self.tableView reloadData]; return;
+            }
+            [self beginImport:url scoped:scoped total:total];
+        });
+    });
+}
+- (void)beginImport:(NSURL *)url scoped:(BOOL)scoped total:(uint64_t)total {
+    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
     self.importing = YES; g_cancel = 0; g_t0 = CFAbsoluteTimeGetCurrent(); g_last = 0;
     self.importStatus = @"Starting…"; [self.tableView reloadData];
     UIApplication.sharedApplication.idleTimerDisabled = YES;
@@ -189,6 +213,7 @@ static void import_progress(void *ctx, uint64_t done, uint64_t total, uint64_t f
         }
         [fm removeItemAtPath:stage error:nil];
         BOOL ok = !rc && nxw_data_found();
+        if (ok && [url.path hasPrefix:doc]) { [fm removeItemAtURL:url error:nil]; fprintf(stderr, "import: removed the imported ZIP from Documents (its space is free again)%c", 10); }
         if (ok) msg = @"Done. Close the app and open it again: the launcher appears, then press Play. The ZIP can be deleted now.";
         else if (!rc) msg = @"Extracted, but the game files were not found in it: the ZIP must hold the data folder (romfs inside).";
         else msg = [NSString stringWithFormat:@"Import stopped: %s. Nothing was left half-written; try again.", e2];
