@@ -1,6 +1,6 @@
 # NXNative for Windows
 
-Build **nxnative** IPAs on a **Windows 10/11 PC, with no Mac**. Bring your own Nintendo Switch game (NSP / XCI) and your own `prod.keys`. Pick them in a window, press **Build IPA**, and sideload the IPA to your iPhone or iPad.
+Build **nxnative** IPAs on a **Windows 10/11 PC, with no Mac**. Use your own legally dumped game files (NSP / XCI) and your own `prod.keys`. Pick them in a window, press **Build IPA**, and sideload the IPA to your iPhone or iPad.
 
 This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnative). nxnative is not an emulator: the game's own arm64 code runs directly on the Apple chip, and the Switch graphics are rebuilt on Metal. Upstream builds IPAs only on a Mac with Xcode. This fork adds a Windows build path in [`win/`](win/) and changes as little of upstream as it can. Nothing from any game is in this repository, and the project has no ties to Nintendo, Apple or any game publisher.
 
@@ -30,6 +30,7 @@ This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnativ
 - [Repository layout](#repository-layout)
 - [Updating from upstream](#updating-from-upstream)
 - [Credits and license](#credits-and-license)
+- [Legal notice](#legal-notice)
 
 ## Status
 
@@ -410,4 +411,10 @@ python win\compile_check.py
 - **Apple's** Metal Developer Tools for Windows and iPhoneOS SDK are downloaded by each user under Apple's terms and are not part of this repository.
 - **[LLVM](https://llvm.org/)** (clang, ld64.lld) builds the app on Windows.
 
-MIT License, as upstream ([LICENSE](LICENSE)). Play only games you own, with keys from your own console.
+MIT License, as upstream ([LICENSE](LICENSE)).
+
+## Legal notice
+
+This is an independent, unofficial developer tool for interoperability and preservation research. It is not affiliated with, endorsed by, or sponsored by Nintendo, Apple, or any game publisher. All trademarks and game titles belong to their owners and are named only to describe compatibility; cover images are shown for identification only.
+
+This repository contains no games, no game files, no keys, no firmware, and no means of bypassing copy protection. You must supply files you dumped yourself from hardware and software you legally own. Do not use this project to obtain or share copyrighted material, and do not open issues asking for game files or keys.
