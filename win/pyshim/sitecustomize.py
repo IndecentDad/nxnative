@@ -118,6 +118,20 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
             return spec
         importlib.util.spec_from_file_location = _spec_from_file_location
 
+    # The Mac shader libraries (xcrun -sdk macosx metal / metallib … -o <file>): the iOS build never packs them, and what it reads from the Mac outputs (c1_guard.py, cb_extent.py)
+    # is the MSL and the JSON beside them. An empty file is written in place of each, with no process at all (starting one costs about 0.35 s here, as much as the compile),
+    # which halves the shader stage. NXW_MAC_METAL=1 compiles them for real
+    _run = subprocess.run
+    def _run_fast(args, *a, **k):
+        if (not os.environ.get('NXW_MAC_METAL') and isinstance(args, (list, tuple)) and len(args) > 4 and isinstance(args[0], str)
+                and args[0].replace('\\', '/').rsplit('/', 1)[-1].lower() in ('xcrun', 'xcrun.exe') and args[1] in ('-sdk', '--sdk') and str(args[2]).startswith('macosx')
+                and args[3] in ('metal', 'metallib') and '-o' in args):
+            out = os.fspath(args[list(args).index('-o') + 1])
+            with _open(out, 'wb'): pass
+            return subprocess.CompletedProcess(args, 0, b'' if not k.get('text') else '', b'' if not k.get('text') else '')
+        return _run(args, *a, **k)
+    subprocess.run = _run_fast
+
     _init = subprocess.Popen.__init__
     def _popen_init(self, args, *a, **k):
         if os.environ.get('NXW_SHIM_TRACE'): print('nxw shim:', args, '->', _map(args), file=sys.stderr)
