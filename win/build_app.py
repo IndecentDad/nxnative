@@ -311,7 +311,7 @@ def main():
     py(DM / 'tools/make_ext_font.py', dmres / 'font/nintendo_ext.ttf', tc.letter_font() or die('no bold TTF for the button icons: set LETTER_FONT'))
 
     files, incs = host_sources(gen / 'profile')
-    files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), es.resolve()]
+    files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), (WIN / 'ios/DataHelp.m').resolve(), es.resolve()]
     fws = frameworks(sdk, files)
     rt = compat_rt_needed(clang)
     if rt:
@@ -327,6 +327,11 @@ def main():
     with open(app / 'Info.plist', 'wb') as f:
         pl = info_plist(bundle_id, name, version, gp('app_category'), show_fps, lang, sdk_ver, sdk_build, icons)
         if env.get('DM_METAL_CAPTURE') == '1': pl['MetalCaptureEnabled'] = True; t('Metal frame capture: enabled (DM_METAL_CAPTURE=1)')   # the host's DM_GPU_CAPTURE switch
+        sp = env.get('NXW_SPLIT_DATA', '')
+        if sp and sp != '0':   # a split build: the app's "game data needed" screen (win/ios/DataHelp.m) names the data folder and its size
+            dname = Path(sp).name if sp not in ('1', 'YES') else out_ipa.stem + '-data'
+            dsize = sum(f.stat().st_size for d in (romfs, msl_ios / msldir, aoc if aoc and aoc.is_dir() else None) if d for f in d.rglob('*') if f.is_file())
+            pl['NXWDataFolder'] = dname; pl['NXWDataSize'] = f'{dsize / 2**30:.1f} GB' if dsize >= 2**30 else f'{dsize / 2**20:.0f} MB'
         plistlib.dump(pl, f, fmt=plistlib.FMT_BINARY)
     (app / 'PkgInfo').write_bytes(b'APPL????')
 

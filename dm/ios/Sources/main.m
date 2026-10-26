@@ -33,6 +33,7 @@ static NSString *romfs_locate(void) {
     }
     return nil;
 }
+int nxw_data_found(void) { return romfs_locate() != nil; }   // win/ios/DataHelp.m's "Check again"
 // <data root>/<name> when it exists and is not empty (a split build's msl/ and aoc/), else <App>/<name>
 static NSString *data_dir(NSString *name) {
     NSString *res = NSBundle.mainBundle.resourcePath;

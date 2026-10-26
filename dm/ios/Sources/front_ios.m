@@ -56,11 +56,8 @@ static void launcher_done(void) { [g_root startGame]; }
     self.view.backgroundColor = UIColor.blackColor;
     front_ios_power_watch();
     if (!front_ios_boot_ok()) {   // No game files: show a hint and do not start the host
-        UILabel *lb = [[UILabel alloc] initWithFrame:CGRectInset(self.view.bounds, 40, 40)];
-        lb.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        lb.numberOfLines = 0; lb.textAlignment = NSTextAlignmentCenter; lb.textColor = UIColor.whiteColor;
-        lb.text = @"Game files not found.\n\nCopy the game's data folder (romfs, msl, aoc) into this App's Documents with the Files app or the Apple Devices app, then fully close and reopen the App.";
-        [self.view addSubview:lb]; return;
+        void nxw_show_data_help(UIViewController *root);   // win/ios/DataHelp.m: where a split build's data folder goes, step by step
+        nxw_show_data_help(self); return;
     }
     front_ios_audio_watch();
 }
