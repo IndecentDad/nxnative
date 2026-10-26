@@ -257,9 +257,25 @@ static void defer_obj_unref(id obj) { defer_obj_release_ex(obj, 1); }
 typedef struct { uintptr_t a; size_t n; uint64_t fence; } disc_t;
 static pthread_mutex_t g_disc_mu = PTHREAD_MUTEX_INITIALIZER;
 static disc_t *g_disc; static size_t g_disc_n, g_disc_cap; static uint64_t g_disc_bytes, g_disc_logged; static int g_disc_on = -1;
+// DM_NVN_TEX_DISCARD: 1 always, 0 never, auto (the default): on from the moment the memory left before iOS's limit falls under 768 MB (os_proc_available_memory, checked at most
+// once a second), then for the rest of the run: the game's copies are what can go without losing anything it shows
 static int disc_on(void) {
-    if (g_disc_on < 0) { const char *e = getenv("DM_NVN_TEX_DISCARD"); g_disc_on = e && atoi(e) != 0; if (g_disc_on) MLOG("texture memory saver: the game's copy of each uploaded texture goes back to the system once the GPU has it (DM_NVN_TEX_DISCARD)"); }
-    return g_disc_on;
+    if (g_disc_on < 0) {
+        const char *e = getenv("DM_NVN_TEX_DISCARD");
+        g_disc_on = e && !strcmp(e, "1") ? 1 : e && !strcmp(e, "0") ? 0 : 2;
+        if (g_disc_on == 1) MLOG("texture memory saver: the game's copy of each uploaded texture goes back to the system once the GPU has it (DM_NVN_TEX_DISCARD)");
+        if (g_disc_on == 2) MLOG("texture memory saver: automatic, on when less than 768 MB is left before the system's memory limit (DM_NVN_TEX_DISCARD=auto)");
+    }
+#if TARGET_OS_IPHONE
+    if (g_disc_on == 2) {
+        static double last; double now = CFAbsoluteTimeGetCurrent();
+        if (now - last >= 1.0) {
+            last = now; size_t left = os_proc_available_memory();
+            if (left && left < (768u << 20)) { g_disc_on = 1; MLOG("texture memory saver: on (only %zu MB left before the system's memory limit)", left >> 20); }
+        }
+    }
+#endif
+    return g_disc_on == 1;
 }
 static void disc_queue(const void *mem, size_t len) {
     if (!disc_on() || !mem || !len) return;
@@ -271,7 +287,7 @@ static void disc_queue(const void *mem, size_t len) {
     pthread_mutex_unlock(&g_disc_mu);
 }
 static void disc_drain(void) {
-    if (g_disc_on <= 0) return;
+    if (g_disc_on != 1) return;
     pthread_mutex_lock(&g_disc_mu);
     size_t k = 0;
     for (size_t i = 0; i < g_disc_n; i++) {
