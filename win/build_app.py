@@ -179,28 +179,56 @@ def make_icons(src, app):
     return True
 
 
+_LISTED = {}
+def list_files(src):
+    """[(path, path relative to src with '/', size)] of a folder, by os.scandir (on Windows the sizes come with the listing, no stat per file: TotK's RomFS is 300,000 files).
+    Listed once per build"""
+    src = Path(src)
+    if src in _LISTED: return _LISTED[src]
+    out, stack = [], [(str(src), '')]
+    while stack:
+        d, rel = stack.pop()
+        with os.scandir(d) as it:
+            for e in it:
+                r = rel + e.name
+                if e.is_dir(follow_symlinks=False): stack.append((e.path, r + '/'))
+                else: out.append((e.path, r, e.stat(follow_symlinks=False).st_size))
+    out.sort(key=lambda x: x[1]); _LISTED[src] = out
+    return out
+
+
 def split_data(data, parts, stamp, name, skip_suffix=()):
-    """Fill the data folder of a split build: {path inside it: source folder}. Files are hard-linked (no disk space, instant) and copied where links fail
-    (another drive). The folder is rebuilt each time, so it never mixes files from two builds"""
-    if data.exists(): shutil.rmtree(data)
-    t(f'split build: game files and shader libraries go to {data}')
-    n = size = 0
-    for rel, src in parts.items():
-        for f in src.rglob('*'):
-            if f.is_dir() or f.name.endswith(tuple(skip_suffix)): continue
-            dst = data / rel / f.relative_to(src); dst.parent.mkdir(parents=True, exist_ok=True)
-            try: os.link(f, dst)
-            except OSError: shutil.copy2(f, dst)
-            n += 1; size += f.stat().st_size
-    (data / 'nxw_data.tsv').write_text(stamp, encoding='utf-8')
-    (data / 'README.txt').write_text(
+    """Fill the data folder of a split build: {path inside it: source folder}. Files are hard-linked (no disk space) on several threads, and copied where links fail
+    (another drive). A folder that a build with the same stamp and the same files filled is kept as it is; otherwise it is made again in <folder>.partial and swapped in,
+    so it never mixes files from two builds. Returns (files, bytes)"""
+    import concurrent.futures as cf
+    todo = [(f, f'{rel}/{r}', n) for rel, src in parts.items() for f, r, n in list_files(src) if not r.endswith(tuple(skip_suffix))]
+    count, size = len(todo), sum(n for _, _, n in todo)
+    sig = stamp + f'files\t{count}\nbytes\t{size}\n'
+    if (data / 'nxw_data.tsv').is_file() and (data / 'nxw_data.tsv').read_text(encoding='utf-8') == sig:
+        t(f'split build: reusing the data folder {data} ({count:,} files, {size / 2**30:.2f} GB, the same build)')
+        return count, size
+    t(f'split build: game files and shader libraries go to {data} ({count:,} files, hard links on {min(32, (os.cpu_count() or 4) * 2)} threads)')
+    tmp = data.with_name(data.name + '.partial')
+    if tmp.exists(): shutil.rmtree(tmp)
+    for d in sorted({str(Path(r).parent) for _, r, _ in todo}): (tmp / d).mkdir(parents=True, exist_ok=True)
+    def one(item):
+        f, r, _ = item; dst = tmp / r
+        try: os.link(f, dst)
+        except OSError: shutil.copy2(f, dst)
+    with cf.ThreadPoolExecutor(min(32, (os.cpu_count() or 4) * 2)) as ex: list(ex.map(one, todo, chunksize=256))
+    (tmp / 'nxw_data.tsv').write_text(sig, encoding='utf-8')
+    (tmp / 'README.txt').write_text(
         f'{name}: game data for the split IPA\n\n'
         'Install the IPA, open it once, then copy this whole folder (or its contents) into the app\'s Documents:\n'
         '  - Windows: Apple Devices app (or iTunes) > your iPhone/iPad > Files > the app > drag this folder in\n'
         '  - iPhone/iPad: Files app > On My iPhone/iPad > the app (from a USB drive, a network share or iCloud Drive)\n'
         'Then fully close and reopen the app. Re-signing the IPA later does not touch these files.\n'
         'Copy the data folder again only after a new build of the same game (nxw_data.tsv names the build).\n', encoding='utf-8')
-    t(f'data folder: {n} files, {size / 2**30:.2f} GB')
+    if data.exists(): shutil.rmtree(data)
+    os.replace(tmp, data)
+    t(f'data folder: {count:,} files, {size / 2**30:.2f} GB')
+    return count, size
 
 
 def main():
@@ -330,7 +358,7 @@ def main():
         sp = env.get('NXW_SPLIT_DATA', '')
         if sp and sp != '0':   # a split build: the app's "game data needed" screen (win/ios/DataHelp.m) names the data folder and its size
             dname = Path(sp).name if sp not in ('1', 'YES') else out_ipa.stem + '-data'
-            dsize = sum(f.stat().st_size for d in (romfs, msl_ios / msldir, aoc if aoc and aoc.is_dir() else None) if d for f in d.rglob('*') if f.is_file())
+            dsize = sum(n for d in (romfs, msl_ios / msldir, aoc if aoc and aoc.is_dir() else None) if d for _, _, n in list_files(d))   # listed once, reused by split_data
             pl['NXWDataFolder'] = dname; pl['NXWDataSize'] = f'{dsize / 2**30:.1f} GB' if dsize >= 2**30 else f'{dsize / 2**20:.0f} MB'
         plistlib.dump(pl, f, fmt=plistlib.FMT_BINARY)
     (app / 'PkgInfo').write_bytes(b'APPL????')
