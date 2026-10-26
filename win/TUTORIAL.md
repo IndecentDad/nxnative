@@ -124,6 +124,13 @@ Cara memasangnya di iPhone/iPad:
 4. Tunggu sampai penyalinan selesai (folder besar seperti TotK bisa makan 10–30 menit), lalu tekan **Check again**. Kalau muncul "Found", tutup app sepenuhnya (geser dari app switcher) dan buka lagi.
 5. Launcher muncul. Tekan **Play**.
 
+**Cara paling mudah: Import ZIP.** Di PC, buat ZIP dari folder data. Pakai 7-Zip dengan format *zip* dan level *Store* supaya cepat: `7z a -tzip -mx=0 <NamaGame>-data.zip <NamaGame>-data`. Pindahkan ZIP itu ke iPad (Files, flashdisk, atau cloud). Di layar **Game data needed**, tekan **Import ZIP…** lalu pilih ZIP-nya. App mengekstrak sendiri ke Documents-nya:
+
+- Bar progres menampilkan GB, jumlah file, dan sisa waktu; ada tombol **Cancel**.
+- Di iOS/iPadOS 26 ke atas, ekstrak tetap jalan saat app ditinggal, dengan progres di Live Activity (layar kunci dan notifikasi), lalu muncul notifikasi "Game data imported" setelah selesai. Izinkan notifikasi saat diminta.
+- ZIP dibaca langsung dari tempatnya, jadi cukup ruang untuk hasil ekstrak, ditambah ZIP itu sendiri. ZIP boleh dihapus setelah selesai.
+- Setelah selesai, tekan **Close the app** lalu buka lagi.
+
 Nama folder tidak perlu diubah, karena app mencari `romfs` di Documents dan di setiap folder tepat di dalamnya. Sign ulang tiap 7 hari hanya perlu memasang IPA kecilnya; folder data di Documents tidak hilang. Salin ulang folder data hanya setelah build baru dari game yang sama.
 
 ## 4c. The Legend of Zelda: Tears of the Kingdom

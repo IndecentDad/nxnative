@@ -128,7 +128,7 @@ def dep_newer(o):
 def link(clang, sdk, objs, fws, embed_flags, out):
     target = f'arm64-apple-ios{tc.setting("ios_deployment", tc.IOS_DEPLOYMENT)}'
     args = [str(clang), '-target', target, '-isysroot', str(sdk), '-fuse-ld=lld', '-fobjc-arc', '-o', str(out), *map(str, objs),
-            '-Wl,-rpath,@executable_path/Frameworks', '-lobjc', *[x for f in fws for x in ('-framework', f)], *embed_flags]
+            '-Wl,-rpath,@executable_path/Frameworks', '-lobjc', '-lz', *[x for f in fws for x in ('-framework', f)], *embed_flags]
     rt = compat_rt_needed(clang)
     if rt: args.append(str(rt))
     t(f'link: {len(objs)} objects, {len(fws)} frameworks (ld64.lld)')
@@ -161,6 +161,10 @@ def info_plist(bundle_id, name, version, category, show_fps, lang, sdk_ver, sdk_
         'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [
             {'UISceneConfigurationName': 'Default', 'UISceneDelegateClassName': 'SceneDelegate'}]}},
     }
+    # The data ZIP import (win/ios/DataHelp.m) runs as a continued-processing task on iOS 26 and later: it goes on in the background with a Live Activity. Its identifiers are
+    # <bundle ID>.import.<n> (a signer that changes the bundle ID makes the request fail, and the import runs in the foreground instead)
+    p['BGTaskSchedulerPermittedIdentifiers'] = [f'{bundle_id}.import.*']
+    p['UIBackgroundModes'] = ['processing']
     if icons:
         p['CFBundleIcons'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon60x60'], 'CFBundleIconName': 'AppIcon'}}
         p['CFBundleIcons~ipad'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon60x60', 'AppIcon76x76', 'AppIcon83.5x83.5'], 'CFBundleIconName': 'AppIcon'}}
@@ -339,7 +343,7 @@ def main():
     py(DM / 'tools/make_ext_font.py', dmres / 'font/nintendo_ext.ttf', tc.letter_font() or die('no bold TTF for the button icons: set LETTER_FONT'))
 
     files, incs = host_sources(gen / 'profile')
-    files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), (WIN / 'ios/DataHelp.m').resolve(), es.resolve()]
+    files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), (WIN / 'ios/DataHelp.m').resolve(), (WIN / 'ios/nxw_unzip.c').resolve(), es.resolve()]
     fws = frameworks(sdk, files)
     rt = compat_rt_needed(clang)
     if rt:
