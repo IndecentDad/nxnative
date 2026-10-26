@@ -76,8 +76,10 @@ def sign(path, ident, ents):
     struct.pack_into('<I', b, sig_lc + 12, size)
     le_fo = struct.unpack_from('<Q', b, linkedit + 40)[0]
     new_le = dataoff + size - le_fo
-    struct.pack_into('<Q', b, linkedit + 48, (new_le + 0x3fff) & ~0x3fff)   # vmsize, 16 KB pages
-    struct.pack_into('<Q', b, linkedit + 56, new_le)                          # filesize
+    # segment_command_64: cmd, cmdsize, segname[16], vmaddr @24, vmsize @32, fileoff @40, filesize @48, maxprot @56, initprot @60 (vmsize and filesize were written one
+    # field late, over filesize and the protections: iOS killed the app before main, with no log)
+    struct.pack_into('<Q', b, linkedit + 32, (new_le + 0x3fff) & ~0x3fff)   # vmsize, 16 KB pages
+    struct.pack_into('<Q', b, linkedit + 48, new_le)                          # filesize
     del b[dataoff:]
     special = {CSSLOT_REQUIREMENTS: reqs, CSSLOT_ENTITLEMENTS: ent, CSSLOT_DER: entd}
     slots = b''.join(hashlib.sha256(special[i]).digest() if i in special else b'\0' * 32 for i in range(nslots, 0, -1))
