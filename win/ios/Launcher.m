@@ -182,6 +182,26 @@ static UIStackView *label_stack(NSString *title, NSString *note, BOOL locked) {
     return st;
 }
 
+// Increased Memory Limit: whether the signature the app was installed with carries com.apple.developer.kernel.increased-memory-limit (true). Read from the entitlements blob in the
+// executable's own code signature, which is what iOS goes by: a signing tool for a free Apple ID (SideStore, AltStore) drops the entitlement, a paid developer account keeps it
+static int increased_memory_limit(void) {
+    static int v = -1;
+    if (v >= 0) return v;
+    NSData *d = [NSData dataWithContentsOfFile:NSBundle.mainBundle.executablePath options:NSDataReadingMappedIfSafe error:nil];
+    NSData *key = [@"com.apple.developer.kernel.increased-memory-limit</key>" dataUsingEncoding:NSUTF8StringEncoding];
+    v = 0;
+    if (d.length) {
+        NSRange r = [d rangeOfData:key options:NSDataSearchBackwards range:NSMakeRange(0, d.length)];   // the signature is at the end of the file
+        if (r.location != NSNotFound) {
+            NSUInteger at = NSMaxRange(r), n = MIN((NSUInteger)64, d.length - at);
+            NSString *after = [[NSString alloc] initWithData:[d subdataWithRange:NSMakeRange(at, n)] encoding:NSASCIIStringEncoding];
+            v = [[after stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] hasPrefix:@"<true/>"];
+        }
+    }
+    fprintf(stderr, "launcher: Increased Memory Limit %s (the app's signature)\n", v ? "on" : "off");
+    return v;
+}
+
 // ---- the settings list ----
 @interface DmSettingsVC : UITableViewController
 @property (strong) DmLauncherModel *m; @property (strong) NSTimer *timer; @property (strong) UILabel *memory;
@@ -197,9 +217,14 @@ static UIStackView *label_stack(NSString *title, NSString *note, BOOL locked) {
 - (void)dealloc { [self.timer invalidate]; }
 - (NSInteger)resetSection { return self.m.sections.count; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.m.sections.count + 2; }   // the sections, Reset, Memory available
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return sec < (NSInteger)self.m.sections.count ? (NSInteger)[self.m inSection:self.m.sections[sec]].count : 1; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return sec < (NSInteger)self.m.sections.count ? (NSInteger)[self.m inSection:self.m.sections[sec]].count : sec > self.resetSection ? 2 : 1; }
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)sec { return sec < (NSInteger)self.m.sections.count ? self.m.sections[sec] : nil; }
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec { return sec == self.resetSection ? @"Brings back all settings this game was tested with." : nil; }
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec {
+    if (sec == self.resetSection) return @"Brings back all settings this game was tested with.";
+    if (sec > self.resetSection && !increased_memory_limit())
+        return @"Increased Memory Limit is off: iOS gives this app less memory, and a big game can be closed when an area loads. A free Apple ID cannot turn it on (the signing app drops it); a paid developer account can. Texture memory saver (Performance) helps meanwhile.";
+    return nil;
+}
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
@@ -212,6 +237,16 @@ static UIStackView *label_stack(NSString *title, NSString *note, BOOL locked) {
         b.enabled = self.m.changed; b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading; b.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:b];
         [NSLayoutConstraint activateConstraints:@[[b.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [b.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
             [b.centerYAnchor constraintEqualToAnchor:v.centerYAnchor], [v.heightAnchor constraintGreaterThanOrEqualToConstant:48]]];
+        return c;
+    }
+    if (ip.section > self.resetSection && ip.row == 1) {   // Increased Memory Limit: On (green) / Off (orange)
+        UILabel *l = body_label(@"Increased Memory Limit");
+        int on = increased_memory_limit();
+        UILabel *st = value_label(on ? @"● On" : @"● Off"); st.textColor = on ? UIColor.systemGreenColor : UIColor.systemOrangeColor;
+        [v addSubview:l]; [v addSubview:st];
+        [NSLayoutConstraint activateConstraints:@[[l.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [l.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+            [st.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [st.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+            [v.heightAnchor constraintGreaterThanOrEqualToConstant:48]]];
         return c;
     }
     if (ip.section > self.resetSection) {   // Memory available
