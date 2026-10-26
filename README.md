@@ -16,7 +16,8 @@ This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnativ
 ## Contents
 
 - [Status](#status)
-- [Games](#games)
+- [Games on NXNative for Windows](#games-on-nxnative-for-windows)
+- [Upstream NXNative games](#upstream-nxnative-games)
 - [What you need](#what-you-need)
 - [One-time setup](#one-time-setup)
 - [Build an IPA with the window](#build-an-ipa-with-the-window)
@@ -35,14 +36,30 @@ This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnativ
 
 ## Status
 
+NXNative for Windows builds the same kind of IPA as upstream NXNative, from a Windows PC. The games below are the ones **built with this fork and run on a real device** by its author (an iPad with an Apple A16 GPU, iPadOS 27, signed with SideStore). Upstream's own list of tested games follows in [Upstream NXNative games](#upstream-nxnative-games).
+
+## Games on NXNative for Windows
+
+| Game | Version | Built on Windows | On the iPad (A16, 6 GB) | Notes |
+|---|---|---|---|---|
+| **The Legend of Zelda: Tears of the Kingdom** | 1.4.3 | yes: split build, 28,669 shaders, 39 MB app + 17 GB data | **plays**, saves load | With Increased Memory Limit on: 3.7 GB, no closes. Render scale 60 % + MetalFX + Handheld: GPU about 10 ms a frame, mostly 60 fps; drops in fights (CPU). BC textures decoded for the A16. |
+| **Balatro** | 1.0 (v0) | yes: LÖVE shaders rebuilt offline from the game's Lua | **plays** | |
+| **Mario vs. Donkey Kong** | 1.0.0 (v0) | yes | runs | slow on the A16; not tuned yet |
+| **OCTOPATH TRAVELER 0** | 1.0.1 (v0) | yes: 10,596 Oodle-compressed Unreal shaders decoded by the game's own Oodle in an emulated ARM64 machine; the allocator cut and 60 fps addresses ported to v0 | not yet confirmed | 3.2 GB IPA |
+| **Megabyte Punch** | 1.0 | yes (no upstream profile: a provisional one) | under test | SDK 8.3.1 address-region fix found automatically |
+| **Portal** | 1.0.3 | yes, with one run-time shader capture on the device | not yet confirmed | 8 of its 10 run-time shaders are already made on the PC by the game's own GLSLC in an emulated ARM64 machine; the rest needs the capture IPA |
+
+What this fork adds on top of upstream, for every game:
+
 | | |
 |---|---|
-| **Verified** | **Balatro** built on Windows 11, sideloaded, and played on an iPad (Apple A16 GPU, iPadOS 27). |
-| **Built on Windows, Mac steps replaced** | **OCTOPATH TRAVELER 0** (v0, XCI): its 10,596 Oodle-compressed Unreal shaders decode with the game's own Oodle in the emulator, and the 3.2 GB IPA builds. **Portal** (v0): the build packs its capture IPA for the GLSLC shaders it compiles at run time. |
-| **Built, under test** | **Megabyte Punch** (Unity 2019.2, no upstream profile yet). Its 3,498 NVN shaders compile with the Windows Metal compiler. The latest IPA has the SDK 8.3.1 address-region fix for its first crash. |
-| **A16 and older GPUs** | Their GPUs cannot read BC-compressed textures, which most 3D Switch games ship. This fork decodes BC1–BC7 on the CPU at upload into uncompressed textures, using every core (`dm/gfx/tex/bc_soft.c`, checked block by block against a reference decoder). A 2048×2048 BC7 texture takes about 65 ms on one PC core. The upstream host stopped on these textures (`MTLTextureDescriptor has invalid pixelFormat`). Only GPUs without BC take this path: A17 Pro / M1 and newer read BC directly, at no cost. On an A16, decoded textures take 2–8× the memory of the BC data, so big games may need *Increased Memory Limit*. |
-| **Checked on Windows** | All 134 app sources compile against the iPhoneOS 27.1 SDK, and `ld64.lld` links the app with no undefined symbols. The shader chain's translator matches upstream's lock. Unit tests pass (`python win/tests/test_win.py`). |
-| **No Mac needed** | Upstream's Mac-host steps run here: LÖVE shaders offline, Oodle / Unreal / LZ5 decoding in an emulated ARM64 machine, and run-time GLSLC / Vulkan captures on your device through a capture IPA. See [Which games build on Windows](#which-games-build-on-windows). |
+| **No Mac** | Metal Developer Tools for Windows, LLVM (clang, ld64.lld) and the iPhoneOS SDK from `Xcode.xip`; upstream's Mac-host steps replaced (LÖVE shaders offline, Oodle / Unreal / LZ5 and GLSLC in an emulated ARM64 machine, run-time captures on the device). |
+| **A16 and older GPUs** | BC1–BC7 textures decoded at upload (`dm/gfx/tex/bc_soft.c`): upstream's IPAs close on these GPUs with `MTLTextureDescriptor has invalid pixelFormat`. |
+| **Small IPAs** | Split builds: the app alone (tens of MB) plus a data folder or ZIP the app imports itself, with a progress bar, in the background with a Live Activity on iOS 26+. |
+| **Memory** | The app asks for Increased Memory Limit in its own signature, so SideStore keeps it when the App ID allows it; a texture memory saver frees the textures' second copy (automatic when memory runs low); a HUD shows fps, GPU time and the memory left. |
+| **Launcher** | Upstream's single-screen launcher in UIKit, with memory-light defaults on 6 GB devices and Tile memory optimizations as an experiment. |
+| **Mods** | Emulator-layout mods (`exefs` IPS / pchtxt, `romfs`) from a `mods` folder, applied as rewriter cuts after a build-ID check. |
+| **Window** | A builder window (black and pink) besides the command line. |
 
 The PC this was built and tested on:
 
@@ -57,9 +74,9 @@ The PC this was built and tested on:
 | Metal Developer Tools for Windows | 6.2 (`Apple metal version 32023.850`) |
 | iPhoneOS SDK | 27.1, from `Xcode_27.1.xip` |
 
-## Games
+## Upstream NXNative games
 
-Upstream's 65 tested games, each with its IPA size. A note under a game is upstream's, for example "60 fps with 1.2.0" where the game runs at 60 fps with that update. The [per-game notes](dm/games/README.md#games) give each game's tested version, platforms and known issues. [Which games build on Windows](#which-games-build-on-windows) lists the few that still need a Mac for one build step.
+These are **upstream's** tested games (on a Mac or an iPhone with upstream NXNative), not a list of games verified with this fork: most build the same way here, and [Which games build on Windows](#which-games-build-on-windows) lists those that need an extra step (no game needs a Mac). Upstream's 65 tested games, each with its IPA size. A note under a game is upstream's, for example "60 fps with 1.2.0" where the game runs at 60 fps with that update. The [per-game notes](dm/games/README.md#games) give each game's tested version, platforms and known issues.
 
 <table>
 <tr>
