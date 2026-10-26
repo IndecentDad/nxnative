@@ -181,8 +181,11 @@ def main():
         up.run([sys.executable, str(WIN / 'build_app.py'), str(out)], logs_dir(work) / 'capture_ipa.log', env=cenv)
         up.PROG.end(ok=False)
         want_n = f'{len(want)} ' if want else ''
+        sp = os.environ.get('NXW_SPLIT_DATA', '')
+        data_step = (f', open it once, copy the folder {out.with_name(out.stem + "-data")} into its Documents (Apple Devices app › Files, or the Files app; '
+                     f'the app shows the steps), reopen it') if sp and sp != '0' else ''
         raise BuildError(f'this game compiles {want_n}shaders only at run time; they are captured on your device, as upstream captures them on a Mac. 1) Install {out} '
-                         f'(Sideloadly) and play it until its title screen, then wait a minute (no picture is fine: it has no shaders yet). 2) In the Files app, copy '
+                         f'(Sideloadly){data_step} and play it until its title screen, then wait a minute (no picture is fine: it has no shaders yet). 2) In the Files app, copy '
                          f'"On My iPhone/iPad › {gname or stem} (capture) › {name}" to {nsp}. 3) Build again: the build finds the folder and makes the real IPA')
 
     def logs_dir(work): return work / 'logs'
