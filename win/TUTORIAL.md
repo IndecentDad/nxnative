@@ -109,7 +109,7 @@ Opsi yang berguna (`-h` menampilkan semuanya):
 
 ## 4b. Mode split: IPA kecil + folder data
 
-Pilih **03 Package → App + data folder** di GUI, atau tambahkan `--split-data` di terminal. Hasilnya ada dua:
+Pilih **03 Package → App + data folder** di GUI, atau tambahkan `--split-data` di terminal. Di kartu yang sama ada **Increased Memory Limit On / Off** (default On; di terminal `--no-entitlements` untuk Off). Hasilnya ada dua:
 
 - `<NamaGame>.ipa`: berisi app saja (puluhan MB), sehingga sign dan install di Sideloadly hanya beberapa detik.
 - `<NamaGame>-data\`: berisi `romfs`, `msl` (shader), dan `aoc` (DLC). Folder ini dibuat lewat hard link, jadi tidak memakan ruang disk tambahan di PC.

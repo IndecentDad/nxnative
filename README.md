@@ -267,7 +267,7 @@ Double-click **`Build-IPA-GUI.bat`** in the repository folder.
 
 1. **Game files**: click the dashed box to pick your NSP / XCI files (base, update and DLC of one game), or use *Choose folder*. Each file shows as BASE, UPD or DLC with its size. *✕* removes one.
 2. **prod.keys**: click *Browse*. The window finds `prod.keys` by itself when it sits next to the game files.
-3. **Package**: *Single IPA* (everything in one file) or *App + data folder* (see [Split builds](#split-builds-small-ipa--data-folder)).
+3. **Package**: *Single IPA* (everything in one file) or *App + data folder* (see [Split builds](#split-builds-small-ipa--data-folder)). Below it, **Increased Memory Limit** *On* (default: the app asks for the entitlement in its own signature) or *Off* (same as `--no-entitlements`).
 4. Click **Build IPA**. The button turns into the progress bar (stage, step, percentage). A green card then shows the IPA, and *Show in folder* opens it.
 
 Every build uses the defaults. *Details*, shown from the start, lists them:

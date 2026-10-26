@@ -271,6 +271,14 @@ class App(tk.Tk):
         self.tiles = [Choice(tiles, 'Single IPA', 'Everything in one file. Simplest to install.', lambda: self._set_split(False)),
                       Choice(tiles, 'App + data folder', 'Small IPA that signs in seconds. Copy the data into the app once.', lambda: self._set_split(True))]
         self.tiles[0].grid(row=0, column=0, sticky='nsew', padx=(0, 6)); self.tiles[1].grid(row=0, column=1, sticky='nsew', padx=(6, 0))
+        # Increased Memory Limit: the app asks for it in its own signature; SideStore / SideInstaller keeps it when the App ID allows it
+        tk.Label(self.c3.body, text='Increased Memory Limit', bg=CARD, fg=TEXT, font=(FONT, 10, 'bold'), anchor='w').pack(fill='x', pady=(16, 0))
+        tiles2 = tk.Frame(self.c3.body, bg=CARD); tiles2.pack(fill='x', pady=(8, 0))
+        tiles2.columnconfigure(0, weight=1, uniform='t'); tiles2.columnconfigure(1, weight=1, uniform='t')
+        self.iml = bool(self.s.get('iml', True))
+        self.iml_tiles = [Choice(tiles2, 'On', 'More memory for big games (TotK). Needs the capability on in SideStore / SideInstaller.', lambda: self._set_iml(True)),
+                          Choice(tiles2, 'Off', 'Plain app, no entitlement. For signers that refuse it.', lambda: self._set_iml(False))]
+        self.iml_tiles[0].grid(row=0, column=0, sticky='nsew', padx=(0, 6)); self.iml_tiles[1].grid(row=0, column=1, sticky='nsew', padx=(6, 0))
         out = tk.Frame(self.c3.body, bg=CARD); out.pack(fill='x', pady=(12, 0))
         self.out_lbl = tk.Label(out, text='', bg=CARD, fg=MUTED, font=(FONT, 9), anchor='w'); self.out_lbl.pack(side='left')
         self.out_link = Link(out, 'Change', self._pick_out); self.out_link.pack(side='left', padx=8)
@@ -304,7 +312,7 @@ class App(tk.Tk):
     def _intro(self):   # what a build uses when nothing is changed: the pipeline's own defaults
         self._write('NXNative for Windows\n', 'pink')
         for k, v in (('App name', "the game's own name"), ('Bundle ID', 'org.nxnativewindows.<title ID>'), ('Language', "the game's default (en-US when it has it)"),
-                     ('IPA', 'saved next to your game files'), ('Package', 'one IPA, or app + data folder (step 03)'), ('Signing', 'none: Sideloadly signs it when you install')):
+                     ('IPA', 'saved next to your game files'), ('Package', 'one IPA, or app + data folder (step 03)'), ('Memory', 'Increased Memory Limit asked for (step 03)'), ('Signing', 'ad-hoc; SideStore re-signs it when you install')):
             self._write(f'  {k:<10}', 'dim'); self._write(f'{v}\n')
         self._write('\nPick the game files and prod.keys above, then press Build IPA.\n', 'dim')
 
@@ -356,6 +364,7 @@ class App(tk.Tk):
             Badge(rb, 'KEY', bg=FIELD, size=32, fill=FIELD_HI, fg=FAINT).pack(side='left')
             tk.Label(rb, text='No prod.keys selected yet', bg=FIELD, fg=FAINT, font=(FONT, 10), anchor='w').pack(side='left', padx=12)
         for i, tl in enumerate(self.tiles): tl.select(i == int(self.split))
+        for i, tl in enumerate(self.iml_tiles): tl.select(i == int(not self.iml))
         what = 'The IPA and its data folder are' if self.split else 'The IPA is'
         if self.out: self.out_lbl.configure(text=f'Saves to  {self.out}'); self.out_reset.pack(side='left')
         else: self.out_lbl.configure(text=f'{what} saved next to your game files'); self.out_reset.pack_forget()
@@ -415,6 +424,10 @@ class App(tk.Tk):
         if self.proc: return
         self.split = v; self.s['split'] = v; save_settings(self.s); self._refresh()
 
+    def _set_iml(self, v):
+        if self.proc: return
+        self.iml = v; self.s['iml'] = v; save_settings(self.s); self._refresh()
+
     def _toggle_details(self):
         self.details = not self.details
         if self.details: self.det.pack(fill='both', expand=True, pady=(12, 0)); self.det_link.configure(text='Hide details')
@@ -436,6 +449,7 @@ class App(tk.Tk):
         cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', self.keys, '--progress', 'json']
         if self.out: cmd += ['-o', self.out]
         if self.split: cmd += ['--split-data']
+        cmd += ['--entitlements' if self.iml else '--no-entitlements']
         self.s.update(files=self.files, keys=self.keys); save_settings(self.s)
         self._clear_log()
         self._write(f'Game folder  {folder}' + ('  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n', 'dim')
