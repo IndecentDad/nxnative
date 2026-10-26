@@ -8,7 +8,7 @@
 #   Mac host steps       → refused with a clear message: games whose shaders exist only at run time (GLSLC / Vulkan / GL capture, Unreal and Oodle decoding)
 #                          boot the game's own arm64 code in the Mac host, which no Windows PC can run
 # Usage: python win/build_ipa_windows.py <NSP folder> -k <prod.keys> [the upstream script's other options]   (--platform mac / mac-app and --prepare-xcode are Mac-only)
-import importlib.util, os, shutil, subprocess, sys, time
+import importlib.util, json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 WIN = Path(__file__).resolve().parent
@@ -96,6 +96,32 @@ def main():
         j = os.environ.get('NXW_AUTO_SDK_CUTS')
         return f + [Path(j)] if j and Path(j).exists() else f
     up.patch_files = patch_files
+
+    # The profile status line: upstream calls a version red when a registered build's fixes do not reach it. An sdk build that sdk_patches.py does not register gets its
+    # address-region cuts here anyway (win/sdk_auto_cuts.py, NXW_AUTO_SDK_CUTS), so when the sdk cuts are all that differ the line is not red
+    orig_report = up.report_profile_status
+    def report_profile_status(g, reg, pkg_ver, derived, provisional, artifact='IPA'):
+        j = os.environ.get('NXW_AUTO_SDK_CUTS'); auto = set()
+        try: auto = set(json.loads(Path(j).read_text(encoding='utf-8'))) if j else set()
+        except (OSError, ValueError): pass
+        lines, say = [], up.say
+        up.say = lambda m, *a, **k: lines.append((m, a, k))
+        try: orig_report(g, reg, pkg_ver, derived, provisional, artifact)
+        finally: up.say = say
+        if derived and auto:
+            row = g.builds().get(pkg_ver, {})
+            known = {(m, b) for r in reg.builds().values() for m, b in r.items() if m != 'display'}
+            other = [m for m, b in row.items() if m != 'display' and (m, b) not in known]
+            repo = Path(__file__).resolve().parent.parent
+            texts = [p.read_text(errors='replace') for p in [reg.dir / 'patches.py'] if p.is_file()]
+            texts += [p.read_text(errors='replace') for d in ('dm/host', 'dm/gfx') for p in (repo / d).rglob('*') if p.suffix in ('.c', '.m', '.h', '.inc')]
+            reg_ids = {b for r in reg.builds().values() for m, b in r.items() if m != 'display' and m in other}
+            lost = [b for b in reg_ids if any(b[:16] in t for t in texts)]   # fixes keyed to the game's own builds or host code: these the auto cuts do not replace
+            if other and not lost and row.get('sdk') in auto:
+                lines = [(m.replace('[RED] ', '', 1) + ' (Windows: the sdk address-region cuts were found in this build\'s own code, win/sdk_auto_cuts.py)' if m.startswith('[RED] this') else m, a, k)
+                         for m, a, k in lines]
+        for m, a, k in lines: say(m, *a, **k)
+    up.report_profile_status = report_profile_status
 
     up.can_clone = lambda d: False
     up.apple_silicon = lambda: True   # only the heap check asks now (the Mac platforms are refused above, the Mac host steps below): it runs heap_estimate instead

@@ -70,7 +70,7 @@ def main(argv):
 
 
 def find(sdk, tool):
-    if tool in ('metal', 'metallib', 'metal-objdump', 'metal-ar'): return tc.metal_tool(sdk, tool)
+    if tool in ('metal', 'metallib', 'metal-objdump', 'metal-ar') or tool.startswith('metal-'): return tc.metal_tool(sdk, tool)   # metal-tt: the offline pipeline archive (pso_offline.py)
     if tool in ('clang', 'clang++'): return tc.llvm_tool(tool)
     if tool in ('ld', 'ld64'): return tc.llvm_tool('ld64.lld')
     if tool in ('ar', 'libtool'): return tc.llvm_tool('llvm-ar')

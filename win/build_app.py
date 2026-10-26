@@ -62,7 +62,7 @@ def host_sources(game_h_dir):
     return files, [Path(i).resolve() for i in incs] + [d for d in dirs if d not in incs]
 
 
-FRAMEWORKS_BASE = ['QuartzCore', 'Metal', 'GameController', 'CoreHaptics', 'AudioToolbox', 'VideoToolbox', 'CoreMedia', 'CoreVideo', 'ImageIO', 'UniformTypeIdentifiers',   # dm/host/Makefile minus Cocoa
+FRAMEWORKS_BASE = ['QuartzCore', 'Metal', 'MetalFX', 'GameController', 'CoreHaptics', 'AudioToolbox', 'VideoToolbox', 'CoreMedia', 'CoreVideo', 'ImageIO', 'UniformTypeIdentifiers',   # dm/host/Makefile minus Cocoa
                    'UIKit', 'Foundation', 'CoreGraphics', 'CoreFoundation']   # what the UIKit side and the launcher use (Xcode would add UIKit through Swift / module autolinking)
 IMPORT = re.compile(r'^\s*#\s*(?:import|include)\s*<(\w+)/', re.M)
 
@@ -179,7 +179,7 @@ def make_icons(src, app):
     return True
 
 
-def split_data(data, parts, stamp, name):
+def split_data(data, parts, stamp, name, skip_suffix=()):
     """Fill the data folder of a split build: {path inside it: source folder}. Files are hard-linked (no disk space, instant) and copied where links fail
     (another drive). The folder is rebuilt each time, so it never mixes files from two builds"""
     if data.exists(): shutil.rmtree(data)
@@ -187,7 +187,7 @@ def split_data(data, parts, stamp, name):
     n = size = 0
     for rel, src in parts.items():
         for f in src.rglob('*'):
-            if f.is_dir(): continue
+            if f.is_dir() or f.name.endswith(tuple(skip_suffix)): continue
             dst = data / rel / f.relative_to(src); dst.parent.mkdir(parents=True, exist_ok=True)
             try: os.link(f, dst)
             except OSError: shutil.copy2(f, dst)
@@ -288,6 +288,21 @@ def main():
     if gfx == 'nvn':
         if (gd / 'cb_extent.tsv').exists(): shutil.copy2(gd / 'cb_extent.tsv', dmres)
         else: t(f'no {gd}/cb_extent.tsv: the host copies whole uniform bindings')
+        # the shader pairs, beside the shader map where the pipeline prebuild reads them (nvn_mtl.m pso_prebuild): without them the app makes no pulling bases (build_ipa.sh)
+        for f in ('shader_pairs.tsv', 'pso_pairs.tsv'):
+            if (gd / f).exists(): shutil.copy2(gd / f, dmres)
+    # The pipeline archive made offline (dm/gfx/tools/pso_offline.py, as build_ipa.sh): the base of every shader pair compiled by metal-tt (Metal Developer Tools for Windows has it)
+    # for each GPU architecture in DM_PSO_GPUS (comma-separated; none = no archive). Default: g18p for a game whose profile sets pso_mtl4 on (only the Metal 4 path reads it), else none
+    pso = None
+    gpus = env['DM_PSO_GPUS'] if 'DM_PSO_GPUS' in env else ('g18p' if gp('pso_mtl4') == 'on' else 'none')
+    if gfx == 'nvn' and not capture and gpus and gpus != 'none' and (gd / 'shader_pairs.tsv').exists():
+        pso = w / 'build/ios/pso/bundle'
+        t(f'pipeline archive for {gpus} (metal-tt; minutes when its inputs changed)')
+        r = subprocess.run([sys.executable, str(DM / 'gfx/tools/pso_offline.py'), '--game', game, '--msl', str(msl_ios / msldir), '--out', str(pso), '--work', str(w / 'build/ios/pso/work'),
+                            '--gpu', gpus] + (['--os-min', env['DM_PSO_IOS_MIN']] if env.get('DM_PSO_IOS_MIN') else []))
+        if r.returncode: die('pipeline archive (dm/gfx/tools/pso_offline.py; DM_PSO_GPUS=none builds the app without it)')
+    elif gfx == 'nvn': t('no pipeline archive (' + (f'DM_PSO_GPUS={gpus}' if 'DM_PSO_GPUS' in env else 'the profile does not set pso_mtl4 on; DM_PSO_GPUS=g18p builds one')
+                         + ('' if (gd / 'shader_pairs.tsv').exists() else ', no shader_pairs.tsv') + ')')
     t('launcher: ' + py(DM / 'games/settings.py', game, patched, vnacp, dmres / 'launcher.json', env=dict(env, GFXAPI=gfx)))
     if env.get('DM_ENV_FILE'): shutil.copy2(env['DM_ENV_FILE'], dmres / 'env.txt')
     (dmres / 'font').mkdir()
@@ -310,26 +325,34 @@ def main():
     icons = icon.exists() and make_icons(icon, app)
     if not icon.exists(): t(f'no app icon ({icon} not found): the home-screen icon stays blank')
     with open(app / 'Info.plist', 'wb') as f:
-        plistlib.dump(info_plist(bundle_id, name, version, gp('app_category'), show_fps, lang, sdk_ver, sdk_build, icons), f, fmt=plistlib.FMT_BINARY)
+        pl = info_plist(bundle_id, name, version, gp('app_category'), show_fps, lang, sdk_ver, sdk_build, icons)
+        if env.get('DM_METAL_CAPTURE') == '1': pl['MetalCaptureEnabled'] = True; t('Metal frame capture: enabled (DM_METAL_CAPTURE=1)')   # the host's DM_GPU_CAPTURE switch
+        plistlib.dump(pl, f, fmt=plistlib.FMT_BINARY)
     (app / 'PkgInfo').write_bytes(b'APPL????')
 
     has_aoc = bool(aoc and aoc.is_dir() and any(aoc.iterdir()))
     if has_aoc: t('add-on content: ' + ' '.join(sorted(p.name for p in aoc.iterdir())))
     split = env.get('NXW_SPLIT_DATA', '')
     maps = [f'Payload/DmIOS.app={app}']
+    if pso: maps.append(f'Payload/DmIOS.app/pso={pso}')
+    # The pulling vertex libraries (<key>_bp) serve the hybrid pipelines: packed when the profile compiles pso_mtl4 in (DM_GAME_PSO_MTL4), or IOS_PULL=1, and always with an archive (build_ipa.sh)
+    m = re.search(r'^#define DM_GAME_PSO_MTL4 (\d)', (gen / 'profile/game_profile.h').read_text(encoding='utf-8'), re.M)
+    pull = env.get('IOS_PULL') or (m.group(1) if m else '0')
+    skip_bp = not pso and pull != '1'
     if split and split != '0':
         # Split build: the IPA holds only the app (small, quick to sign and install); the game files and shader libraries go to a data folder the player copies
         # into the app's Documents (dm/ios/Sources/main.m looks for <Documents>/romfs and <Documents>/<folder>/romfs, and takes msl/ and aoc/ beside it)
         data = Path(split) if split not in ('1', 'YES') else out_ipa.with_name(out_ipa.stem + '-data')
         split_data(data, {'romfs': romfs, f'msl/{msldir}': msl_ios / msldir, **({'aoc': aoc} if has_aoc else {})},
-                   f'game\t{game}\nbundle_id\t{bundle_id}\nversion\t{version}\nchain\t{v}\ngfx\t{gfx}\n', name)
+                   f'game\t{game}\nbundle_id\t{bundle_id}\nversion\t{version}\nchain\t{v}\ngfx\t{gfx}\n', name, skip_suffix=('_bp.metallib',) if skip_bp else ())
     else:
         maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}')
         if has_aoc: maps.append(f'Payload/DmIOS.app/aoc={aoc}')
         maps.append(f'Payload/DmIOS.app/romfs={romfs}')
     t('pack IPA (already-compressed game files stored, everything else deflated)')
     r = subprocess.run([sys.executable, str(IOS / 'tools/pack_ipa.py'), str(out_ipa), '--store', ':'.join(gp('zip_store').split(':')),
-                        '--exec', 'Payload/DmIOS.app/DmIOS', '--skip', 'Payload/DmIOS.app/msl', '--skip', 'Payload/DmIOS.app/aoc', '--skip', 'Payload/DmIOS.app/romfs', *maps])
+                        '--exec', 'Payload/DmIOS.app/DmIOS', '--skip', 'Payload/DmIOS.app/msl', '--skip', 'Payload/DmIOS.app/aoc', '--skip', 'Payload/DmIOS.app/romfs',
+                        '--skip', 'Payload/DmIOS.app/pso', *(['--skip-suffix', '_bp.metallib'] if skip_bp else []), *maps])
     if r.returncode: die('pack_ipa')
     sz = out_ipa.stat().st_size; t(f'done: {out_ipa} ({sz / 2**30:.1f} GB)' if sz >= 2**30 else f'done: {out_ipa} ({sz / 2**20:.1f} MB)')
 

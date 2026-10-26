@@ -1,24 +1,42 @@
-// Launcher for the Windows build: a UIKit port of dm/ios/Sources/Launcher.swift (SwiftUI), so the app builds with clang alone (no Swift toolchain).
-// Its look follows the SwiftUI launcher's Form (upstream 2f69480): the game card on the left half; on the right half every setting in a section of its own
-// (a separate rounded row, its note as the section footer), choices as a menu button, ranges as an inline slider with a percentage, toggles as switches,
-// and the memory available. Same contract: dm_show_launcher(view controller, done) shows the screen over the root view controller, puts every setting into
-// the environment when Play is pressed and then calls done; it returns false (done is not called) when there is no launcher (no dm/launcher.json,
-// DM_LAUNCHER=0, or a file it cannot read). Settings come from the app's dm/launcher.json (dm/games/settings.py): kind "choice" (options [[value, label]]),
-// "range" (min / max / step, shown as a percentage) or a toggle ("1" / "0"). A variable an env file set (DM_ENV_FILE_KEYS, main.m) is shown but kept.
-// Choices are kept in NSUserDefaults under "launcher.<ENV>", as the Swift launcher does.
+// Launcher for the Windows build: a UIKit port of dm/ios/Sources/Launcher.swift and LauncherSettings.swift (SwiftUI), so the app builds with clang alone (no Swift toolchain).
+// Its look follows the SwiftUI launcher (upstream c13ddcf, the single settings screen): the game card on the left third (icon, name, version, Play); on the right two thirds an
+// inset-grouped list with one section per settings section (Game, Controls, Performance) in table order, each row with its note under its label, choices as a menu button,
+// ranges as a slider with a percentage, toggles as switches; then "Reset to tested defaults" and the memory available. Same contract: dm_show_launcher(view controller, done)
+// shows the screen over the root view controller, puts every setting into the environment when Play is pressed and then calls done; it returns false (done is not called)
+// when there is no launcher (no dm/launcher.json, DM_LAUNCHER=0, or a file it cannot read). Settings come from the app's dm/launcher.json (dm/games/settings.py): kind "choice"
+// (options [[value, label]]), "range" (min / max / step, shown as a percentage) or "toggle" (on / off: the two values the variable takes, "1" / "0" when absent).
+// A variable an env file set (DM_ENV_FILE_KEYS, main.m) is shown but kept. A row marked "disabled" (settings.tsv always/<condition>: listed for every game, but this one has
+// nothing it acts on) is shown greyed out and never applied. Only a choice that differs from the game's default is kept, in NSUserDefaults under "launcher.<ENV>", as the Swift launcher does.
 #import <UIKit/UIKit.h>
+#include <math.h>
 #include <os/proc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 @interface DmSetting : NSObject
-@property (copy) NSString *env, *kind, *label, *note, *def;
+@property (copy) NSString *env, *kind, *label, *note, *def, *section, *on, *off;
 @property (copy) NSArray<NSArray<NSString *> *> *options;   // choice: [value, label]
 @property double min, max, step; @property BOOL hasMin, hasMax, hasStep;
-@property BOOL disabled;   // listed for every game, but this one has nothing it acts on (settings.tsv always/<condition>): shown greyed out, never applied
+@property BOOL disabled;
 @end
 @implementation DmSetting
+- (NSString *)sectionTitle { return self.section.length ? self.section : @"Game"; }
+- (NSString *)onValue { return self.on ?: @"1"; }
+- (NSString *)offValue { return self.off ?: @"0"; }
+- (BOOL)isDefault:(NSString *)v {   // a range compares as numbers (a slider writes 1.00 for 1.0)
+    if ([self.kind isEqualToString:@"range"]) return fabs(v.doubleValue - self.def.doubleValue) < 1e-6;
+    return [v isEqualToString:self.def];
+}
+- (BOOL)accepts:(NSString *)v {   // a saved choice the game still offers
+    if ([self.kind isEqualToString:@"choice"]) return [self.options indexOfObjectPassingTest:^BOOL(NSArray *o, NSUInteger i, BOOL *stop) { return [o[0] isEqualToString:v]; }] != NSNotFound;
+    if ([self.kind isEqualToString:@"range"]) {
+        NSScanner *sc = [NSScanner scannerWithString:v]; double d;
+        return [sc scanDouble:&d] && sc.isAtEnd && isfinite(d) && self.hasMin && self.hasMax && d >= self.min && d <= self.max;
+    }
+    if ([self.kind isEqualToString:@"toggle"]) return [v isEqualToString:self.onValue] || [v isEqualToString:self.offValue];
+    return YES;
+}
 @end
 
 static NSString *str(NSDictionary *d, NSString *k) { id v = d[k]; return [v isKindOfClass:NSString.class] ? v : nil; }
@@ -31,6 +49,7 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
         if (![d isKindOfClass:NSDictionary.class]) return nil;
         DmSetting *s = [DmSetting new];
         s.env = str(d, @"env"); s.kind = str(d, @"kind"); s.label = str(d, @"label"); s.note = str(d, @"note"); s.def = str(d, @"default");
+        s.section = str(d, @"section"); s.on = str(d, @"on"); s.off = str(d, @"off");
         if (!s.env || !s.kind || !s.label || !s.note || !s.def) return nil;
         if ([d[@"options"] isKindOfClass:NSArray.class]) {
             NSMutableArray *opts = [NSMutableArray array];
@@ -49,9 +68,10 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
     return out;
 }
 
-// ---- model ----
+// ---- model (LauncherSettings.swift's LauncherModel) ----
 @interface DmLauncherModel : NSObject
 @property (strong) NSArray<DmSetting *> *settings;
+@property (strong) NSArray<NSString *> *sections;
 @property (strong) NSSet<NSString *> *fromFile;   // set by an env file: shown, not changed
 @property (strong) NSMutableDictionary<NSString *, NSString *> *values;
 @end
@@ -59,6 +79,9 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
 - (instancetype)initWith:(NSArray<DmSetting *> *)settings {
     if (!(self = [super init])) return nil;
     _settings = settings; _values = [NSMutableDictionary dictionary];
+    NSMutableArray *secs = [NSMutableArray array];
+    for (DmSetting *s in settings) if (![secs containsObject:s.sectionTitle]) [secs addObject:s.sectionTitle];
+    _sections = secs;
     NSString *keys = NSProcessInfo.processInfo.environment[@"DM_ENV_FILE_KEYS"] ?: @"";
     NSMutableSet *ff = [NSMutableSet set];
     for (NSString *k in [keys componentsSeparatedByString:@" "]) if (k.length) [ff addObject:k];
@@ -68,10 +91,12 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
         NSString *envv = NSProcessInfo.processInfo.environment[s.env];
         if ([ff containsObject:s.env] && envv) { _values[s.env] = envv; continue; }
         NSString *saved = [ud stringForKey:[@"launcher." stringByAppendingString:s.env]];
-        BOOL offered = saved && (!s.options || [s.options indexOfObjectPassingTest:^BOOL(NSArray *o, NSUInteger i, BOOL *stop) { return [o[0] isEqualToString:saved]; }] != NSNotFound);
-        _values[s.env] = offered ? saved : s.def;   // a saved choice the game no longer offers: its default
+        _values[s.env] = (saved && [s accepts:saved]) ? saved : s.def;   // a saved choice the game no longer offers: its default
     }
     return self;
+}
+- (NSArray<DmSetting *> *)inSection:(NSString *)sec {
+    return [self.settings filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(DmSetting *s, NSDictionary *b) { return [s.sectionTitle isEqualToString:sec]; }]];
 }
 - (NSString *)value:(DmSetting *)s { return self.values[s.env] ?: s.def; }
 - (BOOL)locked:(DmSetting *)s { return s.disabled || [self.fromFile containsObject:s.env]; }
@@ -89,32 +114,58 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
     for (NSArray *o in s.options) if ([o[0] isEqualToString:cur]) return o[1];
     return cur;
 }
-- (void)apply {   // before the game starts: every setting not set by an env file goes into the environment (DM_LANG replaces the packed language main.m set as a default)
+- (BOOL)changed {
+    for (DmSetting *s in self.settings) if (!s.disabled && ![self.fromFile containsObject:s.env] && ![s isDefault:[self value:s]]) return YES;
+    return NO;
+}
+- (void)reset {   // every launcher choice back to the game's defaults; an env file's values stay
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
     for (DmSetting *s in self.settings) {
-        NSString *v = [self value:s];
+        [ud removeObjectForKey:[@"launcher." stringByAppendingString:s.env]];
+        if (![self.fromFile containsObject:s.env]) self.values[s.env] = s.def;
+    }
+    fprintf(stderr, "launcher: settings reset to the game's defaults\n");
+}
+// Before the game starts: every setting not set by an env file goes into the environment (DM_LANG replaces the packed language main.m set as a default). Only a choice that
+// differs from the game's default is stored: a setting the player left at its default follows the defaults of a later build (the settings it was tested with)
+- (void)apply {
+    NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+    for (DmSetting *s in self.settings) {
+        NSString *v = [self value:s], *key = [@"launcher." stringByAppendingString:s.env];
         if (s.disabled) continue;   // nothing in this game reads it
-        if ([self locked:s]) { fprintf(stderr, "launcher: %s kept at %s (env file)\n", s.env.UTF8String, v.UTF8String); continue; }
-        [ud setObject:v forKey:[@"launcher." stringByAppendingString:s.env]];
-        setenv(s.env.UTF8String, v.UTF8String, 1); fprintf(stderr, "launcher: %s=%s\n", s.env.UTF8String, v.UTF8String);
+        if ([self.fromFile containsObject:s.env]) { fprintf(stderr, "launcher: %s kept at %s (env file)\n", s.env.UTF8String, v.UTF8String); continue; }
+        BOOL def = [s isDefault:v];
+        if (def) [ud removeObjectForKey:key]; else [ud setObject:v forKey:key];
+        setenv(s.env.UTF8String, v.UTF8String, 1); fprintf(stderr, "launcher: %s=%s%s\n", s.env.UTF8String, v.UTF8String, def ? "" : " (changed)");
     }
 }
 @end
 
 static UILabel *body_label(NSString *text) {
-    UILabel *l = [UILabel new]; l.text = text; l.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; l.textColor = UIColor.labelColor;
-    l.translatesAutoresizingMaskIntoConstraints = NO; [l setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    UILabel *l = [UILabel new]; l.text = text; l.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; l.textColor = UIColor.labelColor; l.numberOfLines = 0;
+    l.translatesAutoresizingMaskIntoConstraints = NO;
     return l;
 }
 
 static UILabel *value_label(NSString *text) {
     UILabel *l = [UILabel new]; l.text = text; l.textColor = UIColor.secondaryLabelColor; l.textAlignment = NSTextAlignmentRight;
     l.font = [UIFont monospacedDigitSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightRegular];
-    l.translatesAutoresizingMaskIntoConstraints = NO;
+    l.translatesAutoresizingMaskIntoConstraints = NO; [l setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [l setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     return l;
 }
 
-// ---- the settings: one section per setting, as SwiftUI's Form draws a Section per row ----
+// The label column of a row: the setting's name, and its note in footnote style under it (SwiftUI's settingLabel)
+static UIStackView *label_stack(NSString *title, NSString *note, BOOL locked) {
+    UIStackView *st = [UIStackView new]; st.axis = UILayoutConstraintAxisVertical; st.spacing = 4; st.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *l = body_label(title); if (locked) l.textColor = UIColor.tertiaryLabelColor; [st addArrangedSubview:l];
+    if (note.length) {
+        UILabel *n = body_label(note); n.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote]; n.textColor = UIColor.secondaryLabelColor; [st addArrangedSubview:n];
+    }
+    return st;
+}
+
+// ---- the settings list ----
 @interface DmSettingsVC : UITableViewController
 @property (strong) DmLauncherModel *m; @property (strong) NSTimer *timer; @property (strong) UILabel *memory;
 @end
@@ -123,72 +174,79 @@ static UILabel *value_label(NSString *text) {
     [super viewDidLoad];
     self.tableView.backgroundColor = UIColor.clearColor;
     self.tableView.rowHeight = UITableViewAutomaticDimension; self.tableView.estimatedRowHeight = 56;
-    self.tableView.sectionHeaderTopPadding = 0;
     __weak DmSettingsVC *w = self;
     self.timer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *t) { w.memory.text = [NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]; }];
 }
 - (void)dealloc { [self.timer invalidate]; }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.m.settings.count + 1; }
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return 1; }
-- (CGFloat)tableView:(UITableView *)tv heightForHeaderInSection:(NSInteger)sec { return sec == 0 ? 20 : 12; }
-- (UIView *)tableView:(UITableView *)tv viewForHeaderInSection:(NSInteger)sec { return [UIView new]; }
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec {
-    if (sec >= (NSInteger)self.m.settings.count) return nil;
-    NSString *n = [self.m note:self.m.settings[sec]]; return n.length ? n : nil;
-}
-- (CGFloat)tableView:(UITableView *)tv heightForFooterInSection:(NSInteger)sec {
-    if (sec < (NSInteger)self.m.settings.count && [self.m note:self.m.settings[sec]].length) return UITableViewAutomaticDimension;
-    return 12;
-}
+- (NSInteger)resetSection { return self.m.sections.count; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.m.sections.count + 2; }   // the sections, Reset, Memory available
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return sec < (NSInteger)self.m.sections.count ? (NSInteger)[self.m inSection:self.m.sections[sec]].count : 1; }
+- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)sec { return sec < (NSInteger)self.m.sections.count ? self.m.sections[sec] : nil; }
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec { return sec == self.resetSection ? @"Brings back all settings this game was tested with." : nil; }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     c.selectionStyle = UITableViewCellSelectionStyleNone;
     UIView *v = c.contentView; UILayoutGuide *g = v.layoutMarginsGuide;
-    if (ip.section == (NSInteger)self.m.settings.count) {   // Memory available
+    if (ip.section == self.resetSection) {   // Reset to tested defaults: a button row, enabled while a choice differs from the defaults
+        UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration]; cfg.title = @"Reset to tested defaults"; cfg.contentInsets = NSDirectionalEdgeInsetsZero;
+        __weak DmSettingsVC *w = self;
+        UIButton *b = [UIButton buttonWithConfiguration:cfg primaryAction:[UIAction actionWithHandler:^(UIAction *a) { [w.m reset]; [w.tableView reloadData]; }]];
+        b.enabled = self.m.changed; b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading; b.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:b];
+        [NSLayoutConstraint activateConstraints:@[[b.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [b.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+            [b.centerYAnchor constraintEqualToAnchor:v.centerYAnchor], [v.heightAnchor constraintGreaterThanOrEqualToConstant:48]]];
+        return c;
+    }
+    if (ip.section > self.resetSection) {   // Memory available
         UILabel *l = body_label(@"Memory available");
         self.memory = value_label([NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]);
         [v addSubview:l]; [v addSubview:self.memory];
         [NSLayoutConstraint activateConstraints:@[[l.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [l.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
             [self.memory.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [self.memory.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
-            [v.heightAnchor constraintGreaterThanOrEqualToConstant:56]]];
+            [v.heightAnchor constraintGreaterThanOrEqualToConstant:48]]];
         return c;
     }
-    DmSetting *s = self.m.settings[ip.section]; BOOL locked = [self.m locked:s];
-    UILabel *l = body_label(s.label); [v addSubview:l];
-    NSMutableArray *cs = [@[[l.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [l.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
-                            [v.heightAnchor constraintGreaterThanOrEqualToConstant:56]] mutableCopy];
-    if ([s.kind isEqualToString:@"choice"]) {   // SwiftUI's default Picker in a Form: the value with up / down chevrons, opening a menu
-        UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration];
-        cfg.title = [self.m choiceLabel:s]; cfg.baseForegroundColor = UIColor.secondaryLabelColor;
-        cfg.image = [UIImage systemImageNamed:@"chevron.up.chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]];
-        cfg.imagePlacement = NSDirectionalRectEdgeTrailing; cfg.imagePadding = 5; cfg.contentInsets = NSDirectionalEdgeInsetsMake(6, 6, 6, 0);
-        cfg.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *a) { NSMutableDictionary *m = [a mutableCopy]; m[NSFontAttributeName] = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; return m; };
-        UIButton *b = [UIButton buttonWithConfiguration:cfg primaryAction:nil];
-        b.showsMenuAsPrimaryAction = YES; b.changesSelectionAsPrimaryAction = NO; b.enabled = !locked;
-        b.menu = [self menuFor:s button:b];
-        b.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:b];
-        [cs addObjectsFromArray:@[[b.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [b.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
-                                  [b.leadingAnchor constraintGreaterThanOrEqualToAnchor:l.trailingAnchor constant:12]]];
-    } else if ([s.kind isEqualToString:@"range"]) {   // label, slider, percentage in one row
+    DmSetting *s = [self.m inSection:self.m.sections[ip.section]][ip.row]; BOOL locked = [self.m locked:s];
+    NSInteger tag = [self.m.settings indexOfObject:s];
+    UIStackView *lab = label_stack(s.label, [self.m note:s], locked);
+    NSMutableArray *cs = [NSMutableArray array];
+    if ([s.kind isEqualToString:@"range"]) {   // label and percentage on one line, the slider under them (SwiftUI's VStack)
+        UILabel *pct = value_label([self.m percentage:s]); pct.tag = 1000 + tag;
         UISlider *sl = [UISlider new]; sl.translatesAutoresizingMaskIntoConstraints = NO;
         sl.minimumValue = s.hasMin ? s.min : 0; sl.maximumValue = s.hasMax ? s.max : 1; sl.value = [self.m rangeValue:s];
-        sl.enabled = !locked; sl.accessibilityLabel = s.label; sl.tag = ip.section;
+        sl.enabled = !locked; sl.accessibilityLabel = s.label; sl.accessibilityValue = pct.text; sl.tag = tag;
         [sl addTarget:self action:@selector(slid:) forControlEvents:UIControlEventValueChanged];
-        UILabel *pct = value_label([self.m percentage:s]); pct.tag = 1000 + ip.section;
-        [v addSubview:sl]; [v addSubview:pct];
-        [cs addObjectsFromArray:@[[sl.leadingAnchor constraintEqualToAnchor:l.trailingAnchor constant:12], [sl.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
-                                  [pct.leadingAnchor constraintEqualToAnchor:sl.trailingAnchor constant:12], [pct.widthAnchor constraintEqualToConstant:56],
-                                  [pct.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [pct.centerYAnchor constraintEqualToAnchor:v.centerYAnchor]]];
+        [sl addTarget:self action:@selector(slidEnd:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside];
+        [v addSubview:lab]; [v addSubview:pct]; [v addSubview:sl];
+        [cs addObjectsFromArray:@[[lab.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [lab.topAnchor constraintEqualToAnchor:g.topAnchor],
+            [pct.leadingAnchor constraintGreaterThanOrEqualToAnchor:lab.trailingAnchor constant:12], [pct.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [pct.firstBaselineAnchor constraintEqualToAnchor:lab.firstBaselineAnchor],
+            [sl.topAnchor constraintEqualToAnchor:lab.bottomAnchor constant:8], [sl.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [sl.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+            [sl.bottomAnchor constraintEqualToAnchor:g.bottomAnchor]]];
     } else {
-        UISwitch *sw = [UISwitch new]; sw.on = [[self.m value:s] isEqualToString:@"1"]; sw.enabled = !locked; sw.tag = ip.section;
-        sw.translatesAutoresizingMaskIntoConstraints = NO;
-        [sw addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
-        [v addSubview:sw];
-        [cs addObjectsFromArray:@[[sw.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [sw.centerYAnchor constraintEqualToAnchor:v.centerYAnchor]]];
+        UIView *ctl;
+        if ([s.kind isEqualToString:@"choice"]) {   // SwiftUI's .menu Picker: the value with up / down chevrons, opening a menu
+            UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration];
+            cfg.title = [self.m choiceLabel:s]; cfg.baseForegroundColor = UIColor.secondaryLabelColor;
+            cfg.image = [UIImage systemImageNamed:@"chevron.up.chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]];
+            cfg.imagePlacement = NSDirectionalRectEdgeTrailing; cfg.imagePadding = 5; cfg.contentInsets = NSDirectionalEdgeInsetsMake(6, 6, 6, 0);
+            cfg.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *a) { NSMutableDictionary *m = [a mutableCopy]; m[NSFontAttributeName] = [UIFont preferredFontForTextStyle:UIFontTextStyleBody]; return m; };
+            UIButton *b = [UIButton buttonWithConfiguration:cfg primaryAction:nil];
+            b.showsMenuAsPrimaryAction = YES; b.changesSelectionAsPrimaryAction = NO; b.enabled = !locked;
+            b.menu = [self menuFor:s button:b];
+            ctl = b;
+        } else {
+            UISwitch *sw = [UISwitch new]; sw.on = [[self.m value:s] isEqualToString:s.onValue]; sw.enabled = !locked; sw.tag = tag;
+            [sw addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
+            ctl = sw;
+        }
+        ctl.translatesAutoresizingMaskIntoConstraints = NO;
+        [ctl setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [v addSubview:lab]; [v addSubview:ctl];
+        [cs addObjectsFromArray:@[[lab.leadingAnchor constraintEqualToAnchor:g.leadingAnchor], [lab.topAnchor constraintEqualToAnchor:g.topAnchor], [lab.bottomAnchor constraintEqualToAnchor:g.bottomAnchor],
+            [ctl.leadingAnchor constraintGreaterThanOrEqualToAnchor:lab.trailingAnchor constant:12], [ctl.trailingAnchor constraintEqualToAnchor:g.trailingAnchor], [ctl.centerYAnchor constraintEqualToAnchor:v.centerYAnchor]]];
     }
+    [cs addObject:[v.heightAnchor constraintGreaterThanOrEqualToConstant:48]];
     [NSLayoutConstraint activateConstraints:cs];
-    if (locked) l.textColor = UIColor.tertiaryLabelColor;
     return c;
 }
 
@@ -202,12 +260,14 @@ static UILabel *value_label(NSString *text) {
             me.m.values[s.env] = o[0];
             UIButtonConfiguration *cfg = wb.configuration; cfg.title = o[1]; wb.configuration = cfg;
             wb.menu = [me menuFor:s button:wb];
+            [me refreshReset];
         }];
         a.state = [o[0] isEqualToString:cur] ? UIMenuElementStateOn : UIMenuElementStateOff;
         [items addObject:a];
     }
     return [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:items];
 }
+- (void)refreshReset { [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:self.resetSection]] withRowAnimation:UITableViewRowAnimationNone]; }
 
 - (void)slid:(UISlider *)sl {
     DmSetting *s = self.m.settings[sl.tag];
@@ -217,10 +277,11 @@ static UILabel *value_label(NSString *text) {
     UILabel *pct = [sl.superview viewWithTag:1000 + sl.tag];
     pct.text = [self.m percentage:s]; sl.accessibilityValue = pct.text;
 }
-- (void)toggled:(UISwitch *)sw { DmSetting *s = self.m.settings[sw.tag]; self.m.values[s.env] = sw.on ? @"1" : @"0"; }
+- (void)slidEnd:(UISlider *)sl { [self refreshReset]; }
+- (void)toggled:(UISwitch *)sw { DmSetting *s = self.m.settings[sw.tag]; self.m.values[s.env] = sw.on ? s.onValue : s.offValue; [self refreshReset]; }
 @end
 
-// ---- the screen: game card on the left half, settings on the right half ----
+// ---- the screen: game card on the left third, settings on the right two thirds ----
 @interface DmLauncherVC : UIViewController
 @property (strong) DmLauncherModel *m; @property (copy) void (^play)(void);
 @end
@@ -235,7 +296,7 @@ static UIImage *app_icon(void) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    self.view.backgroundColor = UIColor.blackColor;
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     UIStackView *card = [UIStackView new]; card.axis = UILayoutConstraintAxisVertical; card.alignment = UIStackViewAlignmentCenter; card.spacing = 16;
     UIImage *icon = app_icon();
     if (icon) {
@@ -258,19 +319,18 @@ static UIImage *app_icon(void) {
     __weak DmLauncherVC *w = self;
     UIButton *b = [UIButton buttonWithConfiguration:cfg primaryAction:[UIAction actionWithHandler:^(UIAction *a) { if (w.play) w.play(); }]];
     [b.widthAnchor constraintEqualToConstant:220].active = YES; [card addArrangedSubview:b];
-    [card setCustomSpacing:20 afterView:ver];
     card.translatesAutoresizingMaskIntoConstraints = NO; [self.view addSubview:card];
 
     DmSettingsVC *list = [[DmSettingsVC alloc] initWithStyle:UITableViewStyleInsetGrouped]; list.m = self.m;
     [self addChildViewController:list]; list.view.translatesAutoresizingMaskIntoConstraints = NO; [self.view addSubview:list.view]; [list didMoveToParentViewController:self];
-    UIView *v = self.view;
-    UILayoutGuide *left = [UILayoutGuide new]; [v addLayoutGuide:left];   // two equal halves, as the SwiftUI HStack of two maxWidth: .infinity views
+    UIView *v = self.view; UILayoutGuide *safe = v.safeAreaLayoutGuide;
+    UILayoutGuide *left = [UILayoutGuide new]; [v addLayoutGuide:left];   // the card in a third, the list in two thirds (Launcher.swift's GeometryReader split)
     [NSLayoutConstraint activateConstraints:@[
         [list.view.topAnchor constraintEqualToAnchor:v.topAnchor], [list.view.bottomAnchor constraintEqualToAnchor:v.bottomAnchor],
-        [list.view.trailingAnchor constraintEqualToAnchor:v.safeAreaLayoutGuide.trailingAnchor], [list.view.widthAnchor constraintEqualToAnchor:v.safeAreaLayoutGuide.widthAnchor multiplier:0.5],
-        [left.leadingAnchor constraintEqualToAnchor:v.safeAreaLayoutGuide.leadingAnchor], [left.trailingAnchor constraintEqualToAnchor:list.view.leadingAnchor],
+        [list.view.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor], [list.view.widthAnchor constraintEqualToAnchor:safe.widthAnchor multiplier:2.0 / 3.0],
+        [left.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor], [left.trailingAnchor constraintEqualToAnchor:list.view.leadingAnchor],
         [card.centerXAnchor constraintEqualToAnchor:left.centerXAnchor], [card.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
-        [card.widthAnchor constraintLessThanOrEqualToAnchor:left.widthAnchor constant:-48]]];
+        [card.widthAnchor constraintLessThanOrEqualToAnchor:left.widthAnchor constant:-32]]];
 }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
 - (BOOL)prefersStatusBarHidden { return YES; }

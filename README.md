@@ -21,6 +21,7 @@ This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnativ
 - [One-time setup](#one-time-setup)
 - [Build an IPA with the window](#build-an-ipa-with-the-window)
 - [Build an IPA from a terminal](#build-an-ipa-from-a-terminal)
+- [Split builds (small IPA + data folder)](#split-builds-small-ipa--data-folder)
 - [Install the IPA on your iPhone or iPad](#install-the-ipa-on-your-iphone-or-ipad)
 - [The launcher on the device](#the-launcher-on-the-device)
 - [How the Windows build works](#how-the-windows-build-works)
@@ -249,7 +250,8 @@ Double-click **`Build-IPA-GUI.bat`** in the repository folder.
 
 1. **Game files**: click the dashed box to pick your NSP / XCI files (base, update and DLC of one game), or use *Choose folder*. Each file shows as BASE, UPD or DLC with its size. *✕* removes one.
 2. **prod.keys**: click *Browse*. The window finds `prod.keys` by itself when it sits next to the game files.
-3. Click **Build IPA**. The button turns into the progress bar (stage, step, percentage). A green card then shows the IPA, and *Show in folder* opens it.
+3. **Package**: *Single IPA* (everything in one file) or *App + data folder* (see [Split builds](#split-builds-small-ipa--data-folder)).
+4. Click **Build IPA**. The button turns into the progress bar (stage, step, percentage). A green card then shows the IPA, and *Show in folder* opens it.
 
 Every build uses the defaults. *Details*, shown from the start, lists them:
 
@@ -281,8 +283,23 @@ The options are upstream's (`-h` lists them all):
 | `--show-fps` / `--no-show-fps` | the frame-rate counter's default |
 | `--keep-extracted` / `--no-keep-extracted` | keep or delete the extracted game files after the build |
 | `--env-file my_env.txt` | diagnostic environment variables baked into the app |
+| `--split-data` / `--split-data=D:\data\Game-data` | a small app-only IPA plus a data folder ([Split builds](#split-builds-small-ipa--data-folder)) |
 
 Only `--platform ios` builds on Windows. `--prepare-xcode` and the Mac platforms need a Mac.
+
+## Split builds (small IPA + data folder)
+
+A normal IPA carries the game files, so signing and installing a 3 GB game takes minutes, every 7 days with a free Apple ID. A split build keeps them apart:
+
+- `<Game>.ipa`: only the app (Balatro: 10 MB). Sideloadly signs and installs it in seconds.
+- `<Game>-data\`: `romfs\`, `msl\` (the shader libraries) and `aoc\` (DLC), hard-linked from the build, so it takes no extra disk space. Its `README.txt` repeats these steps.
+
+Install the IPA, open the app once (it says the game files are missing), then copy the whole `<Game>-data` folder into the app's Documents:
+
+- **Windows**: the *Apple Devices* app (or iTunes) → your device → *Files* → the app → drag the folder in.
+- **On the device**: the *Files* app → *On My iPhone/iPad* → the app, from a USB drive, a network share or iCloud Drive.
+
+Close the app fully and open it again. The app looks for `romfs` in Documents and in every folder directly inside it, so the folder can keep its name. Re-signing the IPA later leaves Documents alone. Copy the data folder again only after a new build of the same game (`nxw_data.tsv` in it names the build). Shaders from one build do not load in an app from another chain version: the log says so.
 
 ## Install the IPA on your iPhone or iPad
 
@@ -296,17 +313,18 @@ With a free Apple ID the app must be signed again every 7 days.
 
 ## The launcher on the device
 
-The settings screen before the game starts looks like upstream's original SwiftUI launcher. The game card sits on the left half and the settings on the right half, one rounded row per setting. On Windows it is drawn by [`win/ios/Launcher.m`](win/ios/Launcher.m), a UIKit port, so no Swift toolchain is needed. Choices are kept between launches.
+The settings screen before the game starts follows upstream's single-screen SwiftUI launcher: the game card (icon, name, version, **Play**) on the left third, and on the right every setting under *Game*, *Controls* and *Performance*, each with its note, then *Reset to tested defaults* and the memory available. On Windows it is drawn by [`win/ios/Launcher.m`](win/ios/Launcher.m), a UIKit port, so no Swift toolchain is needed. Only choices that differ from the game's tested defaults are kept.
 
 | Setting | What it does |
 |---|---|
-| **Frame rate** | *Game default*, 30 fps or 60 fps. Games with an upstream 60 fps patch (Tears of the Kingdom, Breath of the Wild, …) default to their profile's choice. |
-| **Render scale** | 50–100 % of the game's render size. It works only in games whose rewriter has a render-scale stub (Tears of the Kingdom, Breath of the Wild). In other games it is greyed out with "No effect in this game". |
-| **Frame buffering** | NVN games: may reduce stutter, adds display latency. |
-| **Console mode** | *Docked* by default. Touch games such as Balatro default to *Handheld*, because their touches reach the game only in handheld mode. |
-| **Game language** | The Switch system language, among the languages the game's control data declares. Some games (Balatro) declare only English and choose their language in their own options menu instead. |
-| **Frame-rate counter**, **Performance HUD** | on-screen FPS and Metal's HUD |
-| **Touch feedback**, **Game rumble**, **Rumble strength** | haptics |
+| **Frame rate** | 30 or 60 fps, in games whose profile can change it (60 fps patches: Tears of the Kingdom, Breath of the Wild, Octopath Traveler 0 1.0.5, …). Always listed; greyed out where the game sets its own rate. |
+| **Render scale** | 50–100 % of the game's 3D render size, in games whose rewriter has a dynamic-resolution hook (Tears of the Kingdom, Breath of the Wild). Always listed; greyed out elsewhere. To lower the GPU load in any game, pick *Handheld* (most games render at 720p instead of 1080p), with *Upscaling: MetalFX* to sharpen the result. |
+| **Console mode** | *Docked* (the profile's default; touch games such as Balatro default to *Handheld*, because their touches reach the game only in handheld mode). |
+| **Upscaling** | *Standard* or *MetalFX*: Apple's spatial upscaler for the presented picture, in every game. Uses more GPU time and can increase heat. |
+| **Game language** | The Switch system language, among the languages the game's control data declares. Always listed; greyed out when the game declares one language (Balatro chooses its language in its own menu). |
+| **Frame-rate counter** | on-screen FPS |
+| **Touch feedback**, **Game rumble**, **Rumble strength** | haptics (*Controls*) |
+| **Frame buffering**, **Metal 4 pipelines**, **Pipeline prebuild**, **Encode thread**, **Hold frames when late**, **Performance HUD** | NVN games' pacing and pipeline options (*Performance*), as upstream documents them |
 
 An `env.txt` in the app's Documents folder (Files app) still overrides any setting, as upstream documents.
 
@@ -394,6 +412,8 @@ Upstream lists about 65 playable games in its [games table](dm/games/README.md#g
 Local files git ignores: `win/toolchain.json`, `win/gui_settings.json`, `win/sdk/out/` (the extracted SDK) and `win/build/`.
 
 ## Updating from upstream
+
+Last synced with [seedds/nxnative](https://github.com/seedds/nxnative) on 2026-10-26 (46 upstream commits: MetalFX upscaling and the single-screen launcher, offline pipeline archives, the prepare step, hybrid pipelines, Pokémon Shield and Brilliant Diamond, Echoes of Wisdom 1.1.0, thermal frame-rate caps, and more). The offline pipeline archive (`DM_PSO_GPUS`, default for games whose profile sets `pso_mtl4`) builds on Windows too: Metal Developer Tools for Windows ship `metal-tt`.
 
 ```
 git remote add upstream https://github.com/seedds/nxnative.git
