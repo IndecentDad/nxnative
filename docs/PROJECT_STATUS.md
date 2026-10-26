@@ -1,9 +1,8 @@
 # NXNative Project Status
 
-- `main` and `origin/main` are an exact mirror of `upstream/main` at `9a56ecf0`.
-- `integration` includes local Save Folder Sync polish (`a368850`) and the handoff commit (`46041d3`), then merges upstream `main` at `bd2b164`. Pre-merge state is preserved locally as `integration/pre-upstream-9a56ecf-46041d3`.
-- The merge preserved Eden-compatible Save Folder Sync and upstream's new same-core wake handoff. One launcher conflict was resolved by keeping upstream's `GeometryReader`/`NavigationStack` layout while retaining Save Sync status, controls, and details.
-- Focused Save Folder Sync pytest suites pass (19 tests); patch tests pass (6 tests). PR #210's source branch `IndecentDad/save-folder-sync` remains unchanged at `c077af7`.
-- Metroid Dread build is pending. Tahoe has Xcode 26.6 and Metal 32023.883; the checkout's locked Metal fingerprint is 32023.921, so locked shader caches are incompatible. Tahoe has 9.3 GiB free, while the 4.2 GiB base NSP and 284 MiB update remain on the Synology volume, which is not mounted on Tahoe.
-- No physical iOS device is visible to Xcode, so actual gameplay validation has not occurred. No IPA was produced.
-- Next: provide enough Tahoe disk space and access to the two ROM files, build from a separate checkout of the then-current `integration` commit with matching/rebuilt shader artifacts, then install on a connected device and capture real logs through the movie transition and gameplay.
+- Fork main remains untouched as the upstream mirror. Integration now merges the validated Echoes of Wisdom 1.1.0 branch with Eden-compatible Save Folder Sync and upstream launcher settings.
+- Merge resolution keeps grouped launcher settings, reset-to-tested-defaults, and NavigationStack, while retaining the Save Sync entry, status and detail sheet. The app entry imports both the host front-end and Save Sync bridge.
+- Echoes base XCI + update v196608, extraction, rewrites, shader packages and the previously successful device-tested IPA are retained under /Users/kylepyne/nxnative-games/Echoes of Wisdom/v1.1.0. The replacement is to be built from this integration commit.
+- Intel translator fix af582053 builds AnyCPU and avoids x86_64 ReadyToRun incompatibility; translator fingerprint and lock checks must remain enabled. Local Metal and SPIRV-Cross fingerprints are recorded in the Echoes build handoff.
+- Save Folder Sync must keep local Documents/save and shared <Selected Folder>/<TitleID>/, with folder selection, automatic and manual sync, conflict handling, status and last-success display. Device verification remains pending for the rebuilt IPA.
+- Next: run source, translator and Save Sync tests; rebuild Echoes and Celeste from this integration commit using valid existing artifacts; validate both IPAs; clean only superseded build products and update this handoff with exact hashes and remaining device checks.
