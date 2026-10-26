@@ -442,6 +442,8 @@ class App(tk.Tk):
         if copied: self._write(f'Copied (another drive, no hard link possible): {", ".join(copied)}\n', 'dim')
         self.out_ipa, self.started, self.warn = None, time.time(), []
         env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+        mods = next((d for d in (Path(folder) / 'mods', Path(self.files[0]).parent / 'mods') if d.is_dir()), None)   # win/mods.py: the emulators' mod layout beside the game files
+        if mods: env['NXW_MODS_DIR'] = str(mods); self._write(f'Mods  {mods}\n', 'dim')
         try:
             self.proc = subprocess.Popen(cmd, cwd=str(REPO), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), text=True, encoding='utf-8', errors='replace', bufsize=1)

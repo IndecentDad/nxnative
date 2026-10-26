@@ -142,6 +142,23 @@ Nama folder tidak perlu diubah, karena app mencari `romfs` di Documents dan di s
 - **Start pertama lama:** layar "Preparing shaders" memang muncul di start pertama. Tunggu sampai selesai dan jangan tutup app.
 - **Kalau keluar sendiri:** ambil `log.txt` dan `log.prev.txt` dari Files → *On My iPad* → app TotK.
 
+## 4d. Mod (patch performa, tekstur, dan lainnya)
+
+Build Windows bisa memasang mod dengan format yang sama seperti emulator (Yuzu/Ryujinx/Eden) atau Atmosphere. Buat folder `mods` di samping file game, lalu satu folder per mod:
+
+```
+E:\ProjectIOS\Games\0100F2C0115B6000_nxw\
+  mods\
+    NamaMod\
+      exefs\<build ID>.ips   atau   exefs\nama.pchtxt     ← patch kode
+      romfs\...                                           ← file pengganti
+```
+
+- **Patch kode (`.ips`, `.pchtxt`)** dipasang lewat rewriter NXNative, sama seperti patch 60 fps resmi. Hanya patch yang build ID-nya cocok dengan versi game-mu yang dipakai; yang lain dilewati dengan pesan di log. Untuk TotK 1.4.3, build ID `main`-nya `277178b7dba1b6d4…`. Patch yang menimpa fix resmi profil juga dilewati.
+- **File `romfs`** menimpa file asli game di folder data (lewat hard link, tidak memakan ruang).
+- Pakai mod untuk **versi game yang sama**. Mod untuk 1.4.2 tidak cocok dengan 1.4.3.
+- Setelah menambah atau menghapus mod, build ulang dan pasang IPA baru. Kalau mod-nya punya `romfs`, salin ulang juga folder data atau ZIP-nya.
+
 ## 5. Pasang ke iPhone
 
 1. Pasang **Sideloadly** (sideloadly.io) di Windows. Kalau diminta, pasang juga iTunes dan iCloud versi dari situs Apple, bukan dari Microsoft Store.

@@ -102,18 +102,28 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
 
     # NXW_AUTO_SDK_CUTS (a JSON file the Windows driver writes, win/sdk_auto_cuts.py): {sdk build ID: [[offset, old, new, reason], ...]} for sdk builds dm/tools/sdk_patches.py does not
     # register. patch_nso.py loads sdk_patches.py by its path (importlib.util.spec_from_file_location); its CUTS gain these entries, never replacing a registered build's
-    if os.environ.get('NXW_AUTO_SDK_CUTS'):
+    # NXW_MOD_CUTS (win/mods.py through the driver): {"extend": {build ID: cuts}, "new": {build ID: cuts}}: a mod's code patches join the cuts of the patch file that registers the
+    # build (extend), or sdk_patches.py's table when none does (new), so patch_nso.py's one-claim-per-build rule holds
+    if os.environ.get('NXW_AUTO_SDK_CUTS') or os.environ.get('NXW_MOD_CUTS'):
         import importlib.util, json
         _sffl = importlib.util.spec_from_file_location
+        def _json(var):
+            try: return json.loads(Path(os.environ[var]).read_text(encoding='utf-8')) if os.environ.get(var) else {}
+            except (OSError, ValueError): return {}
         def _spec_from_file_location(name, location=None, *a, **k):
             spec = _sffl(name, location, *a, **k)
-            if spec and location and os.fspath(location).replace('\\', '/').endswith('dm/tools/sdk_patches.py'):
+            loc = os.fspath(location).replace(chr(92), '/') if location else ''
+            if spec and name.startswith('patches_') and (loc.endswith('dm/tools/sdk_patches.py') or loc.endswith('/patches.py')):
                 load = spec.loader.exec_module
                 def exec_module(m):
                     load(m)
-                    try: extra = json.loads(Path(os.environ['NXW_AUTO_SDK_CUTS']).read_text(encoding='utf-8'))
-                    except (OSError, ValueError): return
-                    for bid, cuts in extra.items(): m.CUTS.setdefault(bid, [tuple(c) for c in cuts])
+                    if not hasattr(m, 'CUTS'): m.CUTS = {}
+                    mods = _json('NXW_MOD_CUTS')
+                    if loc.endswith('dm/tools/sdk_patches.py'):
+                        for bid, cuts in _json('NXW_AUTO_SDK_CUTS').items(): m.CUTS.setdefault(bid, [tuple(c) for c in cuts])
+                        for bid, cuts in mods.get('new', {}).items(): m.CUTS.setdefault(bid, [tuple(c) for c in cuts])
+                    for bid, cuts in mods.get('extend', {}).items():
+                        if bid in m.CUTS: m.CUTS[bid] = list(m.CUTS[bid]) + [tuple(c) for c in cuts]
                 spec.loader.exec_module = exec_module
             return spec
         importlib.util.spec_from_file_location = _spec_from_file_location

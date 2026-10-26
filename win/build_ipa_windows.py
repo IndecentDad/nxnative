@@ -91,12 +91,38 @@ def main():
                     up.say(f'sdk {bid[:12]} is not in dm/tools/sdk_patches.py: {len(cuts)} address-region cut(s) found in its code (win/sdk_auto_cuts.py)')
         if jf.exists(): os.environ['NXW_AUTO_SDK_CUTS'] = env['NXW_AUTO_SDK_CUTS'] = str(jf)
         else: os.environ.pop('NXW_AUTO_SDK_CUTS', None); env.pop('NXW_AUTO_SDK_CUTS', None)
+        # Mods (win/mods.py): <game folder>/mods, in the emulators' layout. Code patches -> rewriter cuts of the build they name, added to that build's registered cuts by the shim
+        # (NXW_MOD_CUTS: extend = builds a patch file registers, new = builds none does); RomFS folders -> the app build's RomFS (NXW_MODS_ROMFS)
+        import mods
+        mf = out.with_name(out.name + '.mod_cuts.json')
+        if mf.exists(): mf.unlink()
+        mdir = Path(os.environ.get('NXW_MODS_DIR') or exe_dir.parents[3] / 'mods')   # the window stages the game files elsewhere and names the mods folder beside the originals
+        pfiles, rdirs = mods.find(mdir)
+        if pfiles:
+            sys.path.insert(0, str(REPO / 'dm/tools'))
+            import importlib.util as ilu, glob
+            registered = {}
+            for pth in [REPO / 'dm/tools/sdk_patches.py'] + [Path(x) for x in sorted(glob.glob(str(REPO / 'dm/games/*/patches.py')))]:
+                sp = ilu.spec_from_file_location(f'nxw_reg_{abs(hash(str(pth)))}', pth); mm = ilu.module_from_spec(sp)
+                try: sp.loader.exec_module(mm)
+                except Exception: continue
+                for k, v in getattr(mm, 'CUTS', {}).items(): registered.setdefault(k, list(v))
+            cuts = mods.cuts_for(pfiles, exe_dir, g.get('modules').split(), registered, log=up.say)
+            if cuts:
+                mf.parent.mkdir(parents=True, exist_ok=True)
+                mf.write_text(json.dumps({'extend': {k: v for k, v in cuts.items() if k in registered}, 'new': {k: v for k, v in cuts.items() if k not in registered}}, indent=1), encoding='utf-8')
+        if mf.exists(): os.environ['NXW_MOD_CUTS'] = env['NXW_MOD_CUTS'] = str(mf)
+        else: os.environ.pop('NXW_MOD_CUTS', None); env.pop('NXW_MOD_CUTS', None)
+        if rdirs:
+            os.environ['NXW_MODS_ROMFS'] = env['NXW_MODS_ROMFS'] = os.pathsep.join(map(str, rdirs))
+            up.say(f'mods: {len(rdirs)} RomFS folder(s) to lay over the game files: ' + ', '.join(str(d.relative_to(mdir)) for d in rdirs))
+        else: os.environ.pop('NXW_MODS_ROMFS', None); env.pop('NXW_MODS_ROMFS', None)
         return orig_rewrite(py, repo, exe_dir, out, env, logs, g, provisional)
     up.rewrite = rewrite
     def patch_files(repo, exe_dir, mods, game_id=None):
         f = orig_patch_files(repo, exe_dir, mods, game_id)
-        j = os.environ.get('NXW_AUTO_SDK_CUTS')
-        return f + [Path(j)] if j and Path(j).exists() else f
+        extra = [Path(j) for j in (os.environ.get('NXW_AUTO_SDK_CUTS'), os.environ.get('NXW_MOD_CUTS')) if j and Path(j).exists()]
+        return f + extra
     up.patch_files = patch_files
 
     # The profile status line: upstream calls a version red when a registered build's fixes do not reach it. An sdk build that sdk_patches.py does not register gets its
