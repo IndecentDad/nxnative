@@ -294,7 +294,7 @@ def main():
     # The pipeline archive made offline (dm/gfx/tools/pso_offline.py, as build_ipa.sh): the base of every shader pair compiled by metal-tt (Metal Developer Tools for Windows has it)
     # for each GPU architecture in DM_PSO_GPUS (comma-separated; none = no archive). Default: g18p for a game whose profile sets pso_mtl4 on (only the Metal 4 path reads it), else none
     pso = None
-    gpus = env['DM_PSO_GPUS'] if 'DM_PSO_GPUS' in env else ('g18p' if gp('pso_mtl4') == 'on' else 'none')
+    gpus = env['DM_PSO_GPUS'] if 'DM_PSO_GPUS' in env else ('g18p' if prof.get('pso_mtl4', 'off') == 'on' else 'none')
     if gfx == 'nvn' and not capture and gpus and gpus != 'none' and (gd / 'shader_pairs.tsv').exists():
         pso = w / 'build/ios/pso/bundle'
         t(f'pipeline archive for {gpus} (metal-tt; minutes when its inputs changed)')
