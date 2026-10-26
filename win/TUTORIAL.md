@@ -107,6 +107,34 @@ Opsi yang berguna (`-h` menampilkan semuanya):
 | `-l ja` | Bahasa game |
 | `--no-show-fps` | Mematikan penghitung FPS |
 
+## 4b. Mode split: IPA kecil + folder data
+
+Pilih **03 Package → App + data folder** di GUI, atau tambahkan `--split-data` di terminal. Hasilnya ada dua:
+
+- `<NamaGame>.ipa`: berisi app saja (puluhan MB), sehingga sign dan install di Sideloadly hanya beberapa detik.
+- `<NamaGame>-data\`: berisi `romfs`, `msl` (shader), dan `aoc` (DLC). Folder ini dibuat lewat hard link, jadi tidak memakan ruang disk tambahan di PC.
+
+Cara memasangnya di iPhone/iPad:
+
+1. Install `<NamaGame>.ipa` dengan Sideloadly seperti biasa (langkah 5).
+2. Buka app-nya sekali. Akan muncul layar **Game data needed** yang menunjukkan nama folder, ukurannya, dan langkah-langkahnya.
+3. Salin seluruh folder `<NamaGame>-data` ke Documents app itu:
+   - **Dari Windows:** buka app **Apple Devices** (atau iTunes), pilih iPad → **Files** → nama app → seret folder `<NamaGame>-data` ke situ.
+   - **Dari iPad:** buka app **Files** → *On My iPad* → nama app, lalu tempel folder dari flashdisk, network share, atau iCloud Drive.
+4. Tunggu sampai penyalinan selesai (folder besar seperti TotK bisa makan 10–30 menit), lalu tekan **Check again**. Kalau muncul "Found", tutup app sepenuhnya (geser dari app switcher) dan buka lagi.
+5. Launcher muncul. Tekan **Play**.
+
+Nama folder tidak perlu diubah, karena app mencari `romfs` di Documents dan di setiap folder tepat di dalamnya. Sign ulang tiap 7 hari hanya perlu memasang IPA kecilnya; folder data di Documents tidak hilang. Salin ulang folder data hanya setelah build baru dari game yang sama.
+
+## 4c. The Legend of Zelda: Tears of the Kingdom
+
+- **Versi:** pakai **1.4.3** (update `v720896`). Taruh XCI/NSP base dan NSP update 1.4.3 di satu folder. Profil resmi dibuat untuk 1.4.3; versi lain tidak mendapat patch 60 fps dan render scale.
+- **Mode split sangat disarankan.** Datanya sekitar 17 GB, jadi IPA tunggal butuh waktu sangat lama untuk sign dan install.
+- **Ruang kosong di iPad:** minimal sekitar 25 GB (data, ditambah cache shader dan save).
+- **Memori:** TotK memakai sampai 5 GB memori game. Di Sideloadly, aktifkan **Increased Memory Limit**. Upstream baru menguji TotK di iPhone 17 Pro Max dan iPad Pro M2. Perangkat dengan RAM 6 GB atau chip tanpa BC texture (A16 ke bawah) berisiko ditutup iOS karena kehabisan memori.
+- **Start pertama lama:** layar "Preparing shaders" memang muncul di start pertama. Tunggu sampai selesai dan jangan tutup app.
+- **Kalau keluar sendiri:** ambil `log.txt` dan `log.prev.txt` dari Files → *On My iPad* → app TotK.
+
 ## 5. Pasang ke iPhone
 
 1. Pasang **Sideloadly** (sideloadly.io) di Windows. Kalau diminta, pasang juga iTunes dan iCloud versi dari situs Apple, bukan dari Microsoft Store.
