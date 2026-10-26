@@ -11,25 +11,30 @@
 #endif
 
 int nvn_bc_soft;
+int nvn_bc_astc = 1;   // BC1 / BC2 / BC3 / BC7 into ASTC 4x4 instead of RGBA8, BC6H unsigned into RG11B10F instead of RGBA16F (DM_BC_ASTC=0: the uncompressed formats)
 
 enum { BC1 = 130, BC1_S = 131, BC2 = 132, BC2_S = 133, BC3 = 134, BC3_S = 135, BC4_U = 140, BC4_S = 141, BC5_U = 142, BC5_S = 143, BC6H_S = 150, BC6H_U = 151, BC7 = 152, BC7_S = 153 };
-enum { R8U = 10, R8S = 12, RG8U = 30, RG8S = 32, RGBA8 = 70, RGBA8_S = 71, RGBA16F = 115 };
+enum { R8U = 10, R8S = 12, RG8U = 30, RG8S = 32, RGBA8 = 70, RGBA8_S = 71, RG11B10F = 92, RGBA16F = 115, ASTC4_S = 186, ASTC4 = 204 };
 
 uint32_t bc_soft_target(uint32_t pf, int *bpp) {
     uint32_t o; int b;
     switch (pf) {
-        case BC1: case BC2: case BC3: case BC7: o = RGBA8; b = 4; break;
-        case BC1_S: case BC2_S: case BC3_S: case BC7_S: o = RGBA8_S; b = 4; break;
+        // ASTC 4x4: 16 bytes per 4x4 block, 1 byte a pixel instead of RGBA8's 4 (BC1's 0.5 grew 8 times); b = 4 keeps the row pitch the callers compute ((w + 3) / 4 * 4 * b = 16 bytes per block),
+        // bc_soft_rows gives the rows: one per block row
+        case BC1: case BC2: case BC3: case BC7: o = nvn_bc_astc ? ASTC4 : RGBA8; b = 4; break;
+        case BC1_S: case BC2_S: case BC3_S: case BC7_S: o = nvn_bc_astc ? ASTC4_S : RGBA8_S; b = 4; break;
         case BC4_U: o = R8U; b = 1; break;
         case BC4_S: o = R8S; b = 1; break;
         case BC5_U: o = RG8U; b = 2; break;
         case BC5_S: o = RG8S; b = 2; break;
-        case BC6H_U: case BC6H_S: o = RGBA16F; b = 8; break;
+        case BC6H_U: o = nvn_bc_astc ? RG11B10F : RGBA16F; b = nvn_bc_astc ? 4 : 8; break;   // BC6H has no alpha and an unsigned one no sign: RG11B10F holds it in half the memory
+        case BC6H_S: o = RGBA16F; b = 8; break;
         default: return 0;
     }
     if (bpp) *bpp = b;
     return o;
 }
+size_t bc_soft_rows(uint32_t pf, uint32_t h) { uint32_t o = bc_soft_target(pf, NULL); return o == ASTC4 || o == ASTC4_S ? (h + 3) / 4 : (size_t)(h + 3) / 4 * 4; }
 
 // ---- bit reading, LSB first over 128 bits ----
 typedef struct { uint64_t lo, hi; int pos; } bits_t;
@@ -242,10 +247,109 @@ int bc_soft_block(uint32_t pf, const uint8_t *p, uint8_t *out, size_t pitch) {
     return -1;
 }
 
+
+// ---- ASTC 4x4 encoding of a decoded block (nvn_bc_astc) ----
+// One partition, a 4x4 weight grid, endpoints quantized to 8 bits (so no trit / quint packing anywhere):
+//   opaque: CEM 8 (LDR RGB direct), 3-bit weights   17 + 48 + 48 = 113 bits
+//   alpha:  CEM 12 (LDR RGBA direct), 2-bit weights  17 + 64 + 32 = 113 bits
+//   BC1 four-colour blocks: CEM 8 with 2-bit weights, its two colours as the endpoints: 1/3 and 2/3 are the weights 21 and 43 of 64, the same palette
+// Block mode (ASTC spec "Block mode", bits 10:0): bits 1:0 and 4 give the weight range, 3:2 = 00 with B (8:7) = 0 and A (6:5) = 2 a 4x4 grid; 0x42 = 2-bit weights, 0x53 = 3-bit.
+// Endpoint values from bit 17 up, v0 v1 ... = e0.r e1.r e0.g e1.g e0.b e1.b (e0.a e1.a); weights from bit 127 down, texel 0 first, each weight's bits LSB first.
+// The decoder swaps to blue contraction when e1's RGB sum is below e0's: the endpoints are ordered so it never does (weights mirrored, the weight tables are symmetric)
+static void put_bits(uint8_t *o, int pos, uint32_t v, int n) { for (int i = 0; i < n; i++) if (v >> i & 1) o[(pos + i) >> 3] |= (uint8_t)(1u << ((pos + i) & 7)); }
+static void astc_write(uint8_t *o, int nc, int e[2][4], const uint8_t *wi, int wbits) {
+    uint8_t m[16];
+    if (e[1][0] + e[1][1] + e[1][2] < e[0][0] + e[0][1] + e[0][2]) {
+        for (int c = 0; c < 4; c++) { int t = e[0][c]; e[0][c] = e[1][c]; e[1][c] = t; }
+        for (int i = 0; i < 16; i++) m[i] = (uint8_t)((1 << wbits) - 1 - wi[i]);
+        wi = m;
+    }
+    memset(o, 0, 16);
+    put_bits(o, 0, wbits == 2 ? 0x42 : 0x53, 11); put_bits(o, 13, nc == 3 ? 8 : 12, 4);   // bits 12:11 = 0: one partition
+    for (int c = 0; c < nc; c++) { put_bits(o, 17 + 16 * c, (uint32_t)e[0][c], 8); put_bits(o, 25 + 16 * c, (uint32_t)e[1][c], 8); }
+    for (int i = 0; i < 16; i++)
+        for (int k = 0; k < wbits; k++) if (wi[i] >> k & 1) { int b = 127 - (i * wbits + k); o[b >> 3] |= (uint8_t)(1u << (b & 7)); }
+}
+static int clamp255(float v) { int i = (int)(v + 0.5f); return i < 0 ? 0 : i > 255 ? 255 : i; }
+// px: 16 texels RGBA8, row-major. Fit: the principal axis (power iteration from the bounding box diagonal), endpoints at the extreme projections, nearest weights, then one
+// least-squares pass on the endpoints for those weights and the weights again
+static void astc_encode(const uint8_t *px, uint8_t *o) {
+    int opaque = 1; for (int i = 0; i < 16; i++) if (px[i * 4 + 3] != 255) { opaque = 0; break; }
+    int nc = opaque ? 3 : 4, wbits = opaque ? 3 : 2, nl = 1 << wbits; const uint8_t *W = weights(wbits);
+    float m[4] = {0}, lo[4] = {255, 255, 255, 255}, hi[4] = {0};
+    for (int i = 0; i < 16; i++) for (int c = 0; c < nc; c++) { float v = px[i * 4 + c]; m[c] += v; if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; }
+    for (int c = 0; c < nc; c++) m[c] /= 16;
+    float cv[4][4] = {{0}};
+    for (int i = 0; i < 16; i++) for (int a = 0; a < nc; a++) for (int b = 0; b < nc; b++) cv[a][b] += (px[i * 4 + a] - m[a]) * (px[i * 4 + b] - m[b]);
+    float ax[4] = {0}; for (int c = 0; c < nc; c++) ax[c] = hi[c] - lo[c];
+    for (int it = 0; it < 4; it++) {
+        float n[4] = {0}, l = 0;   // scaled by the largest component (no square root: the projections below divide by the axis's squared length)
+        for (int a = 0; a < nc; a++) { for (int b = 0; b < nc; b++) n[a] += cv[a][b] * ax[b]; float q = n[a] < 0 ? -n[a] : n[a]; if (q > l) l = q; }
+        if (l < 1e-12f) break;
+        l = 1.0f / l; for (int a = 0; a < nc; a++) ax[a] = n[a] * l;
+    }
+    float al = 0; for (int c = 0; c < nc; c++) al += ax[c] * ax[c];
+    int e[2][4] = {{0, 0, 0, 255}, {0, 0, 0, 255}}; uint8_t wi[16] = {0};
+    if (al < 1e-12f) { for (int c = 0; c < nc; c++) e[0][c] = e[1][c] = clamp255(m[c]); astc_write(o, nc, e, wi, wbits); return; }   // one colour
+    float tmin = 1e30f, tmax = -1e30f;
+    for (int i = 0; i < 16; i++) { float d = 0; for (int c = 0; c < nc; c++) d += (px[i * 4 + c] - m[c]) * ax[c]; if (d < tmin) tmin = d; if (d > tmax) tmax = d; }
+    for (int c = 0; c < nc; c++) { e[0][c] = clamp255(m[c] + ax[c] * tmin / al); e[1][c] = clamp255(m[c] + ax[c] * tmax / al); }
+    for (int pass = 0; pass < 2; pass++) {
+        float d[4], dd = 0; for (int c = 0; c < nc; c++) { d[c] = (float)(e[1][c] - e[0][c]); dd += d[c] * d[c]; }
+        for (int i = 0; i < 16; i++) {
+            float f = 0; if (dd > 0) { for (int c = 0; c < nc; c++) f += (px[i * 4 + c] - e[0][c]) * d[c]; f = f / dd * 64; }
+            int best = 0; float bd = 1e30f; for (int k = 0; k < nl; k++) { float q = f - W[k]; q *= q; if (q < bd) { bd = q; best = k; } }
+            wi[i] = (uint8_t)best;
+        }
+        if (pass) break;
+        float aa = 0, ab = 0, bb = 0, ra[4] = {0}, rb[4] = {0};   // least squares: p ≈ (1 - w) e0 + w e1
+        for (int i = 0; i < 16; i++) { float w = W[wi[i]] / 64.0f, u = 1 - w; aa += u * u; ab += u * w; bb += w * w; for (int c = 0; c < nc; c++) { ra[c] += u * px[i * 4 + c]; rb[c] += w * px[i * 4 + c]; } }
+        float det = aa * bb - ab * ab;
+        if (det < 1e-6f) break;
+        for (int c = 0; c < nc; c++) { e[0][c] = clamp255((ra[c] * bb - rb[c] * ab) / det); e[1][c] = clamp255((rb[c] * aa - ra[c] * ab) / det); }
+    }
+    astc_write(o, nc, e, wi, wbits);
+}
+// BC1 four-colour block (c0 > c1): the same palette in ASTC, CEM 8 with 2-bit weights (indices 0 1 2 3 = weights 0 3 1 2)
+static int bc1_astc(const uint8_t *p, uint8_t *o) {
+    uint16_t c0 = (uint16_t)(p[0] | p[1] << 8), c1 = (uint16_t)(p[2] | p[3] << 8);
+    if (c0 <= c1) return 0;
+    int e[2][4]; rgb565(c0, &e[0][0], &e[0][1], &e[0][2]); rgb565(c1, &e[1][0], &e[1][1], &e[1][2]); e[0][3] = e[1][3] = 255;
+    static const uint8_t map[4] = {0, 3, 1, 2}; uint8_t wi[16];
+    uint32_t idx = (uint32_t)(p[4] | p[5] << 8 | p[6] << 16 | (uint32_t)p[7] << 24);
+    for (int i = 0; i < 16; i++) wi[i] = map[idx >> (2 * i) & 3];
+    astc_write(o, 3, e, wi, 2);
+    return 1;
+}
+static uint32_t uf(uint16_t h, int mb) {   // a half float into an unsigned small float with mb mantissa bits (5-bit exponent, bias 15 for both): negatives and NaN to 0, rounded to nearest
+    if (h & 0x8000) return 0;
+    if ((h & 0x7c00) == 0x7c00) return (h & 0x3ff) ? 0 : 0x1fu << mb;
+    uint32_t v = (uint32_t)h + (1u << (10 - mb - 1)); v >>= 10 - mb;
+    return v > ((0x1fu << mb) - 1) ? ((0x1eu << mb) | ((1u << mb) - 1)) : v;   // rounding up into the infinity exponent: the largest finite value
+}
+static void block_out(uint32_t pf, const uint8_t *p, uint8_t *dst, size_t dst_pitch) {
+    uint32_t o = bc_soft_target(pf, NULL);
+    if (o == ASTC4 || o == ASTC4_S) {
+        if ((pf == BC1 || pf == BC1_S) && bc1_astc(p, dst)) return;
+        uint8_t px[64]; bc_soft_block(pf, p, px, 16); astc_encode(px, dst); return;
+    }
+    if (o == RG11B10F) {
+        uint8_t hf[128]; bc6_block(p, hf, 32, 0);
+        for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {
+            const uint8_t *q = hf + y * 32 + x * 8; uint16_t r = (uint16_t)(q[0] | q[1] << 8), g = (uint16_t)(q[2] | q[3] << 8), b = (uint16_t)(q[4] | q[5] << 8);
+            uint32_t v = uf(r, 6) | uf(g, 6) << 11 | uf(b, 5) << 22; memcpy(dst + y * dst_pitch + x * 4, &v, 4);
+        }
+        return;
+    }
+    bc_soft_block(pf, p, dst, dst_pitch);
+}
+void bc_soft_astc_pixels(const uint8_t *rgba16, uint8_t *out) { astc_encode(rgba16, out); }   // for tests: 16 RGBA8 texels into one ASTC 4x4 block
+int bc_soft_out_block(uint32_t pf, const uint8_t *block, uint8_t *out, size_t out_pitch) { if (!bc_soft_target(pf, NULL)) return -1; block_out(pf, block, out, out_pitch); return 0; }   // for tests: one block in the staging layout (16 bytes for ASTC)
 static void decode_rows(uint32_t pf, const uint8_t *src, size_t src_pitch, uint32_t bw, uint32_t by0, uint32_t by1, uint8_t *dst, size_t dst_pitch, int bpp, size_t bsz) {
+    uint32_t o = bc_soft_target(pf, NULL); int astc = o == ASTC4 || o == ASTC4_S;   // ASTC: one destination row per block row
     for (uint32_t by = by0; by < by1; by++)
         for (uint32_t bx = 0; bx < bw; bx++)
-            bc_soft_block(pf, src + by * src_pitch + bx * bsz, dst + (size_t)by * 4 * dst_pitch + (size_t)bx * 4 * bpp, dst_pitch);
+            block_out(pf, src + by * src_pitch + bx * bsz, dst + (size_t)by * (astc ? 1 : 4) * dst_pitch + (size_t)bx * 4 * bpp, dst_pitch);
 }
 int bc_soft_decode(uint32_t pf, const uint8_t *src, size_t src_pitch, uint32_t w, uint32_t h, uint8_t *dst, size_t dst_pitch) {
     int bpp; if (!bc_soft_target(pf, &bpp)) return -1;

@@ -6,6 +6,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 #import <AVFAudio/AVFAudio.h>
+int dm_mem_guard(void);   // nvn_mtl.m: the memory guard level, shown in the HUD
 #include <errno.h>
 #include "front.h"
 #include "hle.h"
@@ -146,7 +147,8 @@ static UILabel *front_ios_fps_label(void) {
                 task_vm_info_data_t vi; mach_msg_type_number_t c = TASK_VM_INFO_COUNT; double used = 0;
                 if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &c) == KERN_SUCCESS) used = vi.phys_footprint / 1073741824.0;
                 double left = os_proc_available_memory() / 1073741824.0, gpu = n > 8 ? mtl_gpu_ms(n - 4) : -1;
-                l.text = [NSString stringWithFormat:@" %.0f fps · GPU %@ · %.2f GB · %.2f GB left ", fps, gpu >= 0 ? [NSString stringWithFormat:@"%.1f ms", gpu] : @"--", used, left];
+                int mg = dm_mem_guard();
+                l.text = [NSString stringWithFormat:@" %.0f fps · GPU %@ · %.2f GB · %.2f GB left%@ ", fps, gpu >= 0 ? [NSString stringWithFormat:@"%.1f ms", gpu] : @"--", used, left, mg == 2 ? @" · GUARD 30+flush" : mg == 1 ? @" · GUARD 30" : @""];
                 l.textColor = left < 0.25 ? UIColor.systemRedColor : left < 0.5 ? UIColor.systemOrangeColor : UIColor.whiteColor;   // red: iOS is about to close the app
             }
         }

@@ -28,7 +28,7 @@
 #include <stdatomic.h>
 #include <time.h>
 
-int mtl_fps_target(void);
+int mtl_fps_target(void); int dm_mem_guard(void);
 int mtl_link_active(void); int mtl_link_wait_tick(int vsyncs, uint64_t timeout_ns);   // nvn_mtl.m
 void dm_vi_layer_size(int *w, int *h);   // hle_vi.c: the size of the last sized vi::CreateLayer
 
@@ -1925,6 +1925,7 @@ EGL(eglSwapBuffers, EGLBoolean, EGLDisplay d, EGLSurface s) {
         if (g_pend_clear.bits) clears_flush();
         uint64_t v = cb_commit();
         int vs = S.swap_interval < 1 ? 1 : S.swap_interval > 4 ? 4 : S.swap_interval;
+        if (vs < 2 && S.swap_interval > 0 && dm_mem_guard()) vs = 2;   // memory guard: 30 fps while memory is nearly full
         int k = g_win.cur;
         g_win.ticket[k] = mtl_present_ext(g_win.serial[k], vs / 60.0, (__bridge void *)g_ev, v, NULL);
         g_win.cur = (k + 1) % NWIN;

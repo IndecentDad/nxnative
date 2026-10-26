@@ -54,9 +54,9 @@ What this fork adds on top of upstream, for every game:
 | | |
 |---|---|
 | **No Mac** | Metal Developer Tools for Windows, LLVM (clang, ld64.lld) and the iPhoneOS SDK from `Xcode.xip`; upstream's Mac-host steps replaced (LÖVE shaders offline, Oodle / Unreal / LZ5 and GLSLC in an emulated ARM64 machine, run-time captures on the device). |
-| **A16 and older GPUs** | BC1–BC7 textures decoded at upload (`dm/gfx/tex/bc_soft.c`): upstream's IPAs close on these GPUs with `MTLTextureDescriptor has invalid pixelFormat`. |
+| **A16 and older GPUs** | BC1–BC7 textures transcoded at upload (`dm/gfx/tex/bc_soft.c`): BC1 / BC2 / BC3 / BC7 into ASTC 4x4 (a quarter of RGBA8's memory; BC1 keeps its palette exactly), unsigned BC6H into RG11B10F, BC4 / BC5 into R8 / RG8. Upstream's IPAs close on these GPUs with `MTLTextureDescriptor has invalid pixelFormat`. `DM_BC_ASTC=0` goes back to uncompressed formats. |
 | **Small IPAs** | Split builds: the app alone (tens of MB) plus a data folder or ZIP the app imports itself, with a progress bar, in the background with a Live Activity on iOS 26+. |
-| **Memory** | The app asks for Increased Memory Limit in its own signature, so SideStore keeps it when the App ID allows it; a texture memory saver frees the textures' second copy (automatic when memory runs low); a HUD shows fps, GPU time and the memory left. |
+| **Memory** | The app asks for Increased Memory Limit in its own signature, so SideStore keeps it when the App ID allows it; a texture memory saver frees the textures' second copy (automatic when memory runs low); a HUD shows fps, GPU time and the memory left. A memory guard in every game caps the frame rate at 30 under 600 MB left and flushes caches under 300 MB (`DM_MEM_GUARD=0` turns it off; the HUD shows `GUARD`). On 6 GB devices, Metal 4 pipelines and the pipeline prebuild are off by default, and the device's own pipeline list is not prewarmed before the first frame, so there is no long "Preparing" screen. |
 | **Launcher** | Upstream's single-screen launcher in UIKit, with memory-light defaults on 6 GB devices and Tile memory optimizations as an experiment. |
 | **Mods** | Emulator-layout mods (`exefs` IPS / pchtxt, `romfs`) from a `mods` folder, applied as rewriter cuts after a build-ID check. |
 | **Window** | A builder window (black and pink) besides the command line. |

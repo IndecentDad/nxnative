@@ -140,6 +140,7 @@ Nama folder tidak perlu diubah, karena app mencari `romfs` di Documents dan di s
 - **Ruang kosong di iPad:** minimal sekitar 25 GB (data, ditambah cache shader dan save).
 - **Memori:** TotK memakai sampai 5 GB memori game. Di Sideloadly, aktifkan **Increased Memory Limit**. Upstream baru menguji TotK di iPhone 17 Pro Max dan iPad Pro M2. Perangkat dengan RAM 6 GB atau chip tanpa BC texture (A16 ke bawah) berisiko ditutup iOS karena kehabisan memori.
 - **Start pertama lama:** layar "Preparing shaders" memang muncul di start pertama. Tunggu sampai selesai dan jangan tutup app.
+- **Hemat memori (otomatis):** di A16 ke bawah, tekstur BC diubah ke ASTC 4x4 (¼ memori RGBA8). Pengaman memori menurunkan fps ke 30 kalau sisa memori < 600 MB, dan membersihkan cache kalau < 300 MB (HUD menampilkan `GUARD`). Di perangkat 6 GB, *Metal 4 pipelines* dan *Pipeline prebuild* mati secara default, jadi tidak ada layar "Preparing pipelines" yang lama. Layar "Preparing shaders" berasal dari NXNative asli (upstream). Itu kompilasi shader Metal sekali, bukan emulator, dan di perangkat 6 GB sekarang jalan di latar belakang.
 - **Kalau keluar sendiri:** ambil `log.txt` dan `log.prev.txt` dari Files → *On My iPad* → app TotK.
 
 ## 4d. Mod (patch performa, tekstur, dan lainnya)

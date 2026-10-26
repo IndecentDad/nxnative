@@ -205,6 +205,8 @@ uint64_t mtl_drawable_ns_take(void);   // Take and zero: cumulative ns spent wai
 void mtl_bw(uint64_t *load, uint64_t *store, uint64_t *full_rw_passes);   // Cumulative attachment load / store bytes, cumulative number of full load-store passes
 uint64_t mtl_udc_saved_bytes(void);                                      // Write-back bytes actually saved by DM_NVN_UNWRITTEN_DC
 int mtl_has_window(void);
+int dm_mem_guard(void);                                     // memory guard level: 0 normal, 1 low (30 fps), 2 critical (30 fps, caches flushed); iOS only, nvn_mtl.m
+int dm_mem_guard_flushes(void);
 int mtl_fps_target(void);                                   // target frame rate 30 / 60 (power-saving mode, DM_FPS, the game itself asking for 30)
 int mtl_warm_wait(int timeout_ms);
 int mtl_link_active(void);

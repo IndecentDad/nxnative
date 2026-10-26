@@ -16,6 +16,8 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
 #include <os/proc.h>   // os_proc_available_memory: for the memory readout line
+#include <malloc/malloc.h>   // malloc_zone_pressure_relief: the memory guard
+#include <dispatch/dispatch.h>
 #endif
 #include "nvn_mtl.h"
 #include "nvn_obj.h"
@@ -277,6 +279,58 @@ static int disc_on(void) {
 #endif
     return g_disc_on == 1;
 }
+// Memory guard (iOS, every game; DM_MEM_GUARD=0 turns it off): iOS closes the app with no log when os_proc_available_memory reaches 0, so the host watches it twice a second and
+// on the system's memory-pressure events, and steps down before that happens. Level 1, under 600 MB left: the frame rate is capped at 30 (mtl_fps_target, the NVN frame step and the
+// GL swap all follow dm_mem_guard), which halves the per-frame transient memory and lets the deferred-release queue drain. Level 2, under 300 MB left or a critical pressure event:
+// caches go back too: the texture memory saver is forced on and the malloc zones return their free pages (malloc_zone_pressure_relief). The cap lifts once more than 1 GB is left
+// for 15 s in a row. A game whose logic counts frames runs slower while capped, which beats being closed
+static _Atomic int g_mem_level;
+static int g_mem_flushes;
+static void mem_flush(const char *why, size_t left) {
+    g_disc_on = 1;   // texture memory saver on for the rest of the run (disc_on)
+    size_t freed = malloc_zone_pressure_relief(NULL, 0);
+    g_mem_flushes++;
+    MLOG("memory guard: caches flushed (%s, %zu MB left): texture memory saver on, %zu MB of free malloc pages returned to the system", why, left >> 20, freed >> 20);
+}
+static void mem_sample(int event) {
+    static double calm_since; static int last_logged = -1;
+    size_t left = os_proc_available_memory();
+    if (!left) return;   // not limited (a Mac)
+    int lv = atomic_load(&g_mem_level), was = lv;
+    if (left < (300u << 20) || event == 2) lv = 2;
+    else if (left < (600u << 20) || event == 1) lv = lv > 1 ? lv : 1;
+    double now = CFAbsoluteTimeGetCurrent();
+    if (left > (1024u << 20)) { if (!calm_since) calm_since = now; if (lv && now - calm_since >= 15) lv = 0; }
+    else calm_since = 0;
+    if (lv == 2 && was < 2) mem_flush(event == 2 ? "critical memory pressure from the system" : "under 300 MB left", left);
+    atomic_store(&g_mem_level, lv);
+    if (lv != last_logged) {
+        last_logged = lv;
+        MLOG("memory guard: %s (%zu MB left before the system's memory limit)", lv == 0 ? "normal, the game's own frame rate" : lv == 1 ? "low, frame rate capped at 30" : "critical, frame rate capped at 30 and caches flushed", left >> 20);
+    }
+}
+static int mem_guard_on(void) { static int on = -1; if (on < 0) { const char *e = getenv("DM_MEM_GUARD"); on = !(e && !strcmp(e, "0")); MLOG("memory guard: %s (DM_MEM_GUARD)", on ? "on: frame rate 30 under 600 MB left, caches flushed under 300 MB" : "off"); } return on; }
+int dm_mem_guard(void) {
+#if TARGET_OS_IPHONE
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if (!mem_guard_on()) return;
+        dispatch_queue_t q = dispatch_queue_create("nxw.memguard", DISPATCH_QUEUE_SERIAL);
+        dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
+        dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 0), 500 * NSEC_PER_MSEC, 50 * NSEC_PER_MSEC);
+        dispatch_source_set_event_handler(t, ^{ mem_sample(0); });
+        dispatch_resume(t);
+        dispatch_source_t p = dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0, DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL, q);
+        dispatch_source_set_event_handler(p, ^{ unsigned long f = dispatch_source_get_data(p); mem_sample(f & DISPATCH_MEMORYPRESSURE_CRITICAL ? 2 : f & DISPATCH_MEMORYPRESSURE_WARN ? 1 : 0); });
+        dispatch_resume(p);
+        static void *keep[2]; keep[0] = (__bridge_retained void *)t; keep[1] = (__bridge_retained void *)p;   // live for the whole run
+    });
+    return atomic_load(&g_mem_level);
+#else
+    return 0;
+#endif
+}
+int dm_mem_guard_flushes(void) { return g_mem_flushes; }
 static void disc_queue(const void *mem, size_t len) {
     if (!disc_on() || !mem || !len) return;
     uintptr_t pg = (uintptr_t)getpagesize(), a = ((uintptr_t)mem + pg - 1) & ~(pg - 1), b = ((uintptr_t)mem + len) & ~(pg - 1);
@@ -400,7 +454,9 @@ void mtl_init(void) {
     {   // BC textures on a GPU that cannot sample them (A16 and older iPhone / iPad GPUs): decoded on the CPU at upload into uncompressed formats (bc_soft.c). DM_BC_SOFT=1 forces it, =0 turns it off
         const char *e = getenv("DM_BC_SOFT");
         nvn_bc_soft = e ? atoi(e) != 0 : ![g_dev supportsBCTextureCompression];
-        if (nvn_bc_soft) MLOG("BC textures: decoded on the CPU into uncompressed formats (%s)", e ? "DM_BC_SOFT" : "this GPU has no BC texture support");
+        const char *ea = getenv("DM_BC_ASTC"); nvn_bc_astc = ea ? atoi(ea) != 0 : 1;
+        if (nvn_bc_soft) MLOG("BC textures: decoded on the CPU (%s) into %s", e ? "DM_BC_SOFT" : "this GPU has no BC texture support",
+                              nvn_bc_astc ? "ASTC 4x4 (BC1 / 2 / 3 / 7: a quarter of RGBA8's memory) and RG11B10F (BC6H unsigned); DM_BC_ASTC=0 for uncompressed formats" : "uncompressed formats (DM_BC_ASTC=0)");
     }
     g_q = [g_dev newCommandQueue];
     // A device without Metal 4 (the paravirtualized GPU of a virtual Mac, such as GitHub's macos-26 runner: no residency set, no MTL4CommandQueue) cannot run the NVN layer. The GL and
@@ -2093,7 +2149,7 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
     size_t total = 0;
     for (unsigned l = 0; l < d.mipmapLevelCount; l++) {
         uint32_t w = MAX(t->d.width >> l, 1u), h = MAX(t->d.height >> l, 1u), z = t->d.target == 2 ? MAX(t->d.depth >> l, 1u) : 1;
-        total += bcs ? (size_t)((w + 3) / 4) * 4 * obpp * ((h + 3) / 4) * 4 * z * layers : (size_t)((w + bw - 1) / bw) * bpb * ((h + bh - 1) / bh) * z * layers;
+        total += bcs ? (size_t)((w + 3) / 4) * 4 * obpp * bc_soft_rows(bcs, h) * z * layers : (size_t)((w + bw - 1) / bw) * bpb * ((h + bh - 1) / bh) * z * layers;
     }
     g_bp_up_bytes += total;
     void *mb; uint64_t mo;
@@ -2141,7 +2197,7 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
         uint32_t w = MAX(t->d.width >> l, 1u), h = MAX(t->d.height >> l, 1u), z = t->d.target == 2 ? MAX(t->d.depth >> l, 1u) : 1;
         size_t pitch = (size_t)((w + bw - 1) / bw) * bpb, rows = (h + bh - 1) / bh;
         if (bcs) {
-            size_t dpitch = (size_t)((w + 3) / 4) * 4 * obpp, drows = (size_t)((h + 3) / 4) * 4, need = pitch * rows * z;
+            size_t dpitch = (size_t)((w + 3) / 4) * 4 * obpp, drows = bc_soft_rows(bcs, h), need = pitch * rows * z;
             if (need > raw_n) { free(raw); if (!(raw = malloc(need))) MDIE("BC decode buffer of %zu bytes failed", need); raw_n = need; }
             for (unsigned y = 0; y < layers; y++) {
                 if (nvn_deswizzle(&t->d, l, y, src, raw, pitch)) { RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
@@ -5645,7 +5701,8 @@ static int prepare_on(void) {
     static int v = -1;
     if (v < 0) { const char *e = getenv("DM_PSO_PREPARE");
         if (e && !strcmp(e, "0")) { MLOG("DM_PSO_PREPARE=0: the pipeline prewarm runs in the background, the game does not wait for it"); v = 0; }
-        else v = (e && !strcmp(e, "1")) || front_metal_layer() != NULL; }
+        else v = (e && !strcmp(e, "1")) || (front_metal_layer() != NULL && !(NSProcessInfo.processInfo.physicalMemory <= 6.5 * 1073741824.0 && !e));   // 6 GB devices: in the background, no waiting screen (the list is the profile's alone there)
+        if (!v && !e) MLOG("pipeline prepare: off on this 6 GB device, the prewarm runs in the background (DM_PSO_PREPARE=1 turns the waiting screen back on)"); }
     return v;
 }
 static int prepare_workers(void) {
@@ -5701,6 +5758,11 @@ static void warm_start(void) {
         NSString *seed = [g_shmap_path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"pso_manifest.tsv"];
         NSMutableArray<NSString *> *all = [NSMutableArray arrayWithObject:seed];
         NSString *user = pso_user_path();
+        // A device with 6 GB or less (DM_PSO_USER_WARM=1 / 0 overrides): the device's own list is not prewarmed. It grows with every new pipeline the game draws, all of it was built
+        // before the first frame ("Preparing shaders", longer at each start) and kept for the run; those pipelines come from the system's Metal cache on disk when first drawn instead
+        const char *uw = getenv("DM_PSO_USER_WARM");
+        int skip_user = uw ? !strcmp(uw, "0") : NSProcessInfo.processInfo.physicalMemory <= 6.5 * 1073741824.0;
+        if (skip_user && user) { MLOG("pipeline prewarm: this device's list %s is not prewarmed (%s): its pipelines are made when first drawn", user.UTF8String, uw ? "DM_PSO_USER_WARM=0" : "6 GB device"); user = nil; }
         if (user && [NSFileManager.defaultManager fileExistsAtPath:user]) [all addObject:user];
         else MLOG("pipeline prewarm: this device's user list %s%s", user ? "does not exist yet: " : "has no path (neither DM_PSO_USER nor DM_SAVE is set)", user ? user.UTF8String : "");
         if (![NSFileManager.defaultManager fileExistsAtPath:seed]) { MLOG("[RED] pipeline prewarm: seed list does not exist: %s", seed.UTF8String); return; }
@@ -8831,7 +8893,7 @@ static void copy_b2t(const p_copy_b2t *c) {
     if (bcs) {   // BC blocks into a texture with the decoded format (nvn_bc_soft): decoded on the CPU from the pool's current bytes into a staging buffer, then copied as pixels
         int obpp = 0; bc_soft_target(bcs, &obpp);
         uint32_t w = (uint32_t)c->r.width, h = (uint32_t)c->r.height;
-        size_t dpitch = (size_t)((w + 3) / 4) * 4 * obpp, drows = (size_t)((h + 3) / 4) * 4, dimg = dpitch * drows;
+        size_t dpitch = (size_t)((w + 3) / 4) * 4 * obpp, drows = bc_soft_rows(bcs, h), dimg = dpitch * drows;
         id<MTLBuffer> stg = [g_dev newBufferWithLength:dimg * nz ? dimg * nz : 16 options:MTLResourceStorageModeShared];
         if (!stg) { RED_ONCE(85, "buffer→texture copy: no staging buffer for the decoded BC blocks (%zu bytes)", dimg * nz); return; }
         res_add(stg);
@@ -9101,7 +9163,7 @@ static const char *cctx_snap(void) {
 // When the game itself asks for 30 fps (pacing by the game's present interval, interval 2, hle_nvn.c) the display link runs at 30 Hz too: games whose logic counts frames, such as Engage, are not pulled up to 60 fps by the display link on iOS
 __attribute__((weak)) int nvn_game_fps(void) { return 60; }   // hle_nvn.c provides the strong definition
 int mtl_fps_target(void) { static int env = -2; if (env == -2) { const char *e = getenv("DM_FPS"); env = e ? atoi(e) : -1; if (env != 30 && env != 60) env = -1; else MLOG("DM_FPS=%d: frame rate pinned by the test switch", env); }
-    return env > 0 ? env : nvn_game_fps() == 30 ? 30 : 60; }
+    return dm_mem_guard() ? 30 : env > 0 ? env : nvn_game_fps() == 30 ? 30 : 60; }   // the memory guard caps every game at 30 while memory is low
 // Hand a submission to the GPU in segments (DM_NVN_CUT=draw count, 0 = off; default 64): when the game holds back the next frame's submit until this frame's GPU work is done (The Legend of Zelda: Breath of the Wild: the main thread's nvnSyncWait on the fence of the frame just submitted),
 // the GPU sits idle for the milliseconds the host spends translating inside the submit (in the shrine each frame is GPU 13 ms + translation 7 ms back to back). Each time this many draws have accumulated, the command buffer encoded so far is committed between two passes: the GPU runs the earlier passes while the CPU translates the later ones.
 // Cut only when no encoder is open and no pass is deferred / merged / hoisted; commit this batch's uploads first (later draws use them). The fence signal and completion work stay on the last segment only: the queue executes in commit order and every encoder starts with a queue barrier

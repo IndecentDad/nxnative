@@ -111,7 +111,7 @@ class BcSoft(unittest.TestCase):
                        'void *memset(void *d, int c, size_t n){ char *a=d; while(n--) *a++=(char)c; return d; }\nint _fltused;\n')
         tex = REPO / 'dm/gfx/tex'
         r = subprocess.run([clang, '--target=x86_64-pc-windows-msvc', '-O2', '-ffreestanding', '-fno-builtin', '-nostdlib', '-shared', '-fuse-ld=lld', '-Wl,/NOENTRY',
-                            '-Wl,/EXPORT:bc_soft_block', f'-I{tex}', '-o', str(dll), str(tex / 'bc_soft.c'), str(crt)], capture_output=True, text=True)
+                            '-Wl,/EXPORT:bc_soft_block', '-Wl,/EXPORT:bc_soft_out_block', f'-I{tex}', '-o', str(dll), str(tex / 'bc_soft.c'), str(crt)], capture_output=True, text=True)
         if r.returncode: raise unittest.SkipTest('could not build bc_soft.c: ' + r.stderr[-300:])
         cls.lib = ctypes.CDLL(str(dll))
 
@@ -120,6 +120,33 @@ class BcSoft(unittest.TestCase):
         out = (ctypes.c_uint8 * (16 * bpp))()
         self.assertEqual(self.lib.bc_soft_block(pf, blk, out, 4 * bpp), 0)
         return bytes(out)
+
+    def test_astc(self):
+        """BC → ASTC 4x4 (nvn_bc_astc), decoded by texture2ddecoder: BC1 four-colour blocks keep their palette (within 2), other blocks are a close fit and never the error colour"""
+        try: import texture2ddecoder
+        except ImportError: raise unittest.SkipTest('pip install texture2ddecoder')
+        import ctypes, random
+        rnd = random.Random(11)
+        def astc(pf, b):
+            out = (ctypes.c_uint8 * 16)(); self.assertEqual(self.lib.bc_soft_out_block(pf, b, out, 16), 0)
+            bgra = texture2ddecoder.decode_astc(bytes(out), 4, 4, 4, 4)
+            return bytes(x for i in range(16) for x in (bgra[i * 4 + 2], bgra[i * 4 + 1], bgra[i * 4], bgra[i * 4 + 3]))
+        worst = {}
+        for pf, size in ((130, 8), (134, 16), (152, 16)):
+            errs = []
+            for _ in range(400):
+                b = bytes(rnd.getrandbits(8) for _ in range(size))
+                if pf == 130 and b[0] | b[1] << 8 <= b[2] | b[3] << 8: b = b[2:4] + b[0:2] + b[4:]
+                ref, got = self.block(pf, b, 4), astc(pf, b)
+                if pf == 130 and b[0] | b[1] << 8 > b[2] | b[3] << 8: self.assertLessEqual(max(abs(x - y) for x, y in zip(ref, got)), 2, 'BC1 palette')
+                errs.append(sum((x - y) ** 2 for x, y in zip(ref, got)) / 64)
+            mse = sum(errs) / len(errs); worst[pf] = mse
+        print('ASTC mean squared error per channel: BC1 %.2f, BC3 %.1f, BC7 %.1f (random blocks)' % (worst[130], worst[134], worst[152]))
+        self.assertLess(worst[130], 1.0)
+        for _ in range(300):   # opaque BC3 (alpha 255): the colour part is a BC1 palette, fitted with 3-bit weights
+            b = bytes([255, 255, 0, 0, 0, 0, 0, 0]) + bytes(rnd.getrandbits(8) for _ in range(8))
+            ref, got = self.block(134, b, 4), astc(134, b)
+            self.assertLessEqual(max(abs(x - y) for x, y in zip(ref, got)), 24, 'opaque BC3')
 
     def test_against_pillow(self):
         import random, struct

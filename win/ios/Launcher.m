@@ -98,6 +98,8 @@ static int increased_memory_limit(void);
             else if ([s.env isEqualToString:@"DM_RENDER_SCALE"] && s.def.doubleValue > 0.75) s.def = @"0.75";
             else if ([s.env isEqualToString:@"DM_NVN_TEX_DISCARD"] && ![s.def isEqualToString:@"1"] && !increased_memory_limit()) s.def = @"1";   // the textures' second copy ran TotK out of memory; with Increased Memory Limit, Automatic is enough
             // A 60 fps patch (Tears of the Kingdom: GPU p95 24-28 ms on an A16 iPad) swings between 40 and 60 there: the game's own 30 holds steady
+            // Metal 4 pipelines keep an archive and prebuild every shader pair before the first frame ("Preparing pipelines": 20,017 pairs and about 850 MB more for TotK), past a 6 GB device's limit
+            else if (([s.env isEqualToString:@"DM_PSO_MTL4"] || [s.env isEqualToString:@"DM_PSO_PREBUILD"]) && ![s.def isEqualToString:@"0"]) s.def = @"0";
             else if ([s.env isEqualToString:@"DM_FPS_TARGET"] && [s.def isEqualToString:@"60"] && [s.options indexOfObjectPassingTest:^BOOL(NSArray *o, NSUInteger i, BOOL *stop) { return [o[0] isEqualToString:@"30"]; }] != NSNotFound) s.def = @"30";
             if (![was isEqualToString:s.def]) {
                 s.note = [s.note.length ? [s.note stringByAppendingString:@" "] : @"" stringByAppendingString:@"Lowered for this device's memory."];
@@ -106,6 +108,11 @@ static int increased_memory_limit(void);
         }
     }
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+    // Once on a 6 GB device: a Metal 4 / prebuild choice saved by an earlier build goes back to the light default (it closed TotK for memory); the player can turn it on again
+    if (NSProcessInfo.processInfo.physicalMemory <= 6.5 * 1024 * 1024 * 1024 && ![ud boolForKey:@"launcher.nxw_lowmem_v1"]) {
+        for (NSString *k in @[@"DM_PSO_MTL4", @"DM_PSO_PREBUILD"]) [ud removeObjectForKey:[@"launcher." stringByAppendingString:k]];
+        [ud setBool:YES forKey:@"launcher.nxw_lowmem_v1"];
+    }
     for (DmSetting *s in settings) {
         NSString *envv = NSProcessInfo.processInfo.environment[s.env];
         if ([ff containsObject:s.env] && envv) { _values[s.env] = envv; continue; }
