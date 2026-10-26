@@ -1,37 +1,51 @@
 # The Legend of Zelda: Echoes of Wisdom (`01008CF01BAAC000`)
 
-Base game 1.0.0 (`v0`, a cartridge dump, no update), SDK 16.2.0 (Mario Wonder's). Grezzo's engine on NintendoWare (G3d / Ui2d / Vfx / Atk / Font), as Link's Awakening, on **NVN**. Modules main + subsdk0 (GLSLC, which `main` imports `glslcCompilePreSpec` from) + subsdk1 (movie) + sdk. Its movies are WebM files in `region_common/movie`, played through the SDK's movie library.
+Update 1.1.0 (v196608) over the base game, SDK 20.5.1, NintendoWare G3d / Ui2d / Vfx / Atk / Font on NVN. Modules `main`, `subsdk0` (GLSLC), `subsdk1` (NintendoSDK_movie) and `sdk`.
 
-**Current:** plays on the iPad (IPA 8.4 GB) from the base game 1.0.0 (`v0`), no update. On the Mac: the boot, the title (Press Any Button), file select and about 4 minutes of play, at 60 fps with stretches where the game itself runs at 30 (33.3 ms frames), with sound; about 1.5 GB resident and flat while it runs. The only red lines are Core Haptics' on the Mac (no rumble motor) and one `texture type mismatch: shader declares a cube, texture is 2D (texture ID 271)`, for which the zero cube is bound (what that texture is was not looked into).
+## Status
+
+Playable on the Mac: title movie and logo, file selection, the opening autosave and its reload, and Link's opening Suthorn Ruins corridor through the raised door, rubble jump and upper hall. Movement, jumping, sword input and the right-stick camera work. Both Mac and iOS shader builds produce all 9,858 libraries with no unresolved bindings. An unsigned IPA was built (about 7.8 GB); iOS gameplay remains untested.
 
 ## What it needs
 
 | Setting | Where | Why |
 |---|---|---|
-| 4 GB layout: `mem_reserve 0x100000000`, `mem_alias 0x10000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000` | [`game.tsv`](game.tsv) | 256 MB in front + 256 MB alias region + 256 MB stack region + 3.25 GB heap region; the game sets a 3.11 GB heap |
-| `sys_resource 0x0` | `game.tsv` | the NPDM declares no system resource: no virtual address memory, as on Horizon |
-| `mem_used 0x6600000` | `game.tsv` | the rewritten modules exceed the default 64 MB of used memory |
-| `modules main subsdk0 subsdk1 sdk` | `game.tsv` | every module `main` imports from: `subsdk0` is GLSLC (`glslcCompilePreSpec`), `subsdk1` the movie library |
-| `shader_groups`, `shader_note` | `game.tsv` | the provisional profile's, kept: they are in every shader's cache key |
+| 4 GB address space, 256 MB alias and stack regions, `app_pool 0xCD500000` | [`game.tsv`](game.tsv) | NPDM declares no system resource; the game sets a 3.11 GB heap inside the 3.25 GB heap region |
+| `mem_used 0x6400000` | `game.tsv` | the rewritten modules need 100 MB, exceeding the default 64 MB |
+| `sys_resource 0` | `game.tsv` | NPDM META +0x14 is zero: virtual address memory is disabled |
+| `pad_layout full` | `game.tsv` | the right stick rotates the camera |
 
-The provisional profile the NSP script guessed booted and played the game as it is: the registered profile adds only the app's name and category.
+No game-specific rewriter cuts, SDK cuts or host branches are needed for the tested route. Only update 1.1.0 is registered; the base build has not been brought up.
 
-## Files and shaders
+## Rendering and shaders
 
-- 10,963 RomFS files (7.48 GB), nearly all under `region_common/` (maps 2.78 GB, actors 1.19 GB, audio 1.29 GB, shared textures 0.99 GB), with the text of each language under `region<XX>/`.
-- 9,799 BNSH programs (5,234 vertex, 4,528 pixel, 37 compute): the particle effects in `region_common/effect/*.ptcl` (5,944), the `.bfsha` archives in `region_common/shader` (3,576), the layouts' `bgsh` in `region_common/ui/*.arc` and 40 in `main`.
-- **Cartridge dump:** the base game is an XCI with no ticket and no tags in its file name, so the NSP script could not tell its title ID or version; renamed with `[01008CF01BAAC000][v0]`, it is packed as any other.
+- **Current:** lower-left window origin and near-zero depth, both selected from the game's NVN calls. The existing host handling used by [Link's Awakening](../01006BB00C6F0000/README.md#rendering) applies.
+- **Resolved: a false red cube/2D warning at the first raised-door transition.** The particle fragment shader `aca252efc381a89d` (`region_common/effect/Common.ptcl`, BNSH at `0x59bc000`, variation 3868) chooses reflection cube slot 14 only when the first integer in uniform slot 13 is positive; otherwise it samples cube slot 13. The captured failing draw has that integer equal to zero and a valid 64×64 cube in slot 13. Slot 14 retains a 1408×792 2D depth-stencil texture (ID 272), so it is unused by this draw. The NVN descriptor itself is 2D: no cube view was lost. The existing zero-cube binding is valid; reporting the binding as a rendering error was wrong. Its [general handling](../../../docs/reference/rendering.md#a-2d-texture-in-a-cube-slot-binds-the-zero-cube) now reports an informational fallback. The particle shader and rendered output require no workaround.
+- **Warning validation:** the isolated replay first reproduced the red line in 52.6 s; tracing captured the conditional input and selector. After the fix, the same fallback and the following room render without red lines (63.3 s through frame 3600). The GPU regression has 42 checks under Metal API validation: all pass, versus six false diagnostic failures before the fix. Reproduction scripts, isolated saves, logs and the room screenshot remain under the game's work folder in `cube-repro/`. The unsigned IPA was rebuilt with the fix.
+- 9,858 unique shaders: 5,268 vertex, 4,553 pixel and 37 compute; 7,495 variation pairs. The split finds 9,818 in RomFS containers and 40 in `main`. No unbuilt shader and no undecoded binding in the full Mac build.
+- **Current:** 281 prewarm entries in [`pso_manifest.tsv`](pso_manifest.tsv), recorded through the title, menus, save reload and opening corridor. The final Mac check loaded 144 shaders, 129 render pipelines and eight compute pipelines in 0.37 s of background work, with no unmatched shader keys.
+- Files: models and maps in `region_common/actor` and `region_common/map`, shared BNTX textures in `region_common/sharedtexture`, 96 `.bfsha` archives under `region_common/shader`, six `.ptcl` effect files, and SARC `.arc` UI archives. Nineteen WebM movies; NintendoWare sound in `region_common/audio/edward.bfsar` and `.bfstm` streams.
 
-## Rendering and stutter
+## Audio and memory
 
-- The first use of a Metal pipeline takes 40–450 ms; the prewarm list (576 lines, recorded on the Mac over the route above) removes most of it on later runs (29 long frames → 5). A few presents on the Mac stall 100–300 ms in the display link and come and go between runs (`DM_PRESENT_LINK=0` against `1`, two pairs of runs: inconclusive).
+- **Current:** the SDK audio renderer runs at 48 kHz, 240 samples per frame, 96 voices and a six-input DeviceSink. The Mac callback reports non-silent output and no underruns in the tested route.
+- The first dungeon corridor settles around 1.7–1.8 GB resident with 1.3 GB allocated by Metal. Level transitions change the footprint; the seven-minute repeat ends at 1,831 MB resident / 1,261 MB Metal, with a stable 490-pool count and no continuing growth in the stationary corridor windows.
+- The corridor runs at the game's 60 fps when the Mac window is presenting. First-use pipeline compilation causes hitches. Window-inactive timing is not a gameplay frame-rate measurement.
+- **Validation:** four-minute and seven-minute repeats through the opening corridor, followed by an 85-second run of the finalized profile with prewarming enabled. The final run has no red line. Timed runs end deliberately with SIGALRM (`CRASH sig=14`), rather than a game crash. The unsigned IPA's ZIP CRC check passed; it contains all 9,858 base shader libraries and no signing entries.
 
 ## Mac routes
 
-- Input: the pad only (`main` imports no touch screen); the default 2D gamepad layout.
-- The work folder's `run.sh <log> [secs] VAR=…` boots the Mac host from the NSP script's build folder, its log in `logs/`.
+The development build is `01008CF01BAAC000_build/` beside the NSPs, with runs and diagnostic saves in `01008CF01BAAC000-work/run/`. Set `DM_ROMFS` to the build's `extract/v196608/RomFS`, `DM_MSL_DIR` to `shader/cache`, and `DM_NVN_SHMAP` to this profile's `shader_map.tsv`.
+
+- A fresh save starts the opening prologue and creates File 1's Suthorn Ruins autosave. Subsequent starts show the title.
+- From that save, `DM_KEYS="f600:L+R~0.5,f720:A,f840:A,f960:Up,f1080:A"` selects File 1, the autosave, then Yes (the confirmation initially selects No).
+- In the opening corridor, `LUp~5` reaches the first raised door platform; `LUp+B~1.2` jumps onto it and triggers the opening. In the next room, jump over the low rubble with B, then walk up the stairs. The right stick rotates the view; Y swings the sword.
+- `DM_CTL=<file>` accepts live inputs and `shot <absolute PNG path>` as described in [debugging](../../../docs/agents/05-debugging.md#scripted-input-and-thread-scheduling).
 
 ## Open
 
-- No update was brought up; only the base game 1.0.0 is registered.
-- The cube-for-2D texture mismatch (texture ID 271, the zero cube bound) was not looked into.
+- Later gameplay and iOS runtime validation remain open.
+
+## Found on this game
+
+- **Unused conditional cube inputs are not rendering errors:** [A 2D texture in a cube slot binds the zero cube](../../../docs/reference/rendering.md#a-2d-texture-in-a-cube-slot-binds-the-zero-cube).

@@ -158,6 +158,7 @@ Resource locations:
 | `DM_PSO_HYBRID=0` | A draw whose pipeline is not built yet waits for it, instead of drawing with the pair's pulling pipeline meanwhile (docs/development.md, "Hybrid pipelines") |
 | `DM_PSO_PREBUILD=0` or `tool` | No prebuild of the pulling bases into the archive (in the prepare step, or in the background without one); `tool`: run the prebuild alone and exit (`DM_PSO_PREBUILD_DEPTH=zero`, `DM_PSO_PREBUILD_THREADS=<n>`) |
 | `DM_PSO_PAIRS=path` | The prebuild's second pair table (default: `pso_pairs.tsv` beside the shader map) |
+| `DM_PSO_BUNDLE=folder` or `off` | The pipeline archive made offline (`dm/gfx/tools/pso_offline.py`): `<GPU architecture>.mtl4a` and `prebuilt.tsv`, read only; when it covers the shader pairs the device builds no prebuild bases. The iOS app sets it to its `pso/` folder when it has one (docs/development.md, "The pipeline archive made offline") |
 | `DM_PSO_WAITLOG=1` | Log each draw that waited more than 20 ms for its pipeline, with why no stand-in served it |
 | `DM_PSO_PULL_ALL=1` | Diagnostic: every draw that has a pulling pipeline draws with it |
 
@@ -186,6 +187,7 @@ Comparison and testing:
 | `DM_FPS=30` or `60` | Pins the target frame rate |
 | `DM_NVN_BARRIER=game`, `DM_NVN_CUT` | Pass ordering and segment commits: see [docs/agents/04-graphics.md](../../docs/agents/04-graphics.md) section 7 |
 | `DM_PRESENT_HZ=N` | The frequency of presentation pacing (default 60); 0 means no frame limit and is for performance profiling only |
+| `DM_PRESENT_UPSCALE=metalfx` or `off` | How the present scales a picture smaller than its rectangle on the screen: `metalfx` through MetalFX's spatial scaler, `off` (the default) bilinearly. An option on both platforms (the iOS launcher's Upscaling; `env.txt` on the Mac); rendering at the screen's resolution stays the reference for sharpness ([reference](../../docs/reference/rendering.md#the-present-upscales-through-metalfx)) |
 
 ## Known limitations
 

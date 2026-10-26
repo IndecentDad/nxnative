@@ -2,6 +2,8 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/CAMetalDisplayLink.h>
+#import <MetalFX/MetalFX.h>
+#undef I   // MetalFX brings in <complex.h>, whose I (the imaginary unit) would shadow the local tables named I below
 #import <ImageIO/ImageIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <mach/mach_time.h>
@@ -50,6 +52,8 @@ static uint64_t c2_handle(int stage, unsigned b);   // the handle c2 holds at by
 #import <CommonCrypto/CommonDigest.h>
 #include <stdarg.h>
 #include <mach-o/dyld.h>
+#include <mach-o/fat.h>
+#include <libkern/OSByteOrder.h>
 #include <libgen.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -3011,7 +3015,7 @@ static void shmap_load(void) {
 }
 
 @interface NvShader : NSObject { @public id<MTLFunction> fn, tf_fn, fn_u, fn_m, geo_fn; uint8_t mask_m;   // fn_u: the integer-output entry point (dmsh_build.py fs_uint), for pipelines whose colour attachments are all unsigned integer (pso_desc); fn_m: the mixed one, its outputs in mask_m unsigned integer
-    uint16_t tf_stride[4]; uint32_t cb_ext[16], sb_ro; nvn_refl rf; id<MTLArgumentEncoder> ae; NSUInteger arg_len; int stage, range_ro, afr, layer_out; const char *builtin; uint64_t logged; char key[24]; id<MTLBuffer> c1buf; uint64_t c1_gpu; size_t c1off;
+    uint16_t tf_stride[4]; uint32_t cb_ext[16], sb_ro; nvn_refl rf; id<MTLArgumentEncoder> ae; NSUInteger arg_len; int stage, range_ro, layer_out; const char *builtin; uint64_t logged; char key[24]; id<MTLBuffer> c1buf; uint64_t c1_gpu; size_t c1off;
     uint32_t geo_vertices, geo_invocations, geo_output, geo_stride, geo_index_stride;
     id<MTLComputePipelineState> geo_pso;
     int gs_loc, lay_loc; char gs_comp, lay_comp;   // a slice-writing geometry shader (no function: the layer comes from input gs_loc.gs_comp) / a vertex shader with layer entry points writing output lay_loc.lay_comp (dmsh_build.py gs_slice, vs_layer_entry); -1 = none
@@ -3370,7 +3374,6 @@ void mtl_prog_release(prog_t *p) { if (p->serial) serial_del(p->serial); }
 // At registration the whole texture object is snapshotted (NVN semantics: the descriptor has been written into the pool); view: the MTLTexture for that ID (a view or the base texture, held via CFBridgingRetain) and the serial-table / guest-write generations at the time it was obtained
 typedef struct { tex_t t; int ok; view_t v; int has_v; void *view; uint64_t view_id, view_rid, view_ser, view_dirty; int view_pkg;   // view_pkg: CPU-written (packaged); only those depend on guest writes (view_dirty)
                  void *alt, *alt_of; uint64_t alt_rid; uint8_t alt_type;   // alt: compatible view used when the shader's declared type differs from view (tex_fit), alt_of = the view it was built from
-                 void *ar, *ar_of; uint64_t ar_rid;                         // ar: the alpha-from-red view for the profile's alpha_from_red shaders (tex_alpha_red), ar_of = the view it was built from
                  void *im, *im_of; uint64_t im_rid; } treg_t;              // im: the view an image slot reads in the shader's pixel class (img_fit), im_of = the view it was built from
 static treg_t *g_treg; static int g_ntreg;
 // Lock-free copy of texture ID → serial (the replay hot path only needs the serial: store lookahead index, binding set of the clear-only hoist): texture IDs are 20 bits, fixed 1M entries (BSS, only touched pages are used),
@@ -3379,8 +3382,7 @@ static _Atomic uint64_t g_tser[1 << 20];
 static samp_par *g_sreg; static uint8_t *g_sreg_ok; static void **g_sview; static uint64_t *g_srid; static int g_nsreg;   // g_sview: sampler ID → MTLSamplerState (retained)
 // Memory pool Finalize: for texture IDs whose registered texture lives on this pool, drop the cached MTLTexture (view or base texture). The cache used to be released only when the ID was registered again,
 // so a linear texture built directly on a pool kept the whole pool buffer alive (6 to 17 finalized 16 MB pool buffers stayed alive in Engage's title demo). If the ID is still used, the next lookup rebuilds it on the slow path
-static void treg_drop_ar(treg_t *r) { if (r->ar) { defer_obj_unref((__bridge id)r->ar); CFRelease(r->ar); r->ar = r->ar_of = NULL; r->ar_rid = 0; }
-                                     if (r->im) { defer_obj_unref((__bridge id)r->im); CFRelease(r->im); r->im = r->im_of = NULL; r->im_rid = 0; } }   // and the image class view (img_fit)
+static void treg_drop_im(treg_t *r) { if (r->im) { defer_obj_unref((__bridge id)r->im); CFRelease(r->im); r->im = r->im_of = NULL; r->im_rid = 0; } }   // the image class view (img_fit)
 // Texture views by texture serial and view parameters, beside the per-ID view: KTGL (Age of Calamity) registers a texture into the next ID of a ring before every bind (about 21,000
 // registrations a frame in battle after the first cutscene, 5 in 6 of them a different texture than the ID held), so the per-ID view was rebuilt for nearly every bind: half the
 // registrations ended in a new Metal texture view, 45% of the replay's time. A hit is checked against the current base texture (re-uploads and format-view upgrades replace it).
@@ -3470,7 +3472,7 @@ static void treg_drop_pool_views(const void *pool) {
     vc_drop_pool(pool);
     for (int i = 0; i < g_ntreg; i++)
         if (g_treg[i].view && g_treg[i].ok && (const void *)g_treg[i].t.pool == pool) {
-            defer_obj_unref((__bridge id)g_treg[i].view); CFRelease(g_treg[i].view); g_treg[i].view = NULL; g_treg[i].view_id = g_treg[i].view_rid = 0; treg_drop_ar(&g_treg[i]); }
+            defer_obj_unref((__bridge id)g_treg[i].view); CFRelease(g_treg[i].view); g_treg[i].view = NULL; g_treg[i].view_id = g_treg[i].view_rid = 0; treg_drop_im(&g_treg[i]); }
     os_unfair_lock_unlock(&g_rmu);
 }
 void mtl_reg_tex(int tid, const tex_t *t, const view_t *v) {
@@ -3485,7 +3487,7 @@ void mtl_reg_tex(int tid, const tex_t *t, const view_t *v) {
         g_reg_gen++;
         if (rr->view) { defer_obj_unref((__bridge id)rr->view); CFRelease(rr->view); rr->view = NULL; rr->view_id = rr->view_rid = 0; }
         if (rr->alt) { defer_obj_unref((__bridge id)rr->alt); CFRelease(rr->alt); rr->alt = rr->alt_of = NULL; rr->alt_rid = 0; }
-        treg_drop_ar(rr);
+        treg_drop_im(rr);
         rr->ok = t != NULL; if (t) rr->t = *t; rr->has_v = v != NULL; if (v) rr->v = *v;
         if (id_ < (1 << 20)) atomic_store_explicit(&g_tser[id_], t ? t->serial : 0, memory_order_release);
     }
@@ -3638,7 +3640,9 @@ static id<MTLTexture> tex_fit(int tid, id<MTLTexture> t, MTLTextureType want, ui
     // a defined read, instead of a type mismatch whose reads are undefined. The same for a 2D array of fewer than 6 layers, which is how the host holds some 2D textures (Mario Kart 8 Deluxe binds
     // an NVN 2D texture, format 0x44, at slot 10 of two pixel shaders that declare a cube there, as a race loads)
     if (!ns && (want == MTLTextureTypeCube || want == MTLTextureTypeCubeArray) && (have == MTLTextureType2D || (have == MTLTextureType2DArray && t.arrayLength < 6))) {
-        RED_ONCE(103, "texture type mismatch: shader declares a cube, texture is 2D (texture ID %d); the zero cube is bound", tid);
+        // Uniform-controlled branches can leave unused cube inputs holding 2D descriptors (Echoes of Wisdom).
+        // Binding alone cannot establish that a mismatched input is sampled; this supported fallback is informational.
+        static int noted; if (!noted++) MLOG("cube binding fallback: texture ID %d has a 2D descriptor; zero cube bound (the shader may leave this input unused)", tid);
         id<MTLTexture> z = dummy_tex((int)want, NVN_DPF_FLOAT); *rid = g_dummy_tex_rid[want & 7][NVN_DPF_FLOAT]; return z; }
     if (!ns || tid <= 0 || tid >= g_ntreg) return nil;   // no view bridges it: the caller reports it (tex_mis_note)
     treg_t *r = &g_treg[tid];
@@ -3672,38 +3676,6 @@ static void tex_mis_note(NvShader *sh, int stage, int slot, int tid, id<MTLTextu
                                                                 (unsigned long)(t.bufferOffset % [g_dev minimumLinearTextureAlignmentForPixelFormat:t.pixelFormat]));
     MLOG("[RED] texture type mismatch: shader %s (stage %d) declares slot %d as Metal type %lu, texture ID %d is type %lu (NVN target %d, format %#x, Metal format %lu%s); %s", sh->key, stage, slot,
          (unsigned long)want, tid, (unsigned long)t.textureType, tt ? (int)tt->d.target : -1, tt ? (unsigned)tt->d.format : 0u, (unsigned long)t.pixelFormat, bt, outcome);
-}
-// Alpha from red: the fragment shaders the game profile's alpha_from_red lists read a single-channel render target whose channel mapping is exactly (R, 0, 0, 1) as (R, 0, 0, R).
-// A workaround for NintendoWare layout captures (BotW, Odyssey): the game rebuilds each capture on the same storage with its own mapping ((1, 1, 1, R) for an A8 capture), which was lost while
-// nvnTextureCompare ignored the mapping and left the creation-time (R, 0, 0, 1), alpha always 1 (hard-edged prompt boxes, white coin cards). Since that fix it no longer fires (docs/reference/rendering.md, "`nvnTextureCompare` compares the channel mapping").
-// Only render targets qualify (captures always are; asset and CPU-written textures are not). DM_NVN_ALPHA_RED=0 turns it off, <keys,...> replaces the list. Caller holds g_rmu
-static char g_afr_keys[48][20]; static int g_afr_nk = -1;
-static int afr_want(NvShader *sh) {
-    if (!sh->afr) {
-        if (g_afr_nk < 0) { g_afr_nk = 0; const char *e = getenv("DM_NVN_ALPHA_RED"), *src = e && *e ? e : DM_GAME_ALPHA_FROM_RED;
-            if (strcmp(src, "0")) for (const char *q = src; *q && g_afr_nk < 48;) { size_t n = strcspn(q, ", "); if (n) { if (n > 16) n = 16; memcpy(g_afr_keys[g_afr_nk], q, n); g_afr_keys[g_afr_nk++][n] = 0; } q += n; q += strspn(q, ", "); }
-            if (g_afr_nk) MLOG("single-channel texture alpha from red: %s%s", src, e && *e ? " (DM_NVN_ALPHA_RED)" : " (profile key alpha_from_red)"); }
-        sh->afr = 1; for (int i = 0; i < g_afr_nk; i++) if (!strncmp(sh->key, g_afr_keys[i], strlen(g_afr_keys[i]))) sh->afr = 2;
-    }
-    return sh->afr == 2;
-}
-static id<MTLTexture> tex_alpha_red(int tid, id<MTLTexture> t, uint64_t *rid) {
-    MTLPixelFormat pf = t.pixelFormat; MTLTextureSwizzleChannels sw = t.swizzle;
-    if (pf != MTLPixelFormatR8Unorm && pf != MTLPixelFormatR16Unorm && pf != MTLPixelFormatR16Float && pf != MTLPixelFormatR32Float) return nil;
-    if (sw.red != MTLTextureSwizzleRed || sw.green != MTLTextureSwizzleZero || sw.blue != MTLTextureSwizzleZero || sw.alpha != MTLTextureSwizzleOne || tid <= 0 || tid >= g_ntreg) return nil;
-    id<MTLTexture> base = t.parentTexture ? t.parentTexture : t;
-    if (!(base.usage & MTLTextureUsageRenderTarget)) return nil;   // packaged and CPU-written textures are built without render-target usage
-    treg_t *r = &g_treg[tid];
-    if (r->ar && r->ar_of == (__bridge void *)t) { *rid = r->ar_rid; return (__bridge id<MTLTexture>)r->ar; }
-    treg_drop_ar(r);
-    NSUInteger l0 = t.parentTexture ? t.parentRelativeLevel : 0, s0 = t.parentTexture ? t.parentRelativeSlice : 0;
-    NSUInteger ns = t.textureType == MTLTextureType3D ? 1 : t.arrayLength * (t.textureType == MTLTextureTypeCube || t.textureType == MTLTextureTypeCubeArray ? 6 : 1);
-    id<MTLTexture> v = [base newTextureViewWithPixelFormat:pf textureType:t.textureType levels:NSMakeRange(l0, t.mipmapLevelCount) slices:NSMakeRange(s0, ns)
-                                                   swizzle:MTLTextureSwizzleChannelsMake(MTLTextureSwizzleRed, MTLTextureSwizzleZero, MTLTextureSwizzleZero, MTLTextureSwizzleRed)];
-    if (!v) { RED_ONCE(82, "cannot create the alpha-from-red view (texture ID %d format %lu)", tid, (unsigned long)pf); return nil; }
-    { static int once; if (!once++) MLOG("single-channel texture alpha from red: first case texture ID %d %lux%lu", tid, (unsigned long)t.width, (unsigned long)t.height); }
-    r->ar = (void *)CFBridgingRetain(v); r->ar_of = (__bridge void *)t; r->ar_rid = v.gpuResourceID._impl;
-    *rid = r->ar_rid; return v;
 }
 // Pixel class of a Metal format as a shader's texture type sees it (NVN_DPF_*): the Uint / Sint formats, everything else reads as float
 static int mtl_pf_dpf(MTLPixelFormat pf) {
@@ -4488,8 +4460,8 @@ static MTLRenderPipelineDescriptor *pso_desc(const pso_key *k, NvShader *vs, NvS
 // taken from an archive costs about 0.06 ms, against 10-80 ms to build one.
 // DM_PSO_MTL4=0: the MTLDevice path as before (no bases, no archive). DM_PSO_ARCHIVE=off: no archive; DM_PSO_ARCHIVE=<folder>: the archive in that folder.
 // On by default on the Mac; on iOS DM_PSO_MTL4=1, or the profile key pso_mtl4 on, turns it on, and with it the hybrid pipelines and the pipeline prebuild. The archive's footprint
-// (with the prebuild, about 850 MB more for Breath of the Wild) is not measured against an iPhone's limit yet, and an iPhone cannot be given an archive made offline (metal-tt
-// rejects the Metal 4 serializer's pipeline script)
+// (with the prebuild, about 850 MB more for Breath of the Wild) is not measured against an iPhone's limit yet. The prebuild's bases can also come made offline, bundled with the
+// app (DM_PSO_BUNDLE, pso_bundle_open)
 static int pso4_on(void) {
     static int v = -1;
     if (v < 0) {
@@ -4531,6 +4503,93 @@ static nvn_hmap g_pbase = {.klen = sizeof(pbase_key)};
 static nvn_hmap g_pbase_pending = {.klen = sizeof(pbase_key)};
 static os_unfair_lock g_pbase_lock = OS_UNFAIR_LOCK_INIT;
 static NSString *pso_user_path(void);
+// The pipeline archive made offline (dm/gfx/tools/pso_offline.py, metal-tt) and bundled with the app: DM_PSO_BUNDLE=<folder> (the iOS app sets it to its pso/ folder when it has one;
+// off: not used) holds <GPU architecture>.mtl4a per architecture it was built for and prebuilt.tsv, what it covers (pso_prebuild). The file named after this device's architecture is
+// opened read only and looked up first among the files of bases without a vertex layout; it is never written or compacted. The device's own archive (pso_archive/) so takes only
+// what it lacks: a draw, the prewarm and the prebuild compile a base, and the serializer captures it, only after the bundle missed (it holds no base with a vertex layout). A system
+// that cannot open it (one older than the archive's minimum, or an OS update that changed the GPU compiler) or a GPU it was not built for gets an info line, and the device builds
+// the bases itself as before (the on-device prebuild is the fallback)
+static id<MTL4Archive> g_arch_bundle; static NSString *g_bundle_dir;
+// Metal's loader crashes on malformed containers rather than returning an error. Check the GPU image's load commands and referenced file ranges, including every slice of a
+// universal archive, before giving it to Metal. This checks the container, not the compiler's private payload: Metal still decides whether this system can use its binaries.
+static int arch_macho_ok(int fd, uint64_t off, uint64_t size) {
+    struct mach_header_64 h;
+    if (size < sizeof h || pread(fd, &h, sizeof h, (off_t)off) != sizeof h || h.magic != MH_MAGIC_64 || h.filetype != MH_GPU_EXECUTE ||
+        !h.ncmds || h.sizeofcmds > size - sizeof h || h.ncmds > h.sizeofcmds / sizeof(struct load_command)) return 0;
+    uint64_t pos = sizeof h, end = pos + h.sizeofcmds; int pipeline = 0;
+    for (uint32_t i = 0; i < h.ncmds; i++) {
+        struct load_command lc;
+        if (end - pos < sizeof lc || pread(fd, &lc, sizeof lc, (off_t)(off + pos)) != sizeof lc || lc.cmdsize < sizeof lc || lc.cmdsize > end - pos) return 0;
+        if (lc.cmd == LC_SEGMENT_64) {
+            struct segment_command_64 s;
+            if (lc.cmdsize < sizeof s || pread(fd, &s, sizeof s, (off_t)(off + pos)) != sizeof s || s.fileoff > size || s.filesize > size - s.fileoff ||
+                s.nsects > (lc.cmdsize - sizeof s) / sizeof(struct section_64)) return 0;
+        } else if (lc.cmd == LC_NOTE) {
+            struct note_command n;
+            if (lc.cmdsize < sizeof n || pread(fd, &n, sizeof n, (off_t)(off + pos)) != sizeof n || n.offset > size || n.size > size - n.offset) return 0;
+            if (n.size && !memcmp(n.data_owner, "AIR_PIPELINE", sizeof "AIR_PIPELINE")) pipeline = 1;
+        }
+        pos += lc.cmdsize;
+    }
+    return pos == end && pipeline;
+}
+static int arch_container_ok(int fd, uint64_t size) {
+    struct fat_header h;
+    if (size < sizeof h || pread(fd, &h, sizeof h, 0) != sizeof h) return 0;
+    if (h.magic == MH_MAGIC_64) return arch_macho_ok(fd, 0, size);
+    // The serializer's 0xcbfebabe wrapper uses fat_arch entries and includes a Metal library slice beside the GPU images.
+    int metal = h.magic == OSSwapBigToHostInt32(0xcbfebabe), wide = h.magic == OSSwapBigToHostInt32(FAT_MAGIC_64);
+    if (!metal && !wide && h.magic != OSSwapBigToHostInt32(FAT_MAGIC)) return 0;
+    uint32_t n = OSSwapBigToHostInt32(h.nfat_arch); uint64_t ent = wide ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
+    if (!n || n > (size - sizeof h) / ent) return 0;
+    uint64_t table = sizeof h + n * ent; int gpu = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint64_t off, len;
+        if (wide) {
+            struct fat_arch_64 a; if (pread(fd, &a, sizeof a, (off_t)(sizeof h + i * ent)) != sizeof a) return 0;
+            off = OSSwapBigToHostInt64(a.offset); len = OSSwapBigToHostInt64(a.size);
+        } else {
+            struct fat_arch a; if (pread(fd, &a, sizeof a, (off_t)(sizeof h + i * ent)) != sizeof a) return 0;
+            off = OSSwapBigToHostInt32(a.offset); len = OSSwapBigToHostInt32(a.size);
+        }
+        if (off < table || off > size || len > size - off) return 0;
+        uint32_t magic;
+        if (len < sizeof magic || pread(fd, &magic, sizeof magic, (off_t)off) != sizeof magic) return 0;
+        if (metal && magic == 0x424c544d) {   // MTLB: its header declares the full slice length and four section ranges
+            uint64_t lib[11];
+            if (len < sizeof lib || pread(fd, lib, sizeof lib, (off_t)off) != sizeof lib || lib[2] != len) return 0;
+            for (int j = 3; j < 11; j += 2) if (lib[j] > len || lib[j + 1] > len - lib[j]) return 0;
+        } else {
+            if (!arch_macho_ok(fd, off, len)) return 0;
+            gpu = 1;
+        }
+    }
+    return gpu;
+}
+static int arch_file_ok(NSString *path) {
+    int fd = open(path.fileSystemRepresentation, O_RDONLY); if (fd < 0) return 0;
+    struct stat st; int ok = !fstat(fd, &st) && S_ISREG(st.st_mode) && st.st_size > 0 && arch_container_ok(fd, (uint64_t)st.st_size);
+    close(fd); return ok;
+}
+static void pso_bundle_open(NSMutableArray<id<MTL4Archive>> *archp) {
+    const char *e = getenv("DM_PSO_BUNDLE");
+    if (!e || !*e || !strcmp(e, "off")) return;
+    NSString *dir = @(e), *gpu = [(id)g_dev respondsToSelector:@selector(architecture)] ? g_dev.architecture.name : nil;
+    NSString *p = gpu ? [dir stringByAppendingPathComponent:[gpu stringByAppendingPathExtension:@"mtl4a"]] : nil;
+    if (!p || ![NSFileManager.defaultManager fileExistsAtPath:p]) {
+        NSArray<NSString *> *have = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil] filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"self ENDSWITH '.mtl4a'"]];
+        MLOG("pipeline archive bundled with the app: none for this GPU (%s; %s has %s): the bases are built on the device", gpu ? gpu.UTF8String : "architecture unknown", e,
+             have.count ? [have componentsJoinedByString:@", "].UTF8String : "none");
+        return;
+    }
+    uint64_t t0 = bp_now(); NSError *ae = nil;
+    if (!arch_file_ok(p)) { MLOG("[RED] pipeline archive bundled with the app: %s is not a pipeline archive: the bases are built on the device", p.UTF8String); return; }
+    id<MTL4Archive> a = [g_dev newArchiveWithURL:[NSURL fileURLWithPath:p] error:&ae];
+    if (!a) { MLOG("pipeline archive bundled with the app: this system cannot open %s (%s; made for another system version, or an OS update changed the GPU compiler): the bases are built on the device",
+                   p.UTF8String, ae.localizedDescription.UTF8String); return; }
+    g_arch_bundle = a; g_bundle_dir = dir; [archp addObject:a];
+    MLOG("pipeline archive bundled with the app: %s, %.1f MB, opened in %.1f ms", p.UTF8String, [[NSFileManager.defaultManager attributesOfItemAtPath:p error:nil] fileSize] / 1048576.0, (bp_now() - t0) / 1e6);
+}
 static void pso4_init(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -4538,27 +4597,29 @@ static void pso4_init(void) {
         const char *e = getenv("DM_PSO_ARCHIVE"); NSString *user = pso_user_path();
         g_arch_dir = e && !strcmp(e, "off") ? nil : e && *e ? @(e) : user ? [user.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"pso_archive"] : nil;
         id<MTL4PipelineDataSetSerializer> ser = nil;
+        NSMutableArray<id<MTL4Archive>> *arch = [NSMutableArray array], *archp = [NSMutableArray array];
+        pso_bundle_open(archp);   // first: it holds every pair's base
         if (g_arch_dir) {
             g_arch_q = dispatch_queue_create("dm.nvn.pso-archive", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
             MTL4PipelineDataSetSerializerDescriptor *sd = [MTL4PipelineDataSetSerializerDescriptor new]; sd.configuration = MTL4PipelineDataSetSerializerConfigurationCaptureBinaries;
             ser = [g_dev newPipelineDataSetSerializerWithDescriptor:sd];
-            NSMutableArray<id<MTL4Archive>> *arch = [NSMutableArray array], *archp = [NSMutableArray array]; uint64_t t0 = bp_now(); unsigned long long bytes = 0;
+            uint64_t t0 = bp_now(); unsigned long long bytes = 0;
             NSMutableArray<NSString *> *runf = [NSMutableArray array];
             NSArray<NSString *> *names = [[[NSFileManager.defaultManager contentsOfDirectoryAtPath:g_arch_dir error:nil] filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"self ENDSWITH '.mtl4a'"]]
                                           sortedArrayUsingSelector:@selector(compare:)];
             for (NSString *n in names.reverseObjectEnumerator) {   // newest first
                 NSString *p = [g_arch_dir stringByAppendingPathComponent:n]; NSError *ae = nil;
-                id<MTL4Archive> a = [g_dev newArchiveWithURL:[NSURL fileURLWithPath:p] error:&ae];
+                id<MTL4Archive> a = arch_file_ok(p) ? [g_dev newArchiveWithURL:[NSURL fileURLWithPath:p] error:&ae] : nil;
                 int pf = [n hasPrefix:@"p"];
                 if (a) { [pf ? archp : arch addObject:a]; if (!pf) [runf addObject:p]; bytes += [[NSFileManager.defaultManager attributesOfItemAtPath:p error:nil] fileSize]; }
-                else MLOG("[RED] pipeline archive file %s not usable (%s): its bases are built again", p.UTF8String, ae.localizedDescription.UTF8String);
+                else MLOG("[RED] pipeline archive file %s not usable (%s): its bases are built again", p.UTF8String, ae ? ae.localizedDescription.UTF8String : "not a pipeline archive");
                 g_arch_seq = MAX(g_arch_seq, [n substringFromIndex:pf].intValue + 1);
             }
-            g_arch4 = arch; g_arch4p = archp;
             if (runf.count > PSO_ARCH_COMPACT) { g_compact_opts = [MTL4CompilerTaskOptions new]; g_compact_opts.lookupArchives = arch; g_compact_files = runf; }
-            MLOG("pipeline archive %s: %lu files (%lu of bases without a vertex layout), %.1f MB, opened in %.1f ms", g_arch_dir.UTF8String, (unsigned long)(arch.count + archp.count),
-                 (unsigned long)archp.count, bytes / 1048576.0, (bp_now() - t0) / 1e6);
+            MLOG("pipeline archive %s: %lu files (%lu of bases without a vertex layout), %.1f MB, opened in %.1f ms", g_arch_dir.UTF8String, (unsigned long)(arch.count + archp.count - (g_arch_bundle != nil)),
+                 (unsigned long)archp.count - (g_arch_bundle != nil), bytes / 1048576.0, (bp_now() - t0) / 1e6);
         }
+        g_arch4 = arch; g_arch4p = archp;
         MTL4CompilerDescriptor *cd = [MTL4CompilerDescriptor new]; cd.pipelineDataSetSerializer = ser;
         NSError *ce = nil; g_comp4 = [g_dev newCompilerWithDescriptor:cd error:&ce];
         if (!g_comp4) MLOG("[RED] no Metal 4 compiler (%s): render pipelines are built through the MTLDevice", ce.localizedDescription.UTF8String);
@@ -4867,7 +4928,8 @@ void mtl_pso_line(char *o, size_t n) {
 // there (the archive matches libraries by content). Bases already in the archive are skipped; what is built goes into the archive, flushed every 1,000 bases (the serializer holds
 // what it captured until then). Runs once per chain version, depth mode and pair list (pso_archive/prebuilt.tsv): in the app after the prewarm, on a background queue at utility QoS
 // (DM_PSO_PREBUILD=0: not at all), or as a tool on the Mac (DM_PSO_PREBUILD=tool: build, write, exit). Vertex shaders that write the layer, pairs whose vertex shader has stage
-// inputs but no pulling library, and integer-output or multisampled bases are left to the draws
+// inputs but no pulling library, and integer-output or multisampled bases are left to the draws. An app that bundles these bases made offline (DM_PSO_BUNDLE, pso_bundle_covers)
+// builds none of them, only the pairs that archive left to the device (rest_pairs.tsv beside it: functions with constants)
 static _Atomic int g_pre_running; static _Atomic int g_pre_done, g_pre_built, g_pre_archived, g_pre_skipped, g_pre_failed;
 static MTL4FunctionDescriptor *pre_fn(id<MTLLibrary> lib, NSString *name) {   // as shader_load notes them (fn4_note): constants specialized with an empty set
     id<MTLFunction> f = [lib newFunctionWithName:name]; if (!f) return nil;
@@ -4876,36 +4938,84 @@ static MTL4FunctionDescriptor *pre_fn(id<MTLLibrary> lib, NSString *name) {   //
     MTL4SpecializedFunctionDescriptor *sd = [MTL4SpecializedFunctionDescriptor new]; sd.functionDescriptor = ld; sd.constantValues = [MTLFunctionConstantValues new]; return sd;
 }
 static NSDictionary *pre_json(NSString *key) { NSData *d = [NSData dataWithContentsOfFile:[NSString stringWithFormat:@"%@/%@_b.json", g_msl_dir, key]]; return d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil; }
+// The base of one pair as the draws make it (pso_desc_pull / pso_desc), or nil when the pair is left to the draws. Call inside an autorelease pool
+static MTL4RenderPipelineDescriptor *pre_desc(NSString *vk, NSString *fk, int zero) {
+    NSDictionary *vj = pre_json(vk), *fj = pre_json(fk);
+    if (!vj || !fj || ![vj[@"chain"] isEqual:@DMSH_CHAIN] || ![fj[@"chain"] isEqual:@DMSH_CHAIN]) return nil;
+    NSString *ventry = zero && vj[@"entry_z"] ? vj[@"entry_z"] : vj[@"entry"], *fentry = fj[@"entry"] ?: @"main0";
+    int pull = [vj[@"pull"] isKindOfClass:[NSDictionary class]];
+    if (!pull && [vj[@"vertex_inputs"] count]) return nil;   // stage inputs and no pulling library: its pipelines need the draw's layout
+    NSError *e = nil;
+    id<MTLLibrary> vl = lib_from_file([NSString stringWithFormat:@"%@/%@%@.metallib", g_msl_dir, vk, pull ? @"_bp" : @"_b"], &e);
+    if (!vl || t_lib_layer) return nil;   // writes the layer: its pipelines take an input primitive class (pso_desc), no pulling pipeline
+    id<MTLLibrary> fl = lib_from_file([NSString stringWithFormat:@"%@/%@_b.metallib", g_msl_dir, fk], &e);
+    MTL4FunctionDescriptor *vf = pre_fn(vl, ventry), *ff = fl ? pre_fn(fl, fentry) : nil;
+    if (!vf || !ff) return nil;
+    MTL4RenderPipelineDescriptor *m = [MTL4RenderPipelineDescriptor new];
+    m.vertexFunctionDescriptor = vf; m.fragmentFunctionDescriptor = ff; m.vertexDescriptor = [MTLVertexDescriptor vertexDescriptor]; m.rasterSampleCount = 1;
+    for (int i = 0; i < 8; i++) { MTL4RenderPipelineColorAttachmentDescriptor *a = m.colorAttachments[i];
+        a.pixelFormat = MTLPixelFormatUnspecialized; a.writeMask = MTLColorWriteMaskUnspecialized; a.blendingState = MTL4BlendStateUnspecialized;
+        a.sourceRGBBlendFactor = a.destinationRGBBlendFactor = a.sourceAlphaBlendFactor = a.destinationAlphaBlendFactor = MTLBlendFactorUnspecialized;
+        a.rgbBlendOperation = a.alphaBlendOperation = MTLBlendOperationUnspecialized; }
+    return m;
+}
 static void pre_pair(NSString *vk, NSString *fk, int zero) {
     @autoreleasepool {
-        NSDictionary *vj = pre_json(vk), *fj = pre_json(fk);
-        if (!vj || !fj || ![vj[@"chain"] isEqual:@DMSH_CHAIN] || ![fj[@"chain"] isEqual:@DMSH_CHAIN]) { g_pre_skipped++; return; }
-        NSString *ventry = zero && vj[@"entry_z"] ? vj[@"entry_z"] : vj[@"entry"], *fentry = fj[@"entry"] ?: @"main0";
-        int pull = [vj[@"pull"] isKindOfClass:[NSDictionary class]];
-        if (!pull && [vj[@"vertex_inputs"] count]) { g_pre_skipped++; return; }   // stage inputs and no pulling library: its pipelines need the draw's layout
-        NSError *e = nil;
-        id<MTLLibrary> vl = lib_from_file([NSString stringWithFormat:@"%@/%@%@.metallib", g_msl_dir, vk, pull ? @"_bp" : @"_b"], &e);
-        if (!vl || t_lib_layer) { g_pre_skipped++; return; }   // writes the layer: its pipelines take an input primitive class (pso_desc), no pulling pipeline
-        id<MTLLibrary> fl = lib_from_file([NSString stringWithFormat:@"%@/%@_b.metallib", g_msl_dir, fk], &e);
-        MTL4FunctionDescriptor *vf = pre_fn(vl, ventry), *ff = fl ? pre_fn(fl, fentry) : nil;
-        if (!vf || !ff) { g_pre_skipped++; return; }
-        MTL4RenderPipelineDescriptor *m = [MTL4RenderPipelineDescriptor new];
-        m.vertexFunctionDescriptor = vf; m.fragmentFunctionDescriptor = ff; m.vertexDescriptor = [MTLVertexDescriptor vertexDescriptor]; m.rasterSampleCount = 1;
-        for (int i = 0; i < 8; i++) { MTL4RenderPipelineColorAttachmentDescriptor *a = m.colorAttachments[i];
-            a.pixelFormat = MTLPixelFormatUnspecialized; a.writeMask = MTLColorWriteMaskUnspecialized; a.blendingState = MTL4BlendStateUnspecialized;
-            a.sourceRGBBlendFactor = a.destinationRGBBlendFactor = a.sourceAlphaBlendFactor = a.destinationAlphaBlendFactor = MTLBlendFactorUnspecialized;
-            a.rgbBlendOperation = a.alphaBlendOperation = MTLBlendOperationUnspecialized; }
+        MTL4RenderPipelineDescriptor *m = pre_desc(vk, fk, zero);
+        if (!m) { g_pre_skipped++; return; }
         for (id<MTL4Archive> a in g_arch4p) if ([a newRenderPipelineStateWithDescriptor:m error:nil]) { g_pre_archived++; return; }
         for (id<MTL4Archive> a in g_arch4) if ([a newRenderPipelineStateWithDescriptor:m error:nil]) { g_pre_archived++; return; }
+        NSError *e = nil;
         pthread_rwlock_rdlock(&g_arch_rw); id ps = [g_comp4 newRenderPipelineStateWithDescriptor:m compilerTaskOptions:nil error:&e]; pthread_rwlock_unlock(&g_arch_rw);
         if (ps) { g_pre_built++; atomic_fetch_add(&g_arch_new, 1); }
         else { if (g_pre_failed++ < 4) MLOG("[RED] pipeline prebuild: the base of %s + %s failed: %s", vk.UTF8String, fk.UTF8String, e.localizedDescription.UTF8String); }
     }
 }
+// What a prebuild covers (prebuilt.tsv): the chain version, the depth mode, and the pair lists' length in bytes and SHA-256 (first 16 hex digits). dm/gfx/tools/pso_offline.py writes
+// the same for the archive it makes offline, from the same files
+static NSString *pre_stamp(NSString *txt, int zero) {
+    NSData *d = [txt dataUsingEncoding:NSUTF8StringEncoding]; uint8_t h[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(d.bytes, (CC_LONG)d.length, h);
+    return [NSString stringWithFormat:@"chain\t%s\ndepth\t%s\npairs\t%lu\t%02x%02x%02x%02x%02x%02x%02x%02x\n", DMSH_CHAIN, zero ? "near=0" : "near=-w", (unsigned long)d.length,
+            h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]];
+}
+static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt) {   // (vertex key, pixel key) per line, without empty lines, comments and repeated lines
+    NSMutableArray<NSArray<NSString *> *> *pairs = [NSMutableArray array]; NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    for (NSString *l in [txt componentsSeparatedByString:@"\n"]) { if (!l.length || [l hasPrefix:@"#"] || [seen containsObject:l]) continue; [seen addObject:l]; NSArray *c = [l componentsSeparatedByString:@"\t"]; if (c.count >= 2) [pairs addObject:c]; }
+    return pairs;
+}
+// Whether the archive bundled with the app (pso_bundle_open) holds this run's prebuild: its prebuilt.tsv is the stamp the device would write for these pairs and this depth mode,
+// and a probe of up to 16 pairs spread over the list (not those it left to the device, rest) finds every base it makes in it (an archive that opens but whose binaries this system
+// does not take finds none)
+enum { PRE_PROBE = 16 };
+static const char *stamp_line(NSString *st) {   // a stamp on one line, for the log
+    return [[[st stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet] stringByReplacingOccurrencesOfString:@"\n" withString:@"; "] stringByReplacingOccurrencesOfString:@"\t" withString:@" "].UTF8String;
+}
+static int pso_bundle_covers(NSArray<NSArray<NSString *> *> *pairs, NSString *want, int zero, NSString *rest) {
+    NSString *have = [NSString stringWithContentsOfFile:[g_bundle_dir stringByAppendingPathComponent:@"prebuilt.tsv"] encoding:NSUTF8StringEncoding error:nil];
+    if (![have isEqualToString:want]) {
+        MLOG("pipeline archive bundled with the app: made for %s, this run needs %s: the device builds the bases it does not hold%s", have ? stamp_line(have) : "(no prebuilt.tsv)", stamp_line(want),
+             have && [have rangeOfString:zero ? @"depth\tnear=-w" : @"depth\tnear=0"].location != NSNotFound ? " (the game's depth mode is not the one built for: the profile key depth_mode)" : "");
+        return 0;
+    }
+    NSMutableSet<NSArray<NSString *> *> *left = [NSMutableSet setWithArray:pre_parse(rest ?: @"")];
+    NSMutableArray<NSArray<NSString *> *> *cand = [NSMutableArray array];
+    for (NSArray<NSString *> *p in pairs) if (![left containsObject:@[p[0], p[1]]]) [cand addObject:p];
+    uint64_t t0 = bp_now(); int probed = 0, found = 0; NSUInteger n = cand.count;
+    for (NSUInteger k = 0; k < PRE_PROBE && k < n; k++) @autoreleasepool {
+        NSArray<NSString *> *p = cand[k * n / MIN(n, (NSUInteger)PRE_PROBE)];
+        MTL4RenderPipelineDescriptor *m = pre_desc(p[0], p[1], zero);
+        if (!m) continue;
+        probed++; found += [g_arch_bundle newRenderPipelineStateWithDescriptor:m error:nil] != nil;
+    }
+    int ok = probed > 0 && found == probed;   // skipped samples give no evidence that this system can take a base from the archive
+    MLOG("pipeline archive bundled with the app: %s (%d of %d probed bases found, %.1f ms)%s", ok ? "holds the bases of every shader pair" : "this system does not take its bases",
+         found, probed, (bp_now() - t0) / 1e6, ok ? "" : ": the device builds them");
+    return ok;
+}
 // threads: workers; wait: run on the calling thread until done (the tool), else in the background. Returns the number of pairs, -1 when there is nothing to do
 static int pso_prebuild(int threads, int wait, dispatch_qos_class_t qos) {
     shmap_load(); pso4_init();
-    if (!g_comp4 || !g_ser4 || !g_arch_dir || atomic_exchange(&g_pre_running, 1)) return -1;
+    if (!g_comp4 || (!g_arch_bundle && (!g_ser4 || !g_arch_dir)) || atomic_exchange(&g_pre_running, 1)) return -1;
     // The pairs: shader_pairs.tsv (BNSH variations and the other readers' pairs) and pso_pairs.tsv (agl BAHS program variations, which vs_pad does not read; DM_PSO_PAIRS: another path),
     // both beside the shader map
     NSString *pp = [g_shmap_path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"shader_pairs.tsv"];
@@ -4915,12 +5025,16 @@ static int pso_prebuild(int threads, int wait, dispatch_qos_class_t qos) {
     if (!txt) { MLOG("pipeline prebuild: no %s, nothing to build", pp.UTF8String); g_pre_running = 0; return -1; }
     if (txt2) txt = [txt stringByAppendingString:txt2];
     int zero = atomic_load(&g_depth_zero);
+    NSString *want = pre_stamp(txt, zero);
+    NSArray<NSArray<NSString *> *> *pairs = pre_parse(txt);
+    NSString *rp = g_arch_bundle ? [g_bundle_dir stringByAppendingPathComponent:@"rest_pairs.tsv"] : nil, *rest = rp ? [NSString stringWithContentsOfFile:rp encoding:NSUTF8StringEncoding error:nil] : nil;
+    if (g_arch_bundle && pso_bundle_covers(pairs, want, zero, rest)) {   // the archive made offline holds them: only the pairs it left to the device (function constants) are built here
+        if (!rest.length) { g_pre_running = 0; return -1; }
+        txt = rest; want = pre_stamp(rest, zero); pairs = pre_parse(rest); pp = rp; txt2 = nil;
+    }
+    if (!g_ser4 || !g_arch_dir) { g_pre_running = 0; return -1; }
     NSString *stamp = [g_arch_dir stringByAppendingPathComponent:@"prebuilt.tsv"];
-    NSString *want = [NSString stringWithFormat:@"chain\t%s\ndepth\t%s\npairs\t%lu\t%lx\n", DMSH_CHAIN, zero ? "near=0" : "near=-w", (unsigned long)txt.length, (unsigned long)txt.hash];
     if ([[NSString stringWithContentsOfFile:stamp encoding:NSUTF8StringEncoding error:nil] isEqualToString:want]) { g_pre_running = 0; return -1; }
-    NSMutableArray<NSArray<NSString *> *> *pairs = [NSMutableArray array];
-    NSMutableSet<NSString *> *seen = [NSMutableSet set];
-    for (NSString *l in [txt componentsSeparatedByString:@"\n"]) { if (!l.length || [l hasPrefix:@"#"] || [seen containsObject:l]) continue; [seen addObject:l]; NSArray *c = [l componentsSeparatedByString:@"\t"]; if (c.count >= 2) [pairs addObject:c]; }
     int n = (int)pairs.count; uint64_t t0 = bp_now();
     MLOG("pipeline prebuild: %d shader pairs of %s%s%s, %d workers (%s)", n, pp.UTF8String, txt2 ? " and " : "", txt2 ? pp2.UTF8String : "", threads, wait ? "tool" : prepare_on() ? "prepare step, before the first frame" : "background");
     __block _Atomic int next = 0;
@@ -4954,7 +5068,7 @@ int mtl_pso_prebuild_tool(void) {
     mtl_init(); const char *z = getenv("DM_PSO_PREBUILD_DEPTH"); if (z && !strcmp(z, "zero")) atomic_store(&g_depth_zero, 1);
     int threads = getenv("DM_PSO_PREBUILD_THREADS") ? atoi(getenv("DM_PSO_PREBUILD_THREADS")) : 0;
     if (threads <= 0) { int pc = 0; size_t sz = sizeof pc; if (sysctlbyname("hw.perflevel0.physicalcpu", &pc, &sz, NULL, 0) || pc <= 1) pc = 4; threads = pc - 1; }
-    if (pso_prebuild(threads, 1, QOS_CLASS_USER_INITIATED) < 0) MLOG("pipeline prebuild: nothing to do (no archive, no shader_pairs.tsv, or prebuilt.tsv says it is done)");
+    if (pso_prebuild(threads, 1, QOS_CLASS_USER_INITIATED) < 0) MLOG("pipeline prebuild: nothing to do (no archive, no shader_pairs.tsv, prebuilt.tsv says it is done, or the archive bundled with the app holds every base)");
     return 1;
 }
 static int prepare_on(void);
@@ -5520,7 +5634,6 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
                 // no view fits, and one side is a buffer texture (Octopath Traveler 0: a buffer texture left in a slot a shader reads as a cube): reads of it are undefined, so the slot reads 0
                 else if (t.textureType == MTLTextureTypeTextureBuffer || (MTLTextureType)b->dtt == MTLTextureTypeTextureBuffer) { tex_mis_note(sh, nvn_stage, b->kind == NVN_RB_TEX ? reg : -1, tid, t, (MTLTextureType)b->dtt, "a buffer texture: the slot reads 0 (dummy)"); t = nil; }
                 else tex_mis_note(sh, nvn_stage, b->kind == NVN_RB_TEX ? reg : -1, tid, t, (MTLTextureType)b->dtt, "bound as is"); }
-            if (t && nvn_stage == 1 && afr_want(sh)) { uint64_t r2 = 0; id<MTLTexture> v = tex_alpha_red(tid, t, &r2); if (v) { t = v; trid = r2; } }   // see tex_alpha_red
             if (!t) { t = dummy_tex(b->dtt, b->dpf); trid = g_dummy_tex_rid[b->dtt & 7][b->dpf & 3]; }
             slots[aid] = trid;
             USE(t, MTLResourceUsageRead);
@@ -8812,9 +8925,11 @@ void mtl_res_counts(uint32_t tick, const char *why) {
 static struct { uint64_t frame; char path[1024]; } g_shotq[SHOTQ_MAX]; static int g_nshotq;
 static pthread_mutex_t g_shotq_mu = PTHREAD_MUTEX_INITIALIZER;
 static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4]);
-static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4], int uv_i);
+enum { PRESENT_FAILED, PRESENT_STANDARD, PRESENT_METALFX };
+static int present_offscreen_m4(id<MTLTexture> src, const int crop[4], id<MTLTexture> out, void (^done)(int));
+static int present_offscreen_wait(id<MTLTexture> src, const int crop[4], id<MTLTexture> out);
 // Game picture needed by the whole-window screenshot (front end window_shot; no longer does drawViewHierarchy on a Metal layer with the display link attached): at the next present, the present thread draws the same frame
-// with the same encoding as the present (present_encode) into an offscreen texture of the same size as the swapchain, and after the GPU finishes hands out a CGImage in the completion callback (the callback does not block the present). Guarded by g_shotq_mu
+// with the same encoding as the present into an offscreen texture of the view's size, and after the GPU finishes hands out a CGImage in the completion callback. Guarded by g_shotq_mu
 static void (^g_grab_cb)(CGImageRef img);
 void mtl_grab_next_present(void (^cb)(CGImageRef img)) { pthread_mutex_lock(&g_shotq_mu); g_grab_cb = [cb copy]; pthread_mutex_unlock(&g_shotq_mu); }
 static void grab_present(id<MTLTexture> src, const int crop[4], CGSize sz) {
@@ -8824,17 +8939,26 @@ static void grab_present(id<MTLTexture> src, const int crop[4], CGSize sz) {
     MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:w height:h mipmapped:NO];
     d.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead; d.storageMode = MTLStorageModePrivate;
     id<MTLTexture> out = w && h ? [g_dev newTextureWithDescriptor:d] : nil; id<MTLBuffer> buf = out ? [g_dev newBufferWithLength:row * h options:MTLResourceStorageModeShared] : nil;
-    id<MTLCommandBuffer> cb2 = buf ? q_cb() : nil;
-    if (!cb2 || !present_encode(cb2, src, out, crop)) { MLOG("[RED] full-window screenshot: offscreen encoding of the game image failed (%zux%zu)", w, h); cb(NULL); return; }
-    id<MTLBlitCommandEncoder> b = [cb2 blitCommandEncoder];
-    [b copyFromTexture:out sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1) toBuffer:buf destinationOffset:0 destinationBytesPerRow:row destinationBytesPerImage:row * h];
-    [b endEncoding];
-    [cb2 addCompletedHandler:^(id<MTLCommandBuffer> c) { (void)c;
-        CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-        CGContextRef ctx = CGBitmapContextCreate(buf.contents, w, h, 8, row, cs, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
-        CGImageRef img = ctx ? CGBitmapContextCreateImage(ctx) : NULL; cb(img);
-        CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); }];
-    [cb2 commit];
+    if (!buf) { MLOG("[RED] full-window screenshot: cannot create output (%zux%zu)", w, h); cb(NULL); return; }
+    // GPU completion starts the readback, keeping the present thread free. Each capture owns its scaler and textures until completion.
+    void (^readback)(int) = ^(int ok) {
+        if (!ok) { cb(NULL); return; }
+        id<MTLCommandBuffer> cb2 = q_cb(); id<MTLBlitCommandEncoder> b = [cb2 blitCommandEncoder];
+        [b copyFromTexture:out sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1) toBuffer:buf destinationOffset:0 destinationBytesPerRow:row destinationBytesPerImage:row * h];
+        [b endEncoding];
+        [cb2 addCompletedHandler:^(id<MTLCommandBuffer> c) { (void)c;
+            CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+            CGContextRef ctx = CGBitmapContextCreate(buf.contents, w, h, 8, row, cs, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
+            CGImageRef img = ctx ? CGBitmapContextCreateImage(ctx) : NULL; cb(img);
+            CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); }];
+        [cb2 commit];
+    };
+    if (g_q4) { if (!present_offscreen_m4(src, crop, out, readback)) cb(NULL); }
+    else {
+        id<MTLCommandBuffer> draw = q_cb();
+        if (!present_encode(draw, src, out, crop)) { cb(NULL); return; }
+        [draw addCompletedHandler:^(id<MTLCommandBuffer> c) { readback(c.status == MTLCommandBufferStatusCompleted); }]; [draw commit];
+    }
 }
 void dm_gfx_shot_at(long k, const char *path) {
     pthread_mutex_lock(&g_shotq_mu);
@@ -8842,7 +8966,8 @@ void dm_gfx_shot_at(long k, const char *path) {
     else MLOG("[RED] more than %d screenshot requests; dropping %s", SHOTQ_MAX, path);
     pthread_mutex_unlock(&g_shotq_mu);
 }
-// DM_NVN_SHOT_OUT=WIDTHxHEIGHT (for picture quality metrics): the present-frame screenshot instead captures the result "upscaled to this resolution by present_encode", i.e. the picture the player sees on screen; screen=0 (texture dump) is unaffected
+// DM_NVN_SHOT_OUT=WIDTHxHEIGHT (for picture quality metrics): the present-frame screenshot instead captures the result "upscaled to this resolution by the present pass", i.e. the picture the player sees on a screen
+// of that size (with DM_PRESENT_UPSCALE=metalfx through MetalFX, on the Metal 4 queue: present_offscreen_m4); screen=0 (texture dump) is unaffected
 static void shot(id<MTLTexture> src, const char *path, int screen, const int crop[4]) {
     static int out_w = -1, out_h;
     if (out_w < 0) {
@@ -8856,9 +8981,8 @@ static void shot(id<MTLTexture> src, const char *path, int screen, const int cro
         d.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead; d.storageMode = MTLStorageModePrivate;
         id<MTLTexture> out = [g_dev newTextureWithDescriptor:d];
         if (!out) { MLOG("[RED] cannot create the screenshot output texture %dx%d", out_w, out_h); return; }
-        id<MTLCommandBuffer> cb = q_cb();
-        if (!present_encode(cb, src, out, crop)) return;
-        [cb commit]; [cb waitUntilCompleted];
+        if (g_q4) { if (!present_offscreen_wait(src, crop, out)) return; }
+        else { id<MTLCommandBuffer> cb = q_cb(); if (!present_encode(cb, src, out, crop)) return; [cb commit]; [cb waitUntilCompleted]; }
         read = out;
     }
     if (read.pixelFormat != MTLPixelFormatRGBA8Unorm && read.pixelFormat != MTLPixelFormatRGBA8Unorm_sRGB &&
@@ -9111,26 +9235,36 @@ static id<MTLTexture> present_raw_src(id<MTLTexture> src) {
     if (!v) { RED_ONCE(69, "present: cannot create a non-sRGB view of the sRGB swapchain texture (format %lu); presenting the decoded values", (unsigned long)src.pixelFormat); return src; }
     return v;
 }
-static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4]) {
-    NSUInteger cx = 0, cy = 0, cw = src.width, ch = src.height;
-    if (crop && (crop[2] || crop[3])) {
-        if (crop[0] < 0 || crop[1] < 0 || crop[2] <= 0 || crop[3] <= 0 ||
-            (uint64_t)crop[0] + crop[2] > src.width || (uint64_t)crop[1] + crop[3] > src.height) {
-            MLOG("[RED] present crop out of bounds: %d,%d %dx%d / source texture %lux%lu", crop[0], crop[1], crop[2], crop[3], (unsigned long)src.width, (unsigned long)src.height); return 0;
-        }
-        cx = crop[0]; cy = crop[1]; cw = crop[2]; ch = crop[3];
+// The rectangle of the canvas (dw x dh) the picture (cw x ch) is drawn into: the picture's aspect ratio kept and centred, black bars in the rest (no stretching when the screen's ratio
+// differs from the game's, e.g. iPhone about 19.5:9 against the game's 16:9); when the ratios differ by under 1 % (the remainder from a game width that is a multiple of 8 in the
+// full-screen setup, e.g. 1952x900 against 2868x1320 differs by 0.17 %) the whole canvas, leaving no border of a few pixels
+static MTLViewport present_viewport(double cw, double ch, double dw, double dh) {
+    double s = fmin(dw / cw, dh / ch);
+    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+    if (fabs((dw / dh) / (cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
+    return vp;
+}
+// The valid source rectangle of a present (x, y, width, height; the crop of nvnWindowSetCrop, zero = the whole texture); 0 when it lies outside the texture
+static int present_crop_rect(id<MTLTexture> src, const int crop[4], NSUInteger r[4]) {
+    r[0] = 0; r[1] = 0; r[2] = src.width; r[3] = src.height;
+    if (!crop || !(crop[2] || crop[3])) return 1;
+    if (crop[0] < 0 || crop[1] < 0 || crop[2] <= 0 || crop[3] <= 0 ||
+        (uint64_t)crop[0] + crop[2] > src.width || (uint64_t)crop[1] + crop[3] > src.height) {
+        MLOG("[RED] present crop out of bounds: %d,%d %dx%d / source texture %lux%lu", crop[0], crop[1], crop[2], crop[3], (unsigned long)src.width, (unsigned long)src.height); return 0;
     }
+    r[0] = crop[0]; r[1] = crop[1]; r[2] = crop[2]; r[3] = crop[3]; return 1;
+}
+static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4]) {
+    NSUInteger r[4]; if (!present_crop_rect(src, crop, r)) return 0;
+    NSUInteger cx = r[0], cy = r[1], cw = r[2], ch = r[3];
     static uint64_t last_crop[8]; uint64_t meta[8] = {src.width, src.height, cx, cy, cw, ch, dst.width, dst.height};
     if (memcmp(meta, last_crop, sizeof meta)) { memcpy(last_crop, meta, sizeof meta);
         MLOG("present crop: source texture %lux%lu, valid %lu,%lu %lux%lu → target %lux%lu", (unsigned long)src.width, (unsigned long)src.height,
              (unsigned long)cx, (unsigned long)cy, (unsigned long)cw, (unsigned long)ch, (unsigned long)dst.width, (unsigned long)dst.height); }
     present_pipeline(dst.pixelFormat);
     MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-    // Keep the game picture's aspect ratio and center it, leaving black bars in the rest (no stretching when the screen ratio differs from the game's, e.g. iPhone about 19.5:9 versus the game's 16:9);
-    // when the ratio difference is < 1% (the remainder from the game width being a multiple of 8 in the full-screen setup, e.g. 1952x900 versus 2868x1320 differs by 0.17%) fill directly, leaving no few-pixel border
-    double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
-    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
+    double dw = dst.width, dh = dst.height;
+    MTLViewport vp = present_viewport(cw, ch, dw, dh);
     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
     static double last_vp[4];   // Log one line when the viewport changes (used by the real-device screen-level acceptance screen_check.py to check the aspect ratio)
     if (memcmp(last_vp, &vp, sizeof last_vp)) { memcpy(last_vp, &vp, sizeof last_vp);
@@ -9149,20 +9283,83 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
     [en endEncoding];
     return 1;
 }
-static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4], int uv_i) {
-    NSUInteger cx = 0, cy = 0, cw = src.width, ch = src.height;
-    if (crop && (crop[2] || crop[3])) {
-        if (crop[0] < 0 || crop[1] < 0 || crop[2] <= 0 || crop[3] <= 0 ||
-            (uint64_t)crop[0] + crop[2] > src.width || (uint64_t)crop[1] + crop[3] > src.height) {
-            MLOG("[RED] present crop out of bounds: %d,%d %dx%d / source texture %lux%lu", crop[0], crop[1], crop[2], crop[3], (unsigned long)src.width, (unsigned long)src.height); return 0;
-        }
-        cx = crop[0]; cy = crop[1]; cw = crop[2]; ch = crop[3];
+// ---------- Upscaling in the present (DM_PRESENT_UPSCALE) ----------
+// Opt-in spatial scaling of the valid content to its letterboxed viewport. Copy the crop to an origin-aligned texture, scale in perceptual mode (present_raw_src supplies gamma
+// bytes), then draw 1:1 with the usual origin and output format. Queue barriers serialize both the frame's rendering and reuse of the scaler's textures across presents.
+// Replacing those textures waits for earlier presents; throttle replacement during resizing, and keep standard scaling for refused sizes. Offscreen captures own separate state.
+#define FX_REMAKE_PRESENTS 30
+typedef struct { id<MTL4FXSpatialScaler> sc; id<MTLTexture> in, out; uint64_t made_at; int made; NSUInteger refused[6]; } fx_state;
+static fx_state g_fx_present;   // only the present thread encodes or replaces the scaler
+static id<MTL4Compiler> g_fx_comp;
+static int g_fx_mode = -1;   // 1 = metalfx, 0 = off
+static int fx_mode(void) {
+    if (g_fx_mode >= 0) return g_fx_mode;
+    const char *e = getenv("DM_PRESENT_UPSCALE"); int v = 0;
+    if (e && (!strcmp(e, "metalfx") || !strcmp(e, "1"))) v = 1;
+    else if (e && (!strcmp(e, "off") || !strcmp(e, "0"))) v = 0;
+    else if (e && *e) MLOG("[RED] DM_PRESENT_UPSCALE=%s: metalfx or off; keeping %s", e, v ? "metalfx" : "off");
+    if (v && !(g_q4 && [MTLFXSpatialScalerDescriptor supportsMetal4FX:g_dev])) { MLOG("present upscaling: this GPU has no Metal 4 MetalFX spatial scaler; the present scales bilinearly"); v = 0; }
+    MLOG("present upscaling (DM_PRESENT_UPSCALE): %s", v ? "metalfx, MetalFX's spatial scaler where the picture is shown larger than the game renders it" : "off, bilinear");
+    return g_fx_mode = v;
+}
+// MetalFX scales the content (cw x ch) to its rectangle on the canvas (vp) when the rectangle is at least as large in both directions and larger in one
+static int fx_wanted(MTLViewport vp, NSUInteger cw, NSUInteger ch) {
+    NSUInteger w = (NSUInteger)vp.width, h = (NSUInteger)vp.height;
+    return cw && ch && w >= cw && h >= ch && (w > cw || h > ch);
+}
+// Encodes the upscale of the rectangle r of raw into cb (see above); returns the scaled picture, which the present pass draws 1:1 into vp, or nil (the bilinear pass).
+// remake_wait: fx is the present thread's, whose textures presents still on the GPU may read: a new scaler waits for them and for FX_REMAKE_PRESENTS presents since the last
+static id<MTLTexture> fx_encode(fx_state *fx, id<MTL4CommandBuffer> cb, id<MTLTexture> raw, const NSUInteger r[4], MTLViewport vp, MTLPixelFormat out_pf, int remake_wait) {
+    NSUInteger cw = r[2], ch = r[3], ow = (NSUInteger)vp.width, oh = (NSUInteger)vp.height;
+    if (fx_mode() != 1 || !fx_wanted(vp, cw, ch)) return nil;
+    if (!fx->sc || fx->in.width != cw || fx->in.height != ch || fx->in.pixelFormat != raw.pixelFormat || fx->out.width != ow || fx->out.height != oh || fx->out.pixelFormat != out_pf) {
+        NSUInteger key[6] = {cw, ch, raw.pixelFormat, ow, oh, out_pf};
+        if (!memcmp(key, fx->refused, sizeof key)) return nil;
+        if (remake_wait && fx->made && g_present_n < fx->made_at + FX_REMAKE_PRESENTS) return nil;
+        if (remake_wait) { pthread_mutex_lock(&g_pq_mu); while (g_pq_inflight) pthread_cond_wait(&g_pq_cv, &g_pq_mu); pthread_mutex_unlock(&g_pq_mu); }
+        res_remove(fx->in); res_remove(fx->out); fx->sc = nil; fx->in = fx->out = nil;
+        uint64_t t0 = now_ns(); NSError *e = nil;
+        if (!g_fx_comp) g_fx_comp = [g_dev newCompilerWithDescriptor:[MTL4CompilerDescriptor new] error:&e];
+        MTLFXSpatialScalerDescriptor *d = [MTLFXSpatialScalerDescriptor new];
+        d.colorTextureFormat = raw.pixelFormat; d.outputTextureFormat = out_pf; d.inputWidth = cw; d.inputHeight = ch; d.outputWidth = ow; d.outputHeight = oh;
+        d.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
+        id<MTL4FXSpatialScaler> sc = g_fx_comp ? [d newSpatialScalerWithDevice:g_dev compiler:g_fx_comp] : nil;
+        fx->made_at = g_present_n; fx->made++;
+        if (!sc) { memcpy(fx->refused, key, sizeof key);
+            MLOG("present upscaling: MetalFX makes no spatial scaler for %lux%lu format %lu → %lux%lu format %lu%s; this size is scaled bilinearly", (unsigned long)cw, (unsigned long)ch, (unsigned long)raw.pixelFormat,
+                 (unsigned long)ow, (unsigned long)oh, (unsigned long)out_pf, g_fx_comp ? "" : " (no Metal 4 compiler)"); return nil; }
+        MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:raw.pixelFormat width:cw height:ch mipmapped:NO];
+        td.storageMode = MTLStorageModePrivate; td.usage = sc.colorTextureUsage | MTLTextureUsageShaderRead;
+        id<MTLTexture> in = [g_dev newTextureWithDescriptor:td];
+        td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:out_pf width:ow height:oh mipmapped:NO];
+        td.storageMode = MTLStorageModePrivate; td.usage = sc.outputTextureUsage | MTLTextureUsageShaderRead;
+        id<MTLTexture> out = [g_dev newTextureWithDescriptor:td];
+        if (!in || !out) { memcpy(fx->refused, key, sizeof key); MLOG("[RED] present upscaling: cannot create the scaler's textures (%lux%lu, %lux%lu)", (unsigned long)cw, (unsigned long)ch, (unsigned long)ow, (unsigned long)oh); return nil; }
+        in.label = @"present upscale input"; out.label = @"present upscale output";
+        res_add(in); res_add(out); res_commit();
+        fx->sc = sc; fx->in = in; fx->out = out;
+        MLOG("present upscaling: MetalFX spatial scaler %lux%lu → %lux%lu (format %lu → %lu, scaler #%d, made in %.1f ms)", (unsigned long)cw, (unsigned long)ch, (unsigned long)ow, (unsigned long)oh,
+             (unsigned long)raw.pixelFormat, (unsigned long)out_pf, fx->made, (now_ns() - t0) / 1e6);
     }
+    id<MTL4ComputeCommandEncoder> ce = [cb computeCommandEncoder];
+    [ce barrierAfterQueueStages:MTLStageAll beforeStages:MTLStageBlit visibilityOptions:MTL4VisibilityOptionDevice];   // after the frame's work
+    [ce copyFromTexture:raw sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(r[0], r[1], 0) sourceSize:MTLSizeMake(cw, ch, 1) toTexture:fx->in destinationSlice:0 destinationLevel:0 destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [ce barrierAfterStages:MTLStageBlit beforeQueueStages:MTLStageAll visibilityOptions:MTL4VisibilityOptionDevice];   // the scaler's encoders come after the copy
+    [ce endEncoding];
+    fx->sc.colorTexture = fx->in; fx->sc.inputContentWidth = cw; fx->sc.inputContentHeight = ch; fx->sc.outputTexture = fx->out;
+    [fx->sc encodeToCommandBuffer:cb];
+    return fx->out;
+}
+// The present pass: src's valid rectangle drawn into dst (the drawable, or a screenshot's texture) as present_encode draws it, through MetalFX first where fx_encode takes it
+// (fx: the scaler state to use, nil = bilinear). uvb: the pass's crop constants (one buffer per present allocator, written by the CPU)
+static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4], id<MTLBuffer> uvb, fx_state *fx) {
+    NSUInteger r[4]; if (!present_crop_rect(src, crop, r)) return 0;
     present_pipeline(dst.pixelFormat);
-    double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
-    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
+    double dw = dst.width, dh = dst.height;
+    MTLViewport vp = present_viewport(r[2], r[3], dw, dh);
     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+    id<MTLTexture> tex = present_raw_src(src), up = fx ? fx_encode(fx, cb, tex, r, vp, dst.pixelFormat, fx == &g_fx_present) : nil;
+    if (up) { tex = up; r[0] = r[1] = 0; r[2] = up.width; r[3] = up.height; }   // the scaled picture, the viewport's size: drawn 1:1
     MTL4RenderPassDescriptor *rp = [MTL4RenderPassDescriptor new];
     rp.colorAttachments[0].texture = dst;
     rp.colorAttachments[0].loadAction = full ? MTLLoadActionDontCare : MTLLoadActionClear;
@@ -9172,17 +9369,58 @@ static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MT
     if (!en) { MLOG("[RED] failed to create the M4 present render encoder"); return 0; }
     [en barrierAfterQueueStages:MTLStageAll beforeStages:MTLStageAll visibilityOptions:MTL4VisibilityOptionDevice];
     [en setArgumentTable:g_present_args atStages:MTLRenderStageFragment];
-    [g_present_args setTexture:present_raw_src(src).gpuResourceID atIndex:0];
+    [g_present_args setTexture:tex.gpuResourceID atIndex:0];
     [g_present_args setSamplerState:g_blit_samp.gpuResourceID atIndex:0];
-    float *uv = g_present_uv[uv_i].contents;
-    uv[0] = (float)cx / src.width; uv[1] = (float)cy / src.height; uv[2] = (float)cw / src.width; uv[3] = (float)ch / src.height;
-    uv[4] = (cx + 0.5f) / src.width; uv[5] = (cy + 0.5f) / src.height; uv[6] = (cx + cw - 0.5f) / src.width; uv[7] = (cy + ch - 0.5f) / src.height;
+    float *uv = uvb.contents; NSUInteger tw = tex.width, th = tex.height, cx = r[0], cy = r[1], cw = r[2], ch = r[3];
+    uv[0] = (float)cx / tw; uv[1] = (float)cy / th; uv[2] = (float)cw / tw; uv[3] = (float)ch / th;
+    uv[4] = (cx + 0.5f) / tw; uv[5] = (cy + 0.5f) / th; uv[6] = (cx + cw - 0.5f) / tw; uv[7] = (cy + ch - 0.5f) / th;
     if (atomic_load_explicit(&g_origin_ll, memory_order_relaxed)) { uv[1] += uv[3]; uv[3] = -uv[3]; }   // lower-left origin: the window image is stored bottom-up
-    [g_present_args setAddress:g_present_uv[uv_i].gpuAddress atIndex:0];
+    [g_present_args setAddress:uvb.gpuAddress atIndex:0];
     [en setViewport:vp]; [en setRenderPipelineState:g_blit_pso];
     [en drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     m4_end(en);
+    return up ? PRESENT_METALFX : PRESENT_STANDARD;
+}
+// The present's picture drawn into an offscreen texture (out: private, render target) the way present_now draws it into the drawable, MetalFX included, on the Metal 4 queue;
+// returns whether it was submitted. Completion reports the encoding kind, or PRESENT_FAILED on a GPU error. Resources remain resident and retained until GPU completion.
+static int present_offscreen_m4(id<MTLTexture> src, const int crop[4], id<MTLTexture> out, void (^done)(int)) {
+    id<MTL4CommandAllocator> al = [g_dev newCommandAllocator]; id<MTL4CommandBuffer> cb = [g_dev newCommandBuffer];
+    id<MTLBuffer> uvb = [g_dev newBufferWithLength:sizeof(float) * 8 options:MTLResourceStorageModeShared];
+    if (!al || !cb || !uvb) { MLOG("[RED] offscreen present: no command allocator or buffer"); return 0; }
+    id<MTLTexture> raw = present_raw_src(src);
+    fx_state fx = {0};
+    res_add(out); res_add(uvb); res_commit();
+    [cb beginCommandBufferWithAllocator:al];
+    int kind = present_encode_m4(cb, raw, out, crop, uvb, &fx);
+    [cb endCommandBuffer];
+    if (!kind) { res_remove(out); res_remove(uvb); res_remove(fx.in); res_remove(fx.out); return 0; }
+    MTL4CommitOptions *options = [MTL4CommitOptions new];
+    [options addFeedbackHandler:^(id<MTL4CommitFeedback> f) {
+        (void)al; (void)cb; (void)raw; (void)fx.sc;   // keep the Metal 4 commands, source view and scaler alive too
+        res_remove(out); res_remove(uvb); res_remove(fx.in); res_remove(fx.out);
+        if (f.error) MLOG("[RED] offscreen present: %s", f.error.description.UTF8String);
+        done(f.error ? PRESENT_FAILED : kind);
+    }];
+    [g_q4 commit:&cb count:1 options:options];
     return 1;
+}
+// Diagnostic readback and tests wait for the same asynchronous capture used by whole-window screenshots. A timeout leaves cleanup with the GPU completion handler.
+static int present_offscreen_wait(id<MTLTexture> src, const int crop[4], id<MTLTexture> out) {
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block int kind = PRESENT_FAILED;
+    if (!present_offscreen_m4(src, crop, out, ^(int k) { kind = k; dispatch_semaphore_signal(sem); })) return 0;
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC))) { MLOG("[RED] offscreen present: the GPU did not finish within 10 s"); return 0; }
+    return kind;
+}
+// The present command buffer's GPU time (its commit feedback: from its first to its last command, the MetalFX scaler and the present pass), every 600 presents as p50 / p95, apart
+// for presents through MetalFX and through the bilinear pass. Under g_pq_mu (the feedback handler)
+static void present_gpu_note(double s, int fx) {
+    static double v[2][600]; static int n[2];
+    if (!(s > 0 && s < 1)) return;
+    v[fx][n[fx]++] = s * 1e3;
+    if (n[fx] < 600) return;
+    double *a = v[fx]; for (int i = 1; i < 600; i++) { double x = a[i]; int j = i - 1; while (j >= 0 && a[j] > x) { a[j + 1] = a[j]; j--; } a[j + 1] = x; }
+    MLOG("present command buffer GPU time over 600 presents %s: p50 %.3f ms, p95 %.3f ms, max %.3f ms", fx ? "through MetalFX" : "through the bilinear pass", a[299], a[569], a[599]);
+    n[fx] = 0;
 }
 static double g_link_it_tin;   // Enqueue time of the frame the display-link callback is presenting (read and written only on the display-link thread)
 static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t ticket, const int crop[4], id<CAMetalDrawable> supplied, double target_ts) {
@@ -9259,12 +9497,15 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
     [g_q4 waitForDrawable:dr];
     id<MTL4CommandBuffer> cb = g_present_cb[alloc_i];
     [cb beginCommandBufferWithAllocator:g_present_alloc4[alloc_i]];
-    if (!present_encode_m4(cb, src, dr.texture, crop, alloc_i)) { [cb endCommandBuffer]; [g_q4 signalDrawable:dr]; return 0; }
+    int kind = present_encode_m4(cb, src, dr.texture, crop, g_present_uv[alloc_i], &g_fx_present);
+    if (!kind) { [cb endCommandBuffer]; [g_q4 signalDrawable:dr]; return 0; }
+    int fx_kind = kind == PRESENT_METALFX;
     [cb endCommandBuffer];
     MTL4CommitOptions *o = [MTL4CommitOptions new];
     [o addFeedbackHandler:^(id<MTL4CommitFeedback> f) {
         if (f.error) MLOG("[RED] display command buffer error: %s", f.error.description.UTF8String);
-        pthread_mutex_lock(&g_pq_mu); if (ticket > g_pq_done) g_pq_done = ticket; g_pq_inflight--; pthread_cond_broadcast(&g_pq_cv); pthread_mutex_unlock(&g_pq_mu);
+        pthread_mutex_lock(&g_pq_mu); if (ticket > g_pq_done) g_pq_done = ticket; g_pq_inflight--; pthread_cond_broadcast(&g_pq_cv);
+        present_gpu_note(f.GPUEndTime - f.GPUStartTime, fx_kind); pthread_mutex_unlock(&g_pq_mu);
     }];
     id<MTL4CommandBuffer> buffers[] = {cb};
     pthread_mutex_lock(&g_pq_mu); g_pq_inflight++; pthread_mutex_unlock(&g_pq_mu);
