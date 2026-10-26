@@ -32,6 +32,7 @@ def main():
         if a == '--split-data': os.environ['NXW_SPLIT_DATA'] = '1'
         elif a.startswith('--split-data='): os.environ['NXW_SPLIT_DATA'] = str(Path(a.split('=', 1)[1]).resolve())
         elif a == '--no-split-data': os.environ['NXW_SPLIT_DATA'] = '0'
+        elif a == '--entitlements': os.environ['NXW_ENTITLEMENTS'] = '1'   # an ad-hoc signature asking for Increased Memory Limit (win/macho_sign.py)
         else: rest.append(a)
     sys.argv[1:] = rest
     # every Python the pipeline starts loads the shim; this one too
