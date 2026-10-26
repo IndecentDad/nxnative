@@ -124,6 +124,17 @@ Dengan Apple ID gratis, app harus di-sign ulang setiap 7 hari.
 - **"this IPA uses vX, which game profile ... was not brought up on":** versi game itu belum diuji upstream. Pakai update yang tercantum di README upstream (untuk Balatro: 1.1.3).
 - **Game yang butuh Mac:** build berhenti dengan pesan yang menyebut Mac host. Ini terjadi pada game yang shader-nya dibuat saat runtime lewat GLSLC, Vulkan, atau Unreal/Oodle. Game LÖVE seperti Balatro *tidak* termasuk: shader-nya dirakit ulang di Windows oleh `win\love_shaders.py`.
 
+## 6b. Game yang shader-nya dibuat saat runtime (Portal, Fire Emblem: Three Houses, Super Mario Galaxy)
+
+Game seperti ini mengompilasi sebagian shader saat dimainkan. Upstream menangkapnya di Mac; di sini penangkapan dilakukan di perangkatmu:
+
+1. Build pertama berhenti dengan pesan dan membuat file `<NamaGame>-capture.ipa` di folder game.
+2. Pasang IPA itu, mainkan sampai layar judul, lalu tunggu sekitar satu menit. Layar boleh hitam atau kosong, karena shader-nya memang belum ada.
+3. Buka app **Files** → *On My iPhone/iPad* → `<NamaGame> (capture)`. Salin folder `glslc_capture` (atau `vk_capture`) ke folder game di PC, di samping file NSP.
+4. Build lagi. Build menemukan folder itu, mencocokkannya dengan tabel profil, lalu membuat IPA yang sebenarnya.
+
+Game Oodle/Unreal (Octopath Traveler, Bayonetta 3, Pokémon Z-A, DQ XI S, dan lainnya) tidak perlu langkah ini: decoder-nya dijalankan di emulator ARM64 di PC.
+
 ## 7. Memperbarui repo
 
 ```

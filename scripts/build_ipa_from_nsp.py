@@ -1612,8 +1612,17 @@ def report_profile_status(g, reg, pkg_ver, derived, provisional, artifact='IPA')
         known = {(m, b) for row in reg.builds().values() for m, b in row.items() if m != 'display'}
         other = [m for m, b in g.builds()[pkg_ver].items() if m != 'display' and (m, b) not in known]
         registered_builds = ", ".join(f'{v} {b["display"]}' for v, b in reg.builds().items())
+        # what the registered builds of the modules this version changes carry: rewriter patches (sdk_patches.py, the profile's patches.py) or host code keyed by their build IDs
+        repo = Path(__file__).resolve().parent.parent
+        reg_ids = {b for row in reg.builds().values() for m, b in row.items() if m != 'display' and m in other}
+        texts = [p.read_text(errors='replace') for p in [repo / 'dm/tools/sdk_patches.py', reg.dir / 'patches.py'] if p.is_file()]
+        texts += [p.read_text(errors='replace') for d in ('dm/host', 'dm/gfx') for p in (repo / d).rglob('*') if p.suffix in ('.c', '.m', '.h', '.inc')]
+        lost = sorted(b for b in reg_ids if any(b[:16] in t for t in texts))
         if g.title_id != reg.title_id and not other and pkg_ver in reg.builds():   # a registered build under another title ID (same_build): every fix applies
             say(f'this {artifact} is game profile {reg.id}\'s {pkg_ver} ({disp}) under title ID {g.title_id:016X}: its settings and every fix for its builds, with shaders split from this title\'s own files')
+        elif other and not lost:   # nothing is keyed to the registered builds: the version changes nothing the IPA would have had
+            say(f'this {artifact} uses {pkg_ver} ({disp}); game profile {reg.id} was brought up on {registered_builds}, but has no build-specific fixes (no rewriter patch or host code '
+                f'names those builds), so this version gets all of it, with its own shaders')
         else: say(f'[RED] this {artifact} uses {pkg_ver} ({disp}), which game profile {reg.id} was not brought up on ({registered_builds}): '
             'its settings, with this version\'s own shaders' + (f'; {", ".join(other)} {"is a build" if len(other) == 1 else "are builds"} the profile does not register, so the fixes made for '
             'the registered builds\' fixed addresses do not apply there; opt-in function patches apply only on a verified code match (see rewrite logs), and the game may not run as well' if other else '; every module is a registered build'))

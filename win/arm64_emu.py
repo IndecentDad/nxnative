@@ -109,6 +109,18 @@ class Machine:
                 elif typ == 0: continue
                 else: raise EmuError(f'{m.name}: relocation type {typ} not handled')
                 struct.pack_into('<Q', m.img, off, val & 0xffffffffffffffff)
+            if 36 in m.tags and 35 in m.tags:   # DT_RELR / DT_RELRSZ: packed relative relocations (newer SDKs): an even word is an address, an odd word a bitmap of the 63 words after the last
+                where = 0
+                for k in range(m.tags[35] // 8):
+                    e = struct.unpack_from('<Q', m.img, m.tags[36] + 8 * k)[0]
+                    if not e & 1:
+                        struct.pack_into('<Q', m.img, e, (struct.unpack_from('<Q', m.img, e)[0] + m.base) & 0xffffffffffffffff); where = e + 8
+                    else:
+                        for bit in range(1, 64):
+                            if e >> bit & 1:
+                                a = where + (bit - 1) * 8
+                                struct.pack_into('<Q', m.img, a, (struct.unpack_from('<Q', m.img, a)[0] + m.base) & 0xffffffffffffffff)
+                        where += 63 * 8
             uc.mem_write(m.base, bytes(m.img))
         uc.mem_map(STACK_TOP - STACK_SIZE, STACK_SIZE, UC_PROT_ALL)
         uc.mem_map(TLS_BASE, 0x10000, UC_PROT_ALL)

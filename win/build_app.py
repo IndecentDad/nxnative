@@ -216,7 +216,11 @@ def main():
     v = (re.search(r'^#define DMSH_CHAIN "(.*)"', hdr, re.M) or die('no DMSH_CHAIN in dmsh_chain.h')).group(1)
     gfx = env.get('GFXAPI') or ('nvn' if list((msl_ios / f'b-{v}').glob('*_b.metallib')) else 'vulkan' if (msl_ios / 'vk/vk_shaders.metallib').exists()
                                 else 'gl' if (msl_ios / 'gl/gl_shaders.metallib').exists() else 'nvn')
-    if gfx == 'vulkan':
+    capture = env.get('NXW_CAPTURE_IPA') == '1'   # a capture IPA: no shader libraries (the game runs only to compile its run-time shaders, which its env.txt has the host save)
+    if capture:
+        msldir = {'vulkan': 'vk', 'gl': 'gl'}.get(gfx, f'b-{v}'); msl_ios = w / 'build/ios/empty_msl'; (msl_ios / msldir).mkdir(parents=True, exist_ok=True)
+        t('capture IPA: no shader libraries; the game saves the shaders it compiles at run time into Documents')
+    elif gfx == 'vulkan':
         if not (msl_ios / 'vk/vk_shaders.metallib').exists(): die(f'no iOS Vulkan shader library {msl_ios}/vk')
         msldir = 'vk'
     elif gfx == 'gl':
@@ -255,6 +259,7 @@ def main():
         for f in patched.glob(pat): shutil.copy2(f, dmres)
     if (patched / 'nro.tsv').exists(): shutil.copy2(patched / 'nro.tsv', dmres)
     for f in ('shader_map.tsv', 'pso_manifest.tsv') + (() if gfx in ('vulkan', 'gl') else ('c1_full.tsv',)):
+        if capture and not (gd / f).exists(): continue   # a capture IPA has no shader build: the tables it would stamp may not exist yet
         shutil.copy2(gd / f, dmres)
     if gfx == 'nvn':
         if (gd / 'cb_extent.tsv').exists(): shutil.copy2(gd / 'cb_extent.tsv', dmres)

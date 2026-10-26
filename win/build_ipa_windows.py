@@ -8,7 +8,7 @@
 #   Mac host steps       → refused with a clear message: games whose shaders exist only at run time (GLSLC / Vulkan / GL capture, Unreal and Oodle decoding)
 #                          boot the game's own arm64 code in the Mac host, which no Windows PC can run
 # Usage: python win/build_ipa_windows.py <NSP folder> -k <prod.keys> [the upstream script's other options]   (--platform mac / mac-app and --prepare-xcode are Mac-only)
-import importlib.util, os, subprocess, sys, time
+import importlib.util, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 WIN = Path(__file__).resolve().parent
@@ -108,13 +108,55 @@ def main():
     xc = [sys.executable, str(WIN / 'xcrun.py')]
     up.toolchain = lambda: (('cmd', xc + ['-sdk', 'iphoneos', 'metal', '--version']), ('cmd', xc + ['-sdk', 'macosx', 'metal', '--version']), ('cmd', ['spirv-cross', '--revision']))
 
-    def mac_only(what):
-        def refuse(*a, **k):
-            raise BuildError(f'{what}: this game makes some shaders only at run time, and getting them boots the game\'s own arm64 code in the Mac host. '
-                             'That needs a Mac with Apple silicon; build this game on one (or move only this step there), the rest of the pipeline runs here')
-        return refuse
-    for fn, what in (('capture_glslc', 'GLSLC capture'), ('capture_shaders', 'run-time shader capture')):
-        if hasattr(up, fn): setattr(up, fn, mac_only(what))
+    # Run-time shader captures (GLSLC: Fire Emblem: Three Houses, Portal; Vulkan: Super Mario Galaxy; GL of a non-LÖVE game) are done on the device instead of a Mac. Upstream boots
+    # the game in the Mac host with DM_*_CAPTURE and keeps what it compiles; the iPhone runs the same code natively. A first build packs a capture IPA (no shader libraries, the capture
+    # switch in its dm/env.txt) and stops; after one run of it, the folder the app wrote in Documents, copied next to the game files, finishes the build. The profile's tables say
+    # which files a complete capture holds
+    CAP = {'glslc': ('glslc_capture', 'DM_GLSLC_CAPTURE', 'nvn'), 'vk': ('vk_capture', 'DM_VK_CAPTURE', 'vulkan'), 'gl': ('gl_capture', 'DM_GL_CAPTURE', 'gl')}
+
+    def device_capture(kind, d, patched, work, env, g, want, done_fn):
+        name, var, gfx = CAP[kind]
+        up.PROG.stage(f'{name.replace("_", " ")} (from the device)')
+        nsp = work.parent
+        roots = [nsp] + ([nsp.parent] if nsp.name.endswith('_nxw') else [])
+        cands = [r / n for r in roots for n in (name, f'{g.id}_capture/{name}', f'{g.id}_capture')]
+        for c in cands:
+            if not c.is_dir(): continue
+            got = done_fn(c)
+            if not got: continue
+            if want and not got >= want:
+                up.say(f'[RED] {c} holds {len(got & want)} of the {len(want)} shaders the profile names: run the capture IPA longer (until the title screen, then a minute) and copy the folder again')
+                continue
+            dst = d / name; up.rmtree(dst); shutil.copytree(c, dst)
+            up.PROG.end(f'{len(got)} shaders from {c}')
+            return dst
+        # no capture yet: pack the capture IPA
+        envf = work / 'tmp' / 'capture_env.txt'; envf.parent.mkdir(parents=True, exist_ok=True)
+        envf.write_text(f'# shader capture (win/build_ipa_windows.py): the host saves every shader the game compiles at run time into Documents/{name}\n{var}={name}\n', encoding='utf-8')
+        stem = (g.get('ipa') or f'{g.id}.ipa').rsplit('.', 1)[0]
+        out = nsp / f'{stem}-capture.ipa'
+        nacp = d / 'control.nacp'
+        try: gname = subprocess.run([sys.executable, str(REPO / 'dm/tools/nacp.py'), str(nacp)], capture_output=True, text=True).stdout.strip()
+        except OSError: gname = ''
+        cenv = dict(env, GAME=g.id, W=str(work / 'ipa_capture'), PATCHED=str(patched), ROMFS=str(d / 'RomFS'), AOC='', GFXAPI=gfx, DM_ENV_FILE=str(envf), NXW_CAPTURE_IPA='1',
+                    DM_DISPLAY_NAME=f'{gname or stem} (capture)', DM_SHOW_FPS='NO')
+        up.PROG.set(step='packing the capture IPA')
+        up.run([sys.executable, str(WIN / 'build_app.py'), str(out)], logs_dir(work) / 'capture_ipa.log', env=cenv)
+        up.PROG.end(ok=False)
+        want_n = f'{len(want)} ' if want else ''
+        raise BuildError(f'this game compiles {want_n}shaders only at run time; they are captured on your device, as upstream captures them on a Mac. 1) Install {out} '
+                         f'(Sideloadly) and play it until its title screen, then wait a minute (no picture is fine: it has no shaders yet). 2) In the Files app, copy '
+                         f'"On My iPhone/iPad › {gname or stem} (capture) › {name}" to {nsp}. 3) Build again: the build finds the folder and makes the real IPA')
+
+    def logs_dir(work): return work / 'logs'
+
+    def capture_glslc(repo, dirs, pkg_ver, patched, work, env, logs, g):
+        d = dirs[pkg_ver]
+        want = up.glslc_wanted(g)
+        if want and up.glslc_done(d / 'glslc_capture') >= want: up.say(f'reusing the captured run-time shaders: {d / "glslc_capture"}'); return
+        device_capture('glslc', d, patched, work, env, g, want, up.glslc_done)
+    up.capture_glslc = capture_glslc
+
     # The Mac host's decoder tool mode (Oodle / LZ5: shader_split.py, uepak.py, the Unreal step) runs in an emulated ARM64 machine: the "host" is a marker the shim starts as win/oodle_emu.py
     up.build_mac_host = lambda repo, out, env, logs, g: WIN / 'nxw_oodle_host'
     up.UE_DECODE_SECS = up.UE_DECODE_SECS * 20   # emulated, slower than the Mac's native run
@@ -138,17 +180,16 @@ def main():
     up.derive_profile = derive_profile
 
     import love_shaders
-    refuse_capture = up.capture_shaders
     def capture_shaders(repo, d, patched, work, env, logs, g, api):
         """GL capture of a LÖVE game without the Mac host: win/love_shaders.py assembles the GLSL offline from the Lua LÖVE embeds in main (the same text the game hands to glShaderSource)"""
-        if api != 'gl': return refuse_capture(repo, d, patched, work, env, logs, g, api)
+        if api != 'gl': return device_capture(api, d, patched, work, env, g, up.capture_wanted(g, api), lambda c: up.capture_done(c, api))
         out, part = d / 'gl_capture', d / 'gl_capture.partial'
         up.PROG.stage('GL shader reconstruction (LÖVE)')
         up.rmtree(part)
         try: table = g.table(up.CAPTURES['gl']['table'])
         except Exception: table = None
         r = love_shaders.generate(d / 'ExeFS/main', d / 'RomFS', part, table, log=up.say)
-        if r is None: return refuse_capture(repo, d, patched, work, env, logs, g, api)
+        if r is None: return device_capture('gl', d, patched, work, env, g, up.capture_wanted(g, 'gl'), lambda c: up.capture_done(c, 'gl'))
         up.rmtree(out); part.rename(out)
         up.PROG.end(f'{len(r[0])} shaders')
         return out

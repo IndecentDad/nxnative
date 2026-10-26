@@ -277,7 +277,18 @@ static UIImage *app_icon(void) {
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 @end
 
+// A capture IPA (win/build_ipa_windows.py: the run-time shader capture done on the device instead of a Mac) sets DM_GLSLC_CAPTURE / DM_VK_CAPTURE / DM_GL_CAPTURE in its dm/env.txt
+// to a folder relative to Documents (main.m makes Documents the working directory); the Vulkan and GL captures write into the folder without making it, so it is made here, before the game starts
+static void make_capture_folders(void) {
+    static const char *const keys[] = {"DM_GLSLC_CAPTURE", "DM_VK_CAPTURE", "DM_GL_CAPTURE"};
+    for (int i = 0; i < 3; i++) {
+        const char *k = keys[i], *d = getenv(k);
+        if (d && *d) { [NSFileManager.defaultManager createDirectoryAtPath:@(d) withIntermediateDirectories:YES attributes:nil error:nil]; fprintf(stderr, "capture: %s → Documents/%s\n", k, d); }
+    }
+}
+
 bool dm_show_launcher(void *view_controller, void (*done)(void)) {
+    make_capture_folders();
     const char *off = getenv("DM_LAUNCHER");
     if (off && !strcmp(off, "0")) { fprintf(stderr, "launcher: off (DM_LAUNCHER=0)\n"); return false; }
     NSString *path = [[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"launcher.json"];

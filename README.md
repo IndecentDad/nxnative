@@ -39,7 +39,7 @@ This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnativ
 | **Built, under test** | **Megabyte Punch** (Unity 2019.2, no upstream profile yet). Its 3,498 NVN shaders compile with the Windows Metal compiler. The latest IPA has the SDK 8.3.1 address-region fix for its first crash. |
 | **A16 and older GPUs** | Their GPUs cannot read BC-compressed textures, which most 3D Switch games ship. This fork decodes BC1–BC7 on the CPU at upload into uncompressed textures, using every core (`dm/gfx/tex/bc_soft.c`, checked block by block against a reference decoder). A 2048×2048 BC7 texture takes about 65 ms on one PC core. The upstream host stopped on these textures (`MTLTextureDescriptor has invalid pixelFormat`). Only GPUs without BC take this path: A17 Pro / M1 and newer read BC directly, at no cost. On an A16, decoded textures take 2–8× the memory of the BC data, so big games may need *Increased Memory Limit*. |
 | **Checked on Windows** | All 134 app sources compile against the iPhoneOS 27.1 SDK, and `ld64.lld` links the app with no undefined symbols. The shader chain's translator matches upstream's lock. Unit tests pass (`python win/tests/test_win.py`). |
-| **Needs a Mac** | Games whose shaders exist only at run time, which upstream gets by booting the game in its Mac host: GLSLC capture, Vulkan capture, Unreal / Oodle decoding. See [Which games build on Windows](#which-games-build-on-windows). |
+| **No Mac needed** | Upstream's Mac-host steps run here: LÖVE shaders offline, Oodle / Unreal / LZ5 decoding in an emulated ARM64 machine, and run-time GLSLC / Vulkan captures on your device through a capture IPA. See [Which games build on Windows](#which-games-build-on-windows). |
 
 The PC this was built and tested on:
 
@@ -337,10 +337,11 @@ Upstream lists about 65 playable games in its [games table](dm/games/README.md#g
 
 - **Most games build as on a Mac.** Examples: Super Mario Bros. Wonder, Super Mario Odyssey, Mario Kart 8 Deluxe, Zelda: Breath of the Wild and Tears of the Kingdom.
 - **LÖVE games** (Balatro) build: their run-time shaders are rebuilt offline.
-- **These still need a Mac with Apple silicon**, because one step boots the game's own code in the Mac host. The Windows build stops with a message naming the step:
-  - games that compile shaders at run time with GLSLC (Fire Emblem: Three Houses)
-  - Vulkan games that generate their shaders (Super Mario Galaxy)
-  - games with Oodle or Unreal shader archives (Pokémon Legends: Z-A, PlatinumGames' PKZ games, DRAGON QUEST XI S, …)
+- **Games whose shaders exist only at run time** (Fire Emblem: Three Houses and Portal through GLSLC, Super Mario Galaxy 1 & 2 through Vulkan) are captured **on your device**, as upstream captures them on a Mac:
+  1. The first build packs `<Game>-capture.ipa` (no shader libraries; its `dm/env.txt` turns the host's capture on) and stops with instructions.
+  2. Install it and play until the title screen, then wait a minute. There may be no picture, because the game has no shaders yet. The host saves every shader the game compiles into the app's Documents.
+  3. In the Files app, copy the folder (`glslc_capture` or `vk_capture`) next to the game files on the PC, and build again. The build checks it against the profile's table and makes the real IPA.
+- **Oodle, Unreal and LZ5 games** (Octopath Traveler 0 / II, Bayonetta 3, ASTRAL CHAIN, Pokémon Legends: Z-A, DRAGON QUEST XI S, FINAL FANTASY RESONANCE) decode their shader archives with the game's own decoder, run in an emulated ARM64 machine ([`win/oodle_emu.py`](win/oodle_emu.py), [`win/arm64_emu.py`](win/arm64_emu.py)). Octopath Traveler 0's 10,596 Oodle-compressed shaders decode this way.
 - **Games without an upstream profile** (Megabyte Punch) get a provisional profile guessed from a survey. The IPA is a best effort and may not boot until the game is brought up ([docs/agents](docs/agents/README.md)).
 - **Use the tested version.** Another version builds with its own shaders, but the fixes made for the tested build (60 fps patches and others) do not apply, and the build says so.
 
@@ -349,7 +350,7 @@ Upstream lists about 65 playable games in its [games table](dm/games/README.md#g
 | Message or symptom | What to do |
 |---|---|
 | `doctor.py` shows `MISSING` | Install what the `get it:` line names, or set its path in `win\toolchain.json`. |
-| `run-time shader capture … needs a Mac with Apple silicon` | This game needs a Mac for one step (see above). |
+| `this game compiles … shaders only at run time; they are captured on your device` | Follow the three steps the message gives: install the capture IPA, play to the title screen, copy the capture folder next to the game files, build again. |
 | `[RED] this IPA uses vX, which game profile … was not brought up on` | Put the update named in upstream's games table in the same folder and build again. |
 | `[RED] provisional game profile …` | The game has no upstream profile: the IPA may not boot. Send the device log (below). |
 | The app closes right after *Play* | Open the **Files** app → *On My iPhone/iPad* → the game → `log.txt` (and `log.prev.txt`), and look at its last lines. [docs/agents/symptoms.md](docs/agents/symptoms.md) indexes known messages. |

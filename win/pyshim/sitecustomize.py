@@ -43,9 +43,34 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
 
     class _NoLib:
         def __getattr__(self, name): raise AttributeError(f'{name} (no process-wide C library on Windows)')
+    class _CCCrypt:
+        """CommonCrypto's CCCrypt (uepak.py decrypts Unreal pak indexes with AES-256 ECB through it) on Windows' CNG (bcrypt.dll): AES in ECB mode, decrypt and encrypt, no padding"""
+        restype = argtypes = None
+        def __call__(self, op, alg, options, key, keylen, iv, data, datalen, out, outlen, moved):
+            if alg != 0 or options not in (0, 2): return -4301   # kCCUnimplemented: only AES (0) in ECB mode (2), unpadded
+            from ctypes import wintypes, byref, c_void_p, c_ulong, create_unicode_buffer
+            bc = ctypes.WinDLL('bcrypt'); h = c_void_p(); hk = c_void_p(); res = c_ulong()
+            if bc.BCryptOpenAlgorithmProvider(byref(h), ctypes.c_wchar_p('AES'), None, 0): return -4300
+            try:
+                mode = create_unicode_buffer('ChainingModeECB')
+                bc.BCryptSetProperty(h, ctypes.c_wchar_p('ChainingMode'), mode, ctypes.sizeof(mode), 0)
+                k = bytes(key)[:keylen]
+                if bc.BCryptGenerateSymmetricKey(h, byref(hk), None, 0, k, len(k), 0): return -4300
+                src = bytes(data)[:datalen]
+                fn = bc.BCryptDecrypt if op == 1 else bc.BCryptEncrypt
+                if fn(hk, src, len(src), None, None, 0, out, outlen, byref(res), 0): return -4300
+                moved._obj.value = res.value if hasattr(moved, '_obj') else res.value
+                return 0
+            finally:
+                if hk: bc.BCryptDestroyKey(hk)
+                bc.BCryptCloseAlgorithmProvider(h, 0)
+    class _LibSystem:
+        CCCrypt = _CCCrypt()
     _CDLL = ctypes.CDLL
     def _cdll(name, *a, **k):
-        return _NoLib() if name is None else _CDLL(name, *a, **k)
+        if name is None: return _NoLib()
+        if isinstance(name, str) and name.endswith('libSystem.B.dylib'): return _LibSystem()
+        return _CDLL(name, *a, **k)
     ctypes.CDLL = _cdll
 
     _XC = {}
