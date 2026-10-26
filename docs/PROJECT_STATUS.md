@@ -1,8 +1,8 @@
 # NXNative Project Status
 
-- Fork `main` remains untouched. `game/echoes-of-wisdom` is updated through upstream `d50ecc1`; merge commit `a497706` preserves `9c55499` as first parent. Upstream commit `3dd5d25` and all subsequent fixes are included. Recovery tag: `recovery/eow-v0-9c55499`.
-- Echoes of Wisdom 1.1.0 profile `v196608` is active. Fresh local build workspace: `/Users/kylepyne/nxnative-games/Echoes of Wisdom/v1.1.0/build-input/`; original XCI and update NSP remain symlinked from the Synology volume.
-- Extraction completed: 10,971 files, 7.5 GB. `main`, `subsdk0`, `subsdk1` and `sdk` rewrote successfully. Shader split found all 9,858 profile shaders.
-- Build stopped before translation/Metal compilation: `own_compilers.py` rejected the locked translator because `xlate_source` expected `af0a596483e1ec36` but actual was empty; embedded-source check also failed. No IPA was produced.
-- v1.1.0 build logs and intermediates are preserved locally. Abandoned v0 extraction/shader/package outputs were removed; its logs and startup samples are archived under `surveys/logs/v0-abandoned/`. Original ROMs, keys and surveys are preserved.
-- Next: address Intel translator compatibility separately, then resume the standard 1.1.0 build from the fresh local workspace. Do not reuse v0 build assets.
+- Fork `main` remains untouched. `game/echoes-of-wisdom` preserves the 1.0.0 recovery reference and the registered 1.1.0 profile.
+- EoW 1.1.0 extraction completed (10,971 files, 7.5 GB); main, subsdk0, subsdk1 and sdk rewrote successfully; shader split produced 9,858 shader inputs. These local outputs are preserved.
+- Diagnosed the translator startup failure: the checked-in `dmsh_xlate.dll` was ARM64 ReadyToRun, incompatible with Tahoe's x86_64 .NET 10. The universal launcher, runtime and XCI access were not the cause.
+- `dmsh_xlate.csproj` now disables ReadyToRun and apphost generation. The rebuilt managed package is AnyCPU; `--source-sha` and translator lock checks pass. Chain is `60ce84a81e3c`; pinned SPIRV-Cross/Metal versions remain unchanged.
+- The standard Mac+iOS shader build resumed from the saved split using `own_compilers.py`. Metal 32023.883 and SPIRV-Cross 42ee93372e51d0ee are reported as local compiler versions; the translator remains strictly locked. Current outputs are under the local EoW build workspace, chain `b-60ce84a81e3c`.
+- Next: finish shader statistics, then continue the 1.1.0 host/Xcode/IPA steps from the existing build workspace. Do not rerun extraction or shader splitting.
