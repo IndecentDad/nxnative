@@ -86,6 +86,20 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
     NSMutableSet *ff = [NSMutableSet set];
     for (NSString *k in [keys componentsSeparatedByString:@" "]) if (k.length) [ff addObject:k];
     _fromFile = ff;
+    // A device with 6 GB of memory or less (an A16 iPad, an iPhone 15): the defaults that hold the least memory, Handheld (most games render 720p instead of 1080p) and,
+    // where the game has a render-scale hook, 75 % of its 3D size. Only the defaults change: a choice the player made stays, and Reset brings back these
+    if (NSProcessInfo.processInfo.physicalMemory <= 6.5 * 1024 * 1024 * 1024) {
+        for (DmSetting *s in settings) {
+            if (s.disabled) continue;
+            NSString *was = s.def;
+            if ([s.env isEqualToString:@"DM_OPMODE"] && [s.def isEqualToString:@"1"]) s.def = @"0";
+            else if ([s.env isEqualToString:@"DM_RENDER_SCALE"] && s.def.doubleValue > 0.75) s.def = @"0.75";
+            if (![was isEqualToString:s.def]) {
+                s.note = [s.note.length ? [s.note stringByAppendingString:@" "] : @"" stringByAppendingString:@"Lowered for this device's memory."];
+                fprintf(stderr, "launcher: %s default %s → %s (%.1f GB device)\n", s.env.UTF8String, was.UTF8String, s.def.UTF8String, NSProcessInfo.processInfo.physicalMemory / 1073741824.0);
+            }
+        }
+    }
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
     for (DmSetting *s in settings) {
         NSString *envv = NSProcessInfo.processInfo.environment[s.env];
