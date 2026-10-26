@@ -127,7 +127,7 @@ def dep_newer(o):
 
 def link(clang, sdk, objs, fws, embed_flags, out):
     target = f'arm64-apple-ios{tc.setting("ios_deployment", tc.IOS_DEPLOYMENT)}'
-    args = [str(clang), '-target', target, '-isysroot', str(sdk), '-fuse-ld=lld', '-fobjc-arc', *(['-Wl,-adhoc_codesign'] if os.environ.get('NXW_ENTITLEMENTS') == '1' else []), '-o', str(out), *map(str, objs),
+    args = [str(clang), '-target', target, '-isysroot', str(sdk), '-fuse-ld=lld', '-fobjc-arc', *(['-Wl,-adhoc_codesign'] if os.environ.get('NXW_ENTITLEMENTS', '1') != '0' else []), '-o', str(out), *map(str, objs),
             '-Wl,-rpath,@executable_path/Frameworks', '-lobjc', '-lz', *[x for f in fws for x in ('-framework', f)], *embed_flags]
     rt = compat_rt_needed(clang)
     if rt: args.append(str(rt))
@@ -354,8 +354,9 @@ def main():
     link(clang, sdk, objs, fws, flags.split(), app / 'DmIOS')
     # The entitlements the app asks for, in an ad-hoc signature of its own (win/macho_sign.py): the player's signing tool keeps those its Apple ID allows. Increased Memory Limit
     # is free to enable on an App ID (SideInstaller does it), but SideStore installs only what the executable asks for: unsigned, it asked for nothing
-    # Opt-in (NXW_ENTITLEMENTS=1, --entitlements): an app signed this way would not open on an A16 iPad after SideStore installed it; unsigned, as before, by default
-    if env.get('NXW_ENTITLEMENTS') == '1':
+    # On by default (NXW_ENTITLEMENTS=0 / --no-entitlements leaves the executable unsigned). Checked against rcodesign's own ad-hoc signature; SideStore with Increased Memory Limit
+    # enabled for the App ID (SideInstaller) installs it On, and a signing tool that may not grant it drops it: the app opens either way
+    if env.get('NXW_ENTITLEMENTS', '1') != '0':
       import macho_sign
       ents = {'com.apple.developer.kernel.increased-memory-limit': True}
       t(f'entitlements asked for: {", ".join(ents)} (' + str(macho_sign.sign(str(app / 'DmIOS'), bundle_id, ents)) + '-byte ad-hoc signature)')
