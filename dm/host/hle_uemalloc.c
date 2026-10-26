@@ -32,8 +32,8 @@ static const struct { int nslot, malloc_, try_malloc, realloc_, try_realloc, fre
 static const struct { const char *build, *what; int layout; uint64_t obj, vtable, cut; } k_ue[] = {
     // Octopath Traveler 0 1.0.5: the FMallocBinned3 object (main+0x68022c8, bss), its vtable (main+0x5b06f38, 26 slots), the cut constructor call (main+0x12e40, a nop after the rewrite)
     { "9fe60a212cff9b9a3656ab63d4f882e5", "Octopath Traveler 0 1.0.5", UE5, 0x68022c8, 0x5b06f38, 0x12e40 },
-    // Octopath Traveler 0 1.0.0 (v0, the cartridge): the same nninitStartup and constructor (main+0x12e40 → main+0x9f480); the object at main+0x68082c8, its vtable (26 slots) at main+0x5b0cf68
-    { "5069fe9069984e0cbf1c7f439501538b", "Octopath Traveler 0 1.0.0", UE5, 0x68082c8, 0x5b0cf68, 0x12e40 },
+    // Octopath Traveler 0 1.0.1 (v0, the cartridge): the same nninitStartup and constructor (main+0x12e40 → main+0x9f480); the object at main+0x68082c8, its vtable (26 slots) at main+0x5b0cf68
+    { "5069fe9069984e0cbf1c7f439501538b", "Octopath Traveler 0 1.0.1", UE5, 0x68082c8, 0x5b0cf68, 0x12e40 },
     // DRAGON QUEST VII Reimagined 1.2.0: no fixed object (0: made by GCreateMalloc, given at the gate), its vtable (main+0x5e4c0e8, 21 slots), the cut constructor call (main+0x32758dc)
     { "f7ec03e4cb9de3bd8319d4e899d2e9cc", "DRAGON QUEST VII Reimagined 1.2.0", UE4_27, 0, 0x5e4c0e8, 0x32758dc },
     // Pikmin 4 1.1.1 (Unreal Engine 4.26.2, the 4.27 slot layout: TryMalloc / TryRealloc call +0x18 / +0x28, slot 17 returns 1): made by GCreateMalloc, its vtable (main+0x8da4758, 21 slots),
