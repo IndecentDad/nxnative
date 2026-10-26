@@ -113,8 +113,11 @@ def main():
             raise BuildError(f'{what}: this game makes some shaders only at run time, and getting them boots the game\'s own arm64 code in the Mac host. '
                              'That needs a Mac with Apple silicon; build this game on one (or move only this step there), the rest of the pipeline runs here')
         return refuse
-    for fn, what in (('build_mac_host', 'the Mac host'), ('capture_glslc', 'GLSLC capture'), ('capture_shaders', 'run-time shader capture'), ('decode_ue_shaders', 'Unreal shader decoding')):
+    for fn, what in (('capture_glslc', 'GLSLC capture'), ('capture_shaders', 'run-time shader capture')):
         if hasattr(up, fn): setattr(up, fn, mac_only(what))
+    # The Mac host's decoder tool mode (Oodle / LZ5: shader_split.py, uepak.py, the Unreal step) runs in an emulated ARM64 machine: the "host" is a marker the shim starts as win/oodle_emu.py
+    up.build_mac_host = lambda repo, out, env, logs, g: WIN / 'nxw_oodle_host'
+    up.UE_DECODE_SECS = up.UE_DECODE_SECS * 20   # emulated, slower than the Mac's native run
 
     derive = up.derive_profile
     def derive_profile(g, pdir, ver, d, mods, app=None):

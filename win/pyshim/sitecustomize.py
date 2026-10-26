@@ -68,6 +68,7 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
         if not isinstance(args[0], str): return args
         head = args[0].replace('\\', '/'); base = head.rsplit('/', 1)[-1].lower()
         if base in ('xcrun', 'xcrun.exe'): return _xcrun_direct(args[1:]) or [sys.executable, _XCRUN] + args[1:]
+        if base == 'nxw_oodle_host': return [sys.executable, str(_WIN / 'oodle_emu.py')] + args[1:]   # the Mac host's decoder tool mode, emulated
         if base == 'dmsh_xlate' and '/dmsh_xlate_bin/' in head: return [shutil.which('dotnet') or 'dotnet', args[0] + '.dll'] + args[1:]
         if base in ('python3', 'python3.exe'): return [sys.executable] + args[1:]
         if base in ('bash', 'bash.exe') and len(args) > 1 and args[1].replace('\\', '/').endswith('dm/ios/tools/build_ipa.sh'): return [sys.executable, _BUILD_APP] + args[2:]
