@@ -250,7 +250,40 @@ static void defer_obj_unref(id obj) { defer_obj_release_ex(obj, 1); }
 // Its own autorelease pool: mtl_sub_begin drains before it pushes the submission's pool, on the guest submit thread, whose implicit pool is never drained. The weak-table lookups and the residency-set removal
 // autorelease the retired object, so whatever that thread drained (instead of the completion handler, which wins the race only when the CPU is idle) stayed alive for good: in Metroid Dread every
 // re-upload of its map mask kept the old texture and its 32 MB upload staging block, and GPU memory grew by several GB within minutes under CPU load.
-static void defer_drain(void) { @autoreleasepool {
+// DM_NVN_TEX_DISCARD=1 (the launcher's Texture memory saver, on by default on 6 GB devices): once the GPU has a packaged texture (its upload done, the fence passed), the whole host pages of
+// its storage go back to iOS (madvise MADV_FREE_REUSABLE): the game's copy and the Metal texture held the same bytes twice, and Tears of the Kingdom on an A16 iPad was closed by iOS 70 MB
+// short of its limit when a save loaded. A later game write into those pages faults as before (nvn_dirty) and re-uploads; content the game did not rewrite reads as zeros there, so a texture
+// re-uploaded after a partial write can show wrong texels: rare (one re-upload in minutes of TotK), and the setting turns it off. Pages shared with other data (the storage's first and last) are kept
+typedef struct { uintptr_t a; size_t n; uint64_t fence; } disc_t;
+static pthread_mutex_t g_disc_mu = PTHREAD_MUTEX_INITIALIZER;
+static disc_t *g_disc; static size_t g_disc_n, g_disc_cap; static uint64_t g_disc_bytes, g_disc_logged; static int g_disc_on = -1;
+static int disc_on(void) {
+    if (g_disc_on < 0) { const char *e = getenv("DM_NVN_TEX_DISCARD"); g_disc_on = e && atoi(e) != 0; if (g_disc_on) MLOG("texture memory saver: the game's copy of each uploaded texture goes back to the system once the GPU has it (DM_NVN_TEX_DISCARD)"); }
+    return g_disc_on;
+}
+static void disc_queue(const void *mem, size_t len) {
+    if (!disc_on() || !mem || !len) return;
+    uintptr_t pg = (uintptr_t)getpagesize(), a = ((uintptr_t)mem + pg - 1) & ~(pg - 1), b = ((uintptr_t)mem + len) & ~(pg - 1);
+    if (b <= a) return;
+    pthread_mutex_lock(&g_disc_mu);
+    if (g_disc_n == g_disc_cap) { size_t c = g_disc_cap ? g_disc_cap * 2 : 256; disc_t *nd = realloc(g_disc, c * sizeof *nd); if (!nd) { pthread_mutex_unlock(&g_disc_mu); return; } g_disc = nd; g_disc_cap = c; }
+    g_disc[g_disc_n++] = (disc_t){a, b - a, g_fence + 1};
+    pthread_mutex_unlock(&g_disc_mu);
+}
+static void disc_drain(void) {
+    if (g_disc_on <= 0) return;
+    pthread_mutex_lock(&g_disc_mu);
+    size_t k = 0;
+    for (size_t i = 0; i < g_disc_n; i++) {
+        if (g_disc[i].fence <= g_done) { if (!madvise((void *)g_disc[i].a, g_disc[i].n, MADV_FREE_REUSABLE)) g_disc_bytes += g_disc[i].n; }
+        else g_disc[k++] = g_disc[i];
+    }
+    g_disc_n = k;
+    uint64_t b = g_disc_bytes;
+    pthread_mutex_unlock(&g_disc_mu);
+    if (b >= g_disc_logged + (256ull << 20)) { g_disc_logged = b; MLOG("texture memory saver: %.2f GB of texture copies returned to the system so far", b / 1073741824.0); }
+}
+static void defer_drain(void) { disc_drain(); @autoreleasepool {
     NSMutableArray<NvDeferredRelease *> *ready = [NSMutableArray array];
     pthread_mutex_lock(&g_deferred_mu);
     for (NSInteger i = g_deferred.count - 1; i >= 0; i--) {
@@ -2336,6 +2369,7 @@ static id<MTLTexture> tex_mtl_(const tex_t *ct) {
                 if (pk->spare && pk->spare != nt) defer_obj_release(pk->spare);   // still in use, or of another shape: retired as before
                 if (pk->sparse) sparse_view(pk, t);
                 zb_report(t, pk->sparse ? (unsigned)pk->vbase : 0, "re-upload");
+                if (!pk->sparse) disc_queue(t->mem, t->L.size);
                 pk->spare = old; pk->spare_fence = g_fence + 1; g_ser_gen++; pk->stamp = st; pk->vgen = pk->vseen = vg; pk->span = nvn_dirty_span(t->mem, t->L.size); pk->seen = st; g_pkg_reuploads++; if (dirtycheck() && !pk->sparse) pk->hash = full_hash(t->mem, t->L.size); pkg_edges_take(pk, t); }
             return pk->view ? pk->view : pk->tex;
         }
@@ -2346,6 +2380,7 @@ static id<MTLTexture> tex_mtl_(const tex_t *ct) {
         pk->span = nvn_dirty_span(t->mem, t->L.size);
         pk->seen = pk->stamp; g_pkg_uploads++; if (dirtycheck() && !pk->sparse) pk->hash = full_hash(t->mem, t->L.size);   // "nothing written since" starts at the stamp: a write that faulted during the upload moved "now" past it
         pkg_edges_take(pk, t);
+        if (!pk->sparse) disc_queue(t->mem, t->L.size);
         if (pk->sparse) sparse_view(pk, t);
         zb_report(t, pk->sparse ? (unsigned)pk->vbase : 0, "upload");
         tex_put(t->serial, pk);

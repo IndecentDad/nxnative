@@ -94,6 +94,7 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
             NSString *was = s.def;
             if ([s.env isEqualToString:@"DM_OPMODE"] && [s.def isEqualToString:@"1"]) s.def = @"0";
             else if ([s.env isEqualToString:@"DM_RENDER_SCALE"] && s.def.doubleValue > 0.75) s.def = @"0.75";
+            else if ([s.env isEqualToString:@"DM_NVN_TEX_DISCARD"] && [s.def isEqualToString:s.offValue]) s.def = s.onValue;   // the textures' second copy is what ran TotK out of memory
             // A 60 fps patch (Tears of the Kingdom: GPU p95 24-28 ms on an A16 iPad) swings between 40 and 60 there: the game's own 30 holds steady
             else if ([s.env isEqualToString:@"DM_FPS_TARGET"] && [s.def isEqualToString:@"60"] && [s.options indexOfObjectPassingTest:^BOOL(NSArray *o, NSUInteger i, BOOL *stop) { return [o[0] isEqualToString:@"30"]; }] != NSNotFound) s.def = @"30";
             if (![was isEqualToString:s.def]) {

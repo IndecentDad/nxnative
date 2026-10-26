@@ -1,6 +1,8 @@
 // iOS front end (the iOS implementation of front.h): a centered 16:9 Metal view (black bars on both sides) + a full-screen virtual gamepad layer (DmGamepad.m, controls drawn over the picture).
 // The host runs on the big-stack thread started by main.m; front_run runs the guest directly on the calling thread.
 #import <UIKit/UIKit.h>
+#include <mach/mach.h>
+#include <os/proc.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 #import <AVFAudio/AVFAudio.h>
@@ -20,6 +22,7 @@ static CAMetalLayer *g_layer;
 static void front_ios_power_watch(void);
 static void front_ios_audio_watch(void);
 static UILabel *front_ios_fps_label(void);
+static int g_hud;   // DM_METAL_HUD: the counter grows into a HUD (front_ios_fps_label)
 
 @interface DmGameView : UIView
 @end
@@ -68,7 +71,7 @@ static void launcher_done(void) { [g_root startGame]; }
     self.game = [[DmGameView alloc] initWithFrame:self.view.bounds];
     [self.view addSubview:self.game];
     g_layer = (CAMetalLayer *)self.game.layer;
-    if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) { g_layer.developerHUDProperties = @{@"mode": @"default"}; LOG("front end: Metal performance HUD on (DM_METAL_HUD)"); }   // Apple's HUD over the game: frame rate, frame and GPU time, memory
+    if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) { g_layer.developerHUDProperties = @{@"mode": @"default"}; LOG("front end: performance HUD on (DM_METAL_HUD): fps, GPU time, memory and what is left before the limit"); }   // Apple's HUD over the game: frame rate, frame and GPU time, memory
     dm_haptics_apple_init();
     self.pad = dm_gamepad_view(self.view.bounds);
     self.pad.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -87,7 +90,7 @@ static void launcher_done(void) { [g_root startGame]; }
     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
     if (self.fps) {   // the top row's free stretch: right of DmGamepad.m's L3 key (102 + 17 of its units from the safe edge), level with − / + (22 units down); u is its unit
         CGRect s = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets); CGFloat u = MIN(b.size.height / 430.0, 1.3);
-        self.fps.frame = CGRectMake(floor(CGRectGetMinX(s) + 130 * u), floor(CGRectGetMinY(s) + 22 * u - 11), 64, 22);
+        self.fps.frame = CGRectMake(floor(CGRectGetMinX(s) + 130 * u), floor(CGRectGetMinY(s) + 22 * u - 11), g_hud ? 330 : 64, 22);
     }
 }
 - (void)viewDidAppear:(BOOL)a {
@@ -122,9 +125,13 @@ static void front_ios_power_watch(void) {
 // Frame-rate counter: the frames put on screen in the last second (nvn_mtl.m counts them for NVN and for the Vulkan layer alike; frames the display link merged away are not counted).
 // On when the IPA was built with it (the NSP script's SHOW_FPS / --show-fps → DMShowFPS in Info.plist); DM_SHOW_FPS=0 / 1 in Documents/env.txt overrides that without a rebuild. NULL when off
 uint64_t mtl_present_count(void);
+double mtl_gpu_ms(uint64_t f);
+// DM_METAL_HUD (g_hud): the counter also shows the GPU time of a recent frame, the app's memory and what is left before iOS's limit (Apple's own HUD needs MTL_HUD_ENABLED before the
+                    // first Metal device, which the host makes during its early loading, before the launcher sets the switch: it never appeared from the launcher)
 static UILabel *front_ios_fps_label(void) {
-    const char *e = getenv("DM_SHOW_FPS");
-    if (!(e ? atoi(e) != 0 : [[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMShowFPS"] boolValue])) return nil;
+    const char *e = getenv("DM_SHOW_FPS"), *h = getenv("DM_METAL_HUD");
+    g_hud = h && atoi(h) != 0;
+    if (!g_hud && !(e ? atoi(e) != 0 : [[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMShowFPS"] boolValue])) return nil;
     UILabel *l = [UILabel new];
     l.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold]; l.textColor = UIColor.whiteColor; l.textAlignment = NSTextAlignmentCenter;
     l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45]; l.layer.cornerRadius = 6; l.layer.masksToBounds = YES; l.userInteractionEnabled = NO;
@@ -132,7 +139,17 @@ static UILabel *front_ios_fps_label(void) {
     __block uint64_t n0 = mtl_present_count(); __block double t0 = CACurrentMediaTime();
     [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
         (void)t; uint64_t n = mtl_present_count(); double now = CACurrentMediaTime();
-        if (now - t0 < 1.5) l.text = [NSString stringWithFormat:@"%.0f fps", (n - n0) / (now - t0)];   // a longer span is the time in the background: no reading
+        if (now - t0 < 1.5) {   // a longer span is the time in the background: no reading
+            double fps = (n - n0) / (now - t0);
+            if (!g_hud) l.text = [NSString stringWithFormat:@"%.0f fps", fps];
+            else {
+                task_vm_info_data_t vi; mach_msg_type_number_t c = TASK_VM_INFO_COUNT; double used = 0;
+                if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &c) == KERN_SUCCESS) used = vi.phys_footprint / 1073741824.0;
+                double left = os_proc_available_memory() / 1073741824.0, gpu = n > 8 ? mtl_gpu_ms(n - 4) : -1;
+                l.text = [NSString stringWithFormat:@" %.0f fps · GPU %@ · %.2f GB · %.2f GB left ", fps, gpu >= 0 ? [NSString stringWithFormat:@"%.1f ms", gpu] : @"--", used, left];
+                l.textColor = left < 0.25 ? UIColor.systemRedColor : left < 0.5 ? UIColor.systemOrangeColor : UIColor.whiteColor;   // red: iOS is about to close the app
+            }
+        }
         n0 = n; t0 = now;
     }];
     LOG("front end: frame-rate counter on");
