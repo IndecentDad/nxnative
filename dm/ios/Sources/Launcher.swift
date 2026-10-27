@@ -111,43 +111,45 @@ private final class SaveFolderSyncModel: ObservableObject {
         // Do not treat that default as evidence that the current launch is synchronized.
         return .syncing
     }
-    private func displayPath(_ url: URL) -> (String, Bool) {
-        let path = url.standardizedFileURL.path
-        do {
-            let values = try url.resourceValues(forKeys: [.volumeNameKey])
-            var volumeObject: AnyObject?
-            try (url as NSURL).getResourceValue(&volumeObject, forKey: .volumeURLKey)
-            if let volumeURL = volumeObject as? NSURL,
-               let root = volumeURL.path,
-               let volumeName = values.volumeName, !volumeName.isEmpty {
-                let prefix = root.hasSuffix("/") ? root : root + "/"
-                if path.hasPrefix(prefix) {
-                    let relative = String(path.dropFirst(prefix.count))
-                    if !relative.isEmpty { return ("\(volumeName)/\(relative)", true) }
-                }
+    var saveFolderDisplayPath: SaveSyncDisplayPath? {
+        guard let folder = sync.selectedFolder else { return nil }
+        let path = folder.standardizedFileURL.path
+        let iCloudDriveRoots = [
+            "/var/mobile/Library/Mobile Documents/com~apple~CloudDocs",
+            "/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs",
+        ]
+        for root in iCloudDriveRoots {
+            if path == root {
+                return SaveSyncDisplayPath(prefix: "iCloud Drive/", selectedFolder: "", titleID: titleID)
             }
-        } catch { }
-        return (path, false)
-    }
-    var linkedFolderPath: String? {
-        guard let folder = sync.selectedFolder else { return nil }
-        let (path, _) = displayPath(folder)
-        return path.hasSuffix("/") ? path : path + "/"
-    }
-    var saveDestinationPath: String? {
-        guard let folder = sync.selectedFolder else { return nil }
-        let destination = folder.appendingPathComponent(titleID, isDirectory: true)
-        let (folderPath, providerRelative) = displayPath(folder)
-        let path = providerRelative ? folderPath + "/" + titleID : destination.standardizedFileURL.path
-        return path.hasSuffix("/") ? path : path + "/"
-    }
-    var pathNote: String {
-        guard let folder = sync.selectedFolder else { return "" }
-        let (_, providerRelative) = displayPath(folder)
-        return providerRelative ? "Provider-relative location from iOS Files" : "Location shown as exposed by iOS Files"
+            let prefix = root + "/"
+            guard path.hasPrefix(prefix) else { continue }
+            let relative = String(path.dropFirst(prefix.count))
+            let parent = URL(fileURLWithPath: relative).deletingLastPathComponent().path
+            let relativeParent = parent == "." ? "" : parent + "/"
+            return SaveSyncDisplayPath(prefix: "iCloud Drive/" + relativeParent,
+                                       selectedFolder: folder.lastPathComponent,
+                                       titleID: titleID)
+        }
+
+        let parent = folder.deletingLastPathComponent().standardizedFileURL.path
+        let prefix = parent == "/" ? "/" : parent + "/"
+        return SaveSyncDisplayPath(prefix: prefix, selectedFolder: folder.lastPathComponent, titleID: titleID)
     }
 
     func refresh() { revision += 1 }
+}
+
+private struct SaveSyncDisplayPath {
+    let prefix: String
+    let selectedFolder: String
+    let titleID: String
+
+    var display: String { prefix + (selectedFolder.isEmpty ? "" : selectedFolder + "/") + titleID + "/" }
+    var styledText: Text {
+        if selectedFolder.isEmpty { return Text(prefix) + Text(titleID).bold().italic() + Text("/") }
+        return Text(prefix) + Text(selectedFolder).bold().italic() + Text("/") + Text(titleID).bold().italic() + Text("/")
+    }
 }
 
 private enum SaveSyncVisualState: Equatable {
@@ -207,15 +209,9 @@ private struct SaveSyncDetailsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     detailRow(title: "Last successful sync", value: model.lastSync)
                     detailRow(title: "Last operation and result", value: model.status)
-                    if let path = model.linkedFolderPath {
-                        pathRow(title: "Linked folder", path: path)
+                    if let path = model.saveFolderDisplayPath {
+                        pathRow(path: path)
                     }
-                    if let path = model.saveDestinationPath {
-                        pathRow(title: "Save destination", path: path)
-                    }
-                    Text(model.pathNote)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -240,23 +236,23 @@ private struct SaveSyncDetailsView: View {
         }
     }
 
-    private func pathRow(title: String, path: String) -> some View {
+    private func pathRow(path: SaveSyncDisplayPath) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text("Save Folder").font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 8) {
-                Text(path)
+                path.styledText
                     .font(.footnote.monospaced())
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button {
-                    UIPasteboard.general.string = path
-                    copiedPath = path
+                    UIPasteboard.general.string = path.display
+                    copiedPath = path.display
                 } label: {
-                    Image(systemName: copiedPath == path ? "checkmark" : "doc.on.doc")
+                    Image(systemName: copiedPath == path.display ? "checkmark" : "doc.on.doc")
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Copy \(title.lowercased()) path")
+                .accessibilityLabel("Copy save folder path")
             }
         }
     }
@@ -297,10 +293,6 @@ private struct SaveFolderSyncSection: View {
             Text("Automatically syncs saves to a shared folder. Saves are stored in a TitleID-named folder for Eden compatibility.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            if model.configured {
-                Button("Sync Now") { dm_save_folder_sync_now(model.sync) }
-                    .disabled(!model.enabled || model.status == "Syncing" || model.conflict || model.unavailable)
-            }
             if model.conflict {
                 Button("Resolve Save Conflict…") { resolvingConflict = true }
             }
