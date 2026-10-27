@@ -38,6 +38,8 @@ uint64_t guest_ns(void) { return 0; }
 uint64_t dm_entropy64(void) { return 0; }
 int thr_limit_used(void) { return 0; }
 int dm_ue_heap_owns(uint64_t a, uint64_t n) { (void)a; (void)n; return 0; } // No Unreal allocator is installed in this fixture.
+// This fixture calls the SVC dispatcher directly, without rewritten guest gates.
+void gate_obs_set(int id, void (*fn)(uint64_t *, int)) { (void)id; (void)fn; }
 module_t *module_of(const void *p) {
     uintptr_t a = (uintptr_t)p;
     for (int i = 0; i < g_nmod; ++i) {
@@ -95,7 +97,7 @@ static _Noreturn void memory_abort(void) {
         g_nmap != failure_nmap || prepares != failure_prepares) _exit(78);
     _exit(77);
 }
-enum { P = 0x1000, BAD = 0xd401, LIMIT = 0x10801 };
+enum { P = 0x1000, BAD = 0xd401, OOM = 0xd001, LIMIT = 0x10801 };
 static uintptr_t alias, stack, heap;
 static uint64_t call(unsigned svc, uint64_t x0, uint64_t x1, uint64_t x2) {
     uint64_t r[31] = {x0, x1, x2}; svc_dispatch(svc, r, 0); return r[0];
@@ -449,7 +451,7 @@ static void *init_worker(void *arg) { *(uint64_t *)arg = info(I_AliasAddr); retu
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--heap-probe")) {
         mem_init();
-        assert(resize(g_heap_cap + 0x200000) == BAD);
+        assert(resize(g_heap_cap + 0x200000) == OOM);
         g_nmod = 1; g_mod[0].size = 0xa00000;
         assert(resize(0x800000) == LIMIT);
         return 0;

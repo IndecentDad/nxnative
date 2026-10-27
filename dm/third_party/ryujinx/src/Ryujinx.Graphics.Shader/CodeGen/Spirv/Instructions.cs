@@ -622,16 +622,22 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             ImageDeclaration declaration = context.Images[texOp.GetTextureSetAndBinding()];
             SpvInstruction image = declaration.Image;
 
-            bool bounded = context.HostCapabilities.Msl23ImageAtomics;
-            // Returning atomics and the other bound modes: an access outside the image does nothing and returns 0, as IGN does (a TRAP or clamp access reads no texel
-            // here either). The result is a phi of the atomic's value and 0, so a shader that uses it (Octopath Traveler 0: 2,077 of its shaders) translates
-            bool returns = bounded && !texOp.Flags.HasFlag(TextureFlags.AtomicDiscardResult);
+            bool bounded = context.HostCapabilities.MetalImageAtomics;
+            // CAS is a native texture compare-exchange on Metal (SPIRV-Cross loops
+            // atomic_compare_exchange_weak into a strong one), so it takes the same guard.
+            if (bounded && ((texOp.Flags & TextureFlags.AtomicBoundsMask) != 0 ||
+                texOp.Flags.HasFlag(TextureFlags.AtomicPredicateResult)))
+            {
+                throw new NotSupportedException("Metal image atomics require IGN without a predicate result; TRAP semantics are not implemented.");
+            }
+            // Metal's texture atomics (MSL 3.1) cover buffer, 2D, 2D-array and 3D textures of
+            // R32Uint / R32Sint; source 1D surfaces arrive here already normalized to 2D.
             if (bounded && (declaration.IsIndexed ||
                 (texOp.Type != SamplerType.TextureBuffer && texOp.Type != SamplerType.Texture2D &&
-                 texOp.Type != (SamplerType.Texture2D | SamplerType.Array)) ||
+                 texOp.Type != (SamplerType.Texture2D | SamplerType.Array) && texOp.Type != SamplerType.Texture3D) ||
                 (texOp.Format != TextureFormat.R32Uint && texOp.Format != TextureFormat.R32Sint)))
             {
-                throw new NotSupportedException("MSL 2.3 bounded image atomics support non-indexed 32-bit buffer/2D/2D-array images only.");
+                throw new NotSupportedException("Metal image atomics support non-indexed 32-bit buffer/2D/2D-array/3D images only.");
             }
 
             SpvInstruction resultType = context.GetType(componentType);
@@ -670,7 +676,9 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
             SpvInstruction value = Src(componentType);
 
-            SpvInstruction merge = null, pre = null, validLabel = null;
+            SpvInstruction merge = null;
+            SpvInstruction valid = null;
+            SpvInstruction invalid = null;
             if (bounded)
             {
                 // Test each original coordinate, including the array layer, before
@@ -689,15 +697,12 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
                     inside = context.All(boolType, inside);
                 }
 
-                SpvInstruction valid = context.Label();
+                valid = context.Label();
                 merge = context.Label();
-                pre = context.Label();   // a block of its own for the test, whose label the phi names as the out-of-bounds edge
-                context.Branch(pre);
-                context.AddLabel(pre);
+                invalid = texOp.Flags.HasFlag(TextureFlags.AtomicDiscardResult) ? merge : context.Label();
                 context.SelectionMerge(merge, SelectionControlMask.MaskNone);
-                context.BranchConditional(inside, valid, merge);
+                context.BranchConditional(inside, valid, invalid);
                 context.AddLabel(valid);
-                validLabel = valid;
 
 
             }
@@ -728,10 +733,21 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             if (bounded)
             {
                 context.Branch(merge);
-                context.AddLabel(merge);
-                SpvInstruction zeroResult = context.Constant(resultType, 0);
-                // Discarded: the constant is IR plumbing. Returned: the atomic's old value inside the image, 0 outside it
-                result = returns ? context.Phi(resultType, result, validLabel, zeroResult, pre) : zeroResult;
+                if (texOp.Flags.HasFlag(TextureFlags.AtomicDiscardResult))
+                {
+                    context.AddLabel(merge);
+                    result = context.Constant(resultType, 0);
+                }
+                else
+                {
+                    // IGN image atomics leave memory alone and return zero outside
+                    // the image (ARB_shader_image_load_store, issue 30). Inside it,
+                    // return the actual old texel, as Unreal's particle counters need.
+                    context.AddLabel(invalid);
+                    context.Branch(merge);
+                    context.AddLabel(merge);
+                    result = context.Phi(resultType, result, valid, context.Constant(resultType, 0), invalid);
+                }
             }
             return new OperationResult(componentType, result);
         }
