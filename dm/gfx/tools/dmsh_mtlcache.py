@@ -9,6 +9,7 @@
 # a few of its shaders (two per stage) reproduces their libraries byte for byte; each folder is read once (filled.json remembers it by its number of libraries).
 # Not part of the chain version (dmsh_chain.py): the cache never changes an output, it only skips recompiling one. Change FORMAT when what it stores changes.
 import os, re, json, shutil, ctypes, hashlib, threading, subprocess, collections
+import windows_metal_exchange as windows_metal
 
 FORMAT = b'dmsh_mtlcache 1'
 _clonefile = getattr(ctypes.CDLL(None, use_errno=True), 'clonefile', None)   # APFS copy-on-write copy (no data written); elsewhere a plain copy
@@ -32,6 +33,10 @@ class Cache:
         self.root, self.targets, self.work = root, targets, work
         self.ident = {t: hashlib.sha256(FORMAT + b'\0' + rec.encode() + b'\0' + compiler_id(sdk).encode()).digest() for t, (sdk, rec, _) in targets.items()}
         self.stats, self.lock = collections.Counter(), threading.Lock()
+        self.windows_cache = os.environ.get("DMSH_WINDOWS_IOS_CACHE")
+        self.export_only = bool(os.environ.get("DMSH_WINDOWS_EXPORT_DIR"))
+        self.windows_only = os.environ.get("DMSH_WINDOWS_IOS_ONLY") == "1"
+        self.provenance_outputs = {}
 
     def path(self, target, src):
         d = hashlib.sha256(self.ident[target] + b'\0' + src).hexdigest()
@@ -47,14 +52,61 @@ class Cache:
             if os.path.exists(air): os.unlink(air)
 
     def compile(self, target, msl, lib):
-        """msl → lib for target: a clone of the library that the same source compiled to before, or a compile (then kept). Raises CalledProcessError as the compile does"""
-        p = self.path(target, open(msl, 'rb').read())
+        """Keep iOS export Windows-only; import only receipt-validated Windows libraries."""
+        src = open(msl, 'rb').read()
+        key = os.path.basename(lib).removesuffix('.metallib').split('.tmp-', 1)[0]
+        if self.export_only:
+            if target == 'mac':
+                os.makedirs(os.path.dirname(lib), exist_ok=True)
+                shutil.copyfile(msl, os.path.splitext(lib)[0] + '.metal')
+            self.count((target, 'Windows pending')); return False
+        if target == 'ios' and self.windows_only:
+            if self.windows_cache:
+                flags, _ = windows_metal.ios_flags()
+                hit = windows_metal.load_cached(self.windows_cache, src, flags, key)
+                if hit:
+                    winlib, receipt = hit; clone(winlib, lib); self.count(('ios', 'windows'))
+                    self.provenance_outputs[os.path.realpath(lib)] = receipt; return True
+            raise subprocess.CalledProcessError(1, ['Windows Metal cache'], stderr=f'no verified Windows metallib for {key}')
+        p = self.path(target, src)
         if os.path.exists(p):
-            clone(p, lib); self.count((target, 'reused')); return
+            clone(p, lib); self.count((target, 'reused')); self.provenance_outputs[os.path.realpath(lib)] = 'local'; return True
+        if target == 'ios' and self.windows_cache:
+            flags, _ = windows_metal.ios_flags()
+            hit = windows_metal.load_cached(self.windows_cache, src, flags, key)
+            if hit:
+                winlib, receipt = hit; clone(winlib, lib); self.count(('ios', 'windows'))
+                self.provenance_outputs[os.path.realpath(lib)] = receipt; return True
         tmp = f'{lib}.tmp-{os.getpid()}-{threading.get_ident()}'
         self._compile(target, msl, tmp)
         os.replace(tmp, lib)
         os.makedirs(os.path.dirname(p), exist_ok=True); clone(lib, p); self.count((target, 'compiled'))
+        self.provenance_outputs[os.path.realpath(lib)] = 'local'; return True
+
+    def _windows_receipt(self, target, msl, shader_key):
+        if target != 'ios' or not self.windows_cache: return None
+        flags, _ = windows_metal.ios_flags()
+        hit = windows_metal.load_cached(self.windows_cache, open(msl, 'rb').read(), flags, shader_key)
+        return hit[1] if hit else None
+
+    def provenance(self, target, msl, lib=None, shader_key=None):
+        # Keep the actual compiler origin; a Windows library is never labelled as a Tahoe build.
+        if target == 'ios':
+            v = self.provenance_outputs.get(os.path.realpath(lib)) if lib else None
+            if not isinstance(v, dict): v = self._windows_receipt(target, msl, shader_key)
+            if isinstance(v, dict): return {k: v.get(k) for k in ('compiler', 'compiler_version', 'air_target', 'source_sha256', 'metallib_sha256')}
+        sdk = self.targets[target][0]
+        ident = hashlib.sha256(compiler_id(sdk).encode()).hexdigest()[:16]
+        return {'compiler': 'local macOS Metal toolchain', 'compiler_fingerprint': ident, 'record': self.targets[target][1]}
+
+    def validate_reflection(self, target, msl, lib, shader_key, metadata_path):
+        receipt = self._windows_receipt(target, msl, shader_key)
+        if not receipt: return
+        try: rows = json.loads(receipt.get('reflection_metadata_json', '{}'))
+        except (TypeError, ValueError): rows = {}
+        row = rows.get(shader_key)
+        if not row or hashlib.sha256(open(metadata_path, 'rb').read()).hexdigest() != row.get('sha256'):
+            raise ValueError(f'Windows Metal receipt reflection hash mismatch for {shader_key}')
 
     def _check(self, target, d, stems, mac_dir):
         """None if folder d was built with the current convention and compiler, else why not"""
@@ -74,6 +126,8 @@ class Cache:
 
     def fill(self, mac_dir, ios_dir=None):
         """Takes the libraries of an earlier build: mac_dir = its Mac b-<chain>/ folder, ios_dir = the iOS folder of the same chain (or None). Returns the lines to print"""
+        if self.export_only or self.windows_only:
+            return []
         stamp_file = os.path.join(self.root, 'filled.json')
         try: stamps = json.load(open(stamp_file))
         except (OSError, ValueError): stamps = {}
@@ -105,5 +159,5 @@ class Cache:
 
     def summary(self):
         s = self.stats
-        return 'Metal cache: ' + '; '.join(f'{t} {s[t, "reused"]} reused, {s[t, "compiled"]} compiled' + (f', {s[t, "filled"]} filled from earlier builds' if s[t, 'filled'] else '')
+        return 'Metal cache: ' + '; '.join(f'{t} {s[t, "reused"]} reused, {s[t, "compiled"]} compiled' + (f', {s[t, "windows"]} Windows' if t == 'ios' and s[t, 'windows'] else '') + (f', {s[t, "filled"]} filled from earlier builds' if s[t, 'filled'] else '')
                                           for t in self.targets)

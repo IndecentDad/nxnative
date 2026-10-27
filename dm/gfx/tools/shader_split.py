@@ -1952,7 +1952,7 @@ def ps_inputs(code):
     """Generic attributes a pixel shader reads: SPH words 6–13 are the input map, 8 bits for each of the 32 attributes (Ryujinx ShaderHeader.ImapTypes), non-zero = read; the translated MSL inputs are exactly user(locn<attribute>)"""
     return {i for i in range(32) if struct.unpack_from('<I', code, 0x30 + 4 * (6 + (i >> 2)))[0] >> ((i & 3) * 8) & 0xff}
 
-SINGLE_STAGE = ('#GLSLC@', '#UE', '#MTSPK@', '#MGFX@', '#NLG', '#PGSO', '#RAW@', '#TFXO@', '#NEEDLE@', '#SNOWDROP@')   # sources whose every shader is a program of one stage: GLSLC outputs, Unreal's shader records, MT Framework's shader package (BNSH variations, Unity programs, MSHD and SDF pair theirs);
+SINGLE_STAGE = ('#GLSLC@', '#UE', '#MTSPK@', '#MGFX@', '#NLG', '#PGSO', '#RAW@', '#TFXO@', '#NEEDLE@', '#SNOWDROP@', '#BERG')   # sources whose every shader is a program of one stage: GLSLC outputs, Unreal's shader records, MT Framework's shader package (BNSH variations, Unity programs, MSHD and SDF pair theirs);
 # MonoGame's effects, whose passes may name no vertex shader and keep the one bound (Celeste: 10 of its 13 effects draw through SpriteBatch's vertex shader, which is in main); Next Level Games'
 # archives (Luigi's Mansion 3 makes 5,317 programs of one stage each at boot); PlatinumGames' shader objects (Bayonetta 3: one stage each, pg_shader); control sections loose in main
 # (Advance Wars 1+2: Re-Boot Camp's Bink shaders, raw_shaders), which no file pairs; and YEBIS's effect file (tfxo_shaders)
@@ -2007,6 +2007,23 @@ def var_pairs(found):
         if g: var[g][st] = skey(ctl, code)
     return {(v['vs'], v['ps']) + (('prog',) if '#BAHS#prog' in g else ()) for g, v in var.items() if 'vs' in v and 'ps' in v}
 
+def berg_shaders(path, label, out, entries=None):
+    """Snowdrop SDK 4 (Kingdom Battle): single-stage NVN programs in WEST-indexed BERG v22 records."""
+    import berg
+    for where, kind, data in berg.records(path, label, entries):
+        for match in re.finditer(CTL_MAGIC, data):
+            offset = match.start()
+            if offset + 0x760 > len(data): continue
+            nctl = struct.unpack_from('<I', data, offset + 0x20)[0]
+            ncode = struct.unpack_from('<I', data, offset + 0x704)[0]
+            end = offset + nctl + ncode
+            if nctl < 0x760 or nctl & 3 or ncode < 4 or end > len(data): continue
+            ctl, code = data[offset:offset + nctl], data[offset + nctl:end]
+            headerless_cs = code[:4] not in (CS_MAGIC, GFX_MAGIC) and all(struct.unpack_from('<3I', ctl, 0x748))
+            stage = 'cs' if code[:4] == CS_MAGIC or headerless_cs else SPH_STAGE.get((struct.unpack_from('<I', code, 0x30)[0] >> 10) & 0xf) if code[:4] == GFX_MAGIC and len(code) >= 0x34 else None
+            if stage and not check(where, stage, ctl, code):
+                out.append((f'{where}#BERG{kind}@{offset:#x}', stage, ctl, code))
+
 def scan_file(args):
     """→ (relative path, {key: …}, pairs, extra); extra = this file's Unity type trees, or 'defer' (no type tree, scanned again in the second pass)"""
     path, rel = args[:2]
@@ -2047,7 +2064,7 @@ def scan_file(args):
     if len(args) > 2 and head[:4] == b'BDF3':   # entries of a FromSoftware dvdbnd archive (bdt_jobs)
         bdt_shaders(path, rel, args[2], found)
         return rel, uniq_keys(found), var_pairs(found), trees
-    if len(args) > 2:   # a range of LINKDATA entries (linkdata_jobs)
+    if len(args) > 2 and head[:4] != b'BERG':   # a range of LINKDATA entries (linkdata_jobs); indexed BERG entries have their own reader below
         linkdata_shaders(path, rel, args[2], found)
         return rel, uniq_keys(found), var_pairs(found), trees
     if head[:4] == SPKG or head[:4] == b'\0\0\1\0' and path.endswith('.gz'):   # Three Houses' loose shader packages and chunked zlib files (kt_shaders)
@@ -2056,8 +2073,11 @@ def scan_file(args):
     if head[:4] == RFRM:   # a Retro Studios form or pack (rfrm_shaders)
         found += rfrm_shaders(open(path, 'rb').read(), '/' + rel)
         return rel, uniq_keys(found), var_pairs(found), trees
-    if head[:4] == b'BERG':   # Snowdrop's SDF data slices: shader objects in individual compressed records
-        with open(path, 'rb') as f: found += snowdrop_shaders(f.read(), '/' + rel)
+    if head[:4] == b'BERG':   # Snowdrop's SDF slices: Sparks of Hope records or Kingdom Battle's WEST-indexed cache
+        if GAME.get('snowdrop_berg_v22', 'off') == 'on':
+            berg_shaders(path, '/' + rel, found, args[2] if len(args) > 2 else None)
+        else:
+            with open(path, 'rb') as f: found += snowdrop_shaders(f.read(), '/' + rel)
         return rel, uniq_keys(found), var_pairs(found), trees
     if head[:4] == MTARC:   # an MT Framework archive (mtarc_members): its shader package
         mtarc_shaders(open(path, 'rb').read(), '/' + rel, found)
@@ -2154,6 +2174,10 @@ def main():
     big = [j for p, r in files for j in (linkdata_jobs(p, r) or [])]   # Three Houses' 6.9 GB DATA1.bin: one job per range of entries, not one read of the whole file
     pak_jobs, paks = kpka_jobs(files)   # Monster Hunter Rise's PAKs: the newest copy of each path, in ranges of entries
     tr_jobs, trp = trpfs_jobs(files)   # Pokémon Legends: Z-A's Trinity packs (data.trpfs and its index data.trpfd), decoded by the game's own Oodle in the Mac host
+    berg_jobs, berg_archives = [], set()
+    if GAME.get('snowdrop_berg_v22', 'off') == 'on':
+        import berg
+        berg_jobs, berg_archives = berg.jobs(files)
     ue_jobs, uep = ue_legacy_jobs(files)   # Unreal paks with inline shaders: DRAGON QUEST XI S's legacy ones (the game's own LZ5 in the Mac host), OCTOPATH TRAVELER II's (Zlib)
     bd_jobs, bdts = bdt_jobs(files)   # Dark Souls Remastered's dvdbnd archives: the entries of each .bdt by its .bhd5 index, in ranges
     arc_jobs, arcs = smash_arc_jobs(files)   # Super Smash Bros. Ultimate's data.arc: its current files, in ranges
@@ -2161,8 +2185,8 @@ def main():
     ck_jobs, cpks = cpk_jobs(files)   # Bayonetta 2's CRI CPK archives (CRILAYLA entries)
     zp_jobs, zips = zip_jobs(files)   # Portal's game.zip (Deflate members)
     ah_jobs, arhs = arh_jobs(files)   # Monolith's ARH1/ARD archives and embedded XBC1/HCPS programs
-    big += pak_jobs + tr_jobs + ue_jobs + bd_jobs + arc_jobs + pz_jobs + ck_jobs + zp_jobs + ah_jobs
-    files = [(p, r) for p, r in files if not linkdata_jobs(p, r) and p not in paks and p not in trp and p not in uep and p not in bdts and p not in arcs and p not in pkzs and p not in cpks and p not in zips and p not in arhs]
+    big += pak_jobs + tr_jobs + berg_jobs + ue_jobs + bd_jobs + arc_jobs + pz_jobs + ck_jobs + zp_jobs + ah_jobs
+    files = [(p, r) for p, r in files if not linkdata_jobs(p, r) and p not in paks and p not in trp and p not in uep and p not in bdts and p not in arcs and p not in pkzs and p not in cpks and p not in zips and p not in arhs and p not in berg_archives]
     with cf.ProcessPoolExecutor(J, initializer=_pool_init, initargs=(common, {}, zdicts)) as ex:
         results += list(ex.map(scan_file, big)) + list(ex.map(scan_file, files, chunksize=16))
     trees, defer = {}, []

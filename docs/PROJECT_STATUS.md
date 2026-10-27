@@ -2,8 +2,8 @@
 
 ## Shared integration baseline
 
-- Source/build baseline: `2694c280d563ea573c705b939f54c1ccd34f9e95` (merge of `game/echoes-of-wisdom` into `integration`; parents `fe662e1` and `e358448`). Echo history includes portable translator fix `af582053` and successful Echo build record `e358448`. Fork `main` was not modified.
-- Echoes merge preserved existing integration Save Folder Sync and Intel support. Launcher keeps upstream grouped settings, reset-to-tested-defaults and navigation, with Save Sync entry, folder selection, status/details/conflict handling, manual **Sync Now**, and bridge initialization. Save paths are local `Documents/save` and `<Selected Folder>/<TitleID>/` directly.
+- Source/build baseline for this Rabbids build: `1c592426bf22fb8caeff32076ec25ed1afdde27f`, the remote `origin/integration` merge of the upstream main mirror. The local `integration` checkout is behind this remote ref; this game branch is based on the remote integration commit. Fork `main` was not modified.
+- Eden-compatible Save Folder Sync has folder selection, status/details/conflict handling, and bridge initialization. The launcher has no manual Sync Now button; save sync uses the selected folder and no legacy iCloud save path.
 - Local functionality beyond the upstream mirror: Eden-compatible Save Folder Sync module/UI/bridge; Echoes 1.1.0 profile and validated shader data; portable AnyCPU translator build fix. These are candidates for upstream contribution where generally applicable. No game-specific runtime behavior was changed to add Save Sync. Upstream Intel launcher support from `1822616` remains; no launcher-only change was reintroduced by the Echo merge.
 
 ## Intel translator reproducibility
@@ -17,6 +17,15 @@
 - Echoes of Wisdom 1.1.0, update `v196608`, built from baseline above, bundle `org.nxnative.01008cf01baac000`, 9,858/9,858 shaders and 14,159 metallibs, Xcode Release unsigned, 135 source files compiled. IPA: `/volume1/Media/Roms/iOS/Echoes of Wisdom/Build v1.1.0/Echoes-of-Wisdom-v1.1.0.ipa`; 8,414,216,443 bytes; SHA-256 `4ea74679bc334abb869d8f70fef7ef2f33e50d919f8b45d77b9470bd238cf76b`.
 - Celeste update `v589824` (profile 1.4.1.1; app metadata 1.4.1), same baseline and translator, bundle `org.nxnative.01002b30028f6000`, 26/26 shaders and 38 metallibs, Xcode Release unsigned, 135 source files compiled. IPA: `/volume1/Media/Roms/iOS/Celeste/Build integration-2694c28/Celeste-1.4.1.1-integration-2694c28.ipa`; 924,915,261 bytes; SHA-256 `ff8500309f931f67974dc070ff93f0cd7b62d1db3689b4fc9203a1b33d1a344f`.
 - Both IPAs have intact ZIPs, expected bundle metadata, Save Sync resources/code, and no legacy iCloud messages or `env.txt`. Increased Memory Limit entitlement must be applied by signing/install tooling. Echoes rebuilt IPA and Celeste regression have not been device-tested; Save Folder Sync provider bookmark/sync behavior still needs device validation. Two Echoes shaders remain flagged not proven bounded.
+
+## Mario + Rabbids Kingdom Battle - Windows Metal build (packaged)
+
+- Branch: `game/mario-rabbids-kingdom-battle`, based on integration `1c592426bf22fb8caeff32076ec25ed1afdde27f`.
+- Windows results validate: 16,797 unique MSL sources, 24,117 unique library keys, 16,797 successful libraries/receipts, exact iOS 18 flags, matching source/reflection hashes, one Metal Developer Tools 6.2 compiler identity, zero failures.
+- All 24,117 libraries and reflection metadata were imported into a separate Windows-only build directory. The Tahoe fallback outputs remain untouched. c1/cb safety tables were generated from existing MSL/reflection metadata; no Tahoe Metal shader compilation ran.
+- Xcode 26.6 Release compiled 180 files. The package used the base game, v1.9.0 update, four DLCs, extracted JPG icon, Eden-compatible Save Folder Sync, and the empty documented PSO prewarm manifest.
+- IPA: `/volume1/Media/Roms/iOS/Mario Rabbids - Kingdom Battle/MarioRabbidsKingdomBattle-v1.9.589692-Windows-Metal-6.2-unsigned.ipa`; 5,063,928,124 bytes; SHA-256 `e6a466b5a02df9faa047c05774b29fe0c87da0f86313107d66e6f24965c8c87e`. ZIP integrity passed; no signing artifacts. Packaged shader libraries: 11,368 base and 2,367 vertex-shadow variants. The packager omits 10,382 `_bp` libraries because no PSO archive is included.
+- Warnings: runtime GLSLC capture was disabled on Intel Tahoe, so runtime-only shader coverage is unverified; no PSO archive/prewarm was built. The IPA is unsigned and ready for PlumeImpactor. Device installation/gameplay and Metal runtime loading remain untested.
 
 ## Verification and next steps
 

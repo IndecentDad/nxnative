@@ -1499,12 +1499,36 @@ def build_shaders(py, repo, sh, xlate, env, logs, g, pkg_key=None, mac=False):
     chain = chain_of(repo)
     out = sh / 'cache' if mac else ios
     libs, kf, kmac = out / f'b-{chain}', ios / f'b-{chain}.key', sh / f'mac-b-{chain}.key'
+    if not mac and env.get('DMSH_WINDOWS_IOS_ONLY') == '1':
+        windows_out = Path(env.get('DMSH_WINDOWS_IOS_DIR', ''))
+        exchange = Path(env.get('DMSH_WINDOWS_EXCHANGE_DIR', ''))
+        results = Path(env.get('DMSH_WINDOWS_IOS_CACHE', ''))
+        manifest = exchange / 'manifest.csv'
+        if not windows_out.is_dir() or not manifest.is_file() or not results.is_dir():
+            raise BuildError('Windows-only iOS shader build requires imported libraries, manifest, and validated result cache')
+        run([py, repo / 'dm/gfx/tools/windows_metal_exchange.py', 'verify-results', manifest, results],
+            logs / 'windows_metal_validate.log', env=env)
+        win_libs = list(windows_out.glob('*.metallib'))
+        win_reflections = list(windows_out.glob('*.json'))
+        if len(win_libs) != 24117 or len(win_reflections) < 11368:
+            raise BuildError(f'incomplete Windows-only iOS output: {len(win_libs)} libraries, {len(win_reflections)} reflection files')
+        sys.path.insert(0, str(repo / 'dm/gfx/tools'))
+        import dmsh_chain
+        digest = dmsh_chain.inputs(g)
+        dmsh_chain.write_stamp(libs, g.id, digest)
+        dmsh_chain.write_stamp(windows_out, g.id, digest)
+        for tool, name in (('c1_guard.py', 'c1_full.tsv'), ('cb_extent.py', 'cb_extent.tsv')):
+            run([py, repo / 'dm/gfx/tools' / tool, libs, g.table(name)], logs / f'{tool[:-3]}.log', env=env)
+        PROG.end(f'{len(win_libs):,} Windows iOS libraries; source-derived safety tables; Tahoe Metal compilation skipped')
+        return windows_out.parent
     pso_pairs = g.table('pso_pairs.tsv')
     if not pso_pairs.is_file(): pso_pairs = sh / 'pso_pairs.tsv'   # the split's copy is a shader input too (vs_pad)
     if pkg_key:
         PROG.set(step='checking the inputs')
-        key = fingerprint(pkg_key, ('files', chain_files(repo)), ('stat', xlate.parent), ('files', profile_files(g)), ('files', [pso_pairs]), *toolchain(), str(xlate),
-                          {k: env.get(k) for k in ('XLATE_DEBUG', 'XLATE_REDUCED')}, env=env)
+        win_cache = Path(env['DMSH_WINDOWS_IOS_CACHE']) if env.get('DMSH_WINDOWS_IOS_CACHE') else None
+        win_files = sorted(list(win_cache.glob('*.json')) + list(win_cache.glob('*.metallib'))) if win_cache and win_cache.is_dir() else []
+        key = fingerprint(pkg_key, ('files', chain_files(repo)), ('stat', xlate.parent), ('files', profile_files(g)), ('files', [pso_pairs]), ('files', win_files), *toolchain(), str(xlate),
+                          {k: env.get(k) for k in ('XLATE_DEBUG', 'XLATE_REDUCED', 'DMSH_WINDOWS_IOS_ONLY', 'DMSH_WINDOWS_EXPORT_DIR')}, env=env)
         note = next((n for k in ((kmac, kf) if mac else (kf,)) if (n := reused(k, key)) is not None), None)
         # the libraries are the last build's, so are tables that name their stamp; a missing or stale one is made from that build's Mac outputs, and without them the step runs again
         if next(libs.glob('*_b.metallib'), None) and note is not None and chain_tables(py, repo, sh, env, logs, g, chain):
@@ -1518,7 +1542,20 @@ def build_shaders(py, repo, sh, xlate, env, logs, g, pkg_key=None, mac=False):
     if mac: del benv['IOSOUT']   # dmsh_build.py builds the iOS libraries only with IOSOUT
     run([py, repo / 'dm/gfx/tools/own_compilers.py', sh / 'pkg', sh / 'cache'], log, env=benv)   # dmsh_build.py with this Mac's Metal compiler and spirv-cross
     PROG.watch(None)
-    if not chain_tables(py, repo, sh, env, logs, g, chain): raise BuildError(f'no stamped Mac shader outputs in {sh / "cache" / f"b-{chain}"} (inputs.tsv): dmsh_build.py did not finish a full build')
+    if not (not mac and env.get('DMSH_WINDOWS_EXPORT_DIR')) and not chain_tables(py, repo, sh, env, logs, g, chain): raise BuildError(f'no stamped Mac shader outputs in {sh / "cache" / f"b-{chain}"} (inputs.tsv): dmsh_build.py did not finish a full build')
+    if not mac and env.get('DMSH_WINDOWS_EXPORT_DIR'):
+        exchange = Path(env['DMSH_WINDOWS_EXPORT_DIR']).expanduser().resolve()
+        rmtree(exchange / 'sources'); (exchange / 'sources').mkdir(parents=True, exist_ok=True)
+        for old_manifest in (exchange / 'manifest.csv',):
+            try: old_manifest.unlink()
+            except FileNotFoundError: pass
+        run([py, repo / 'dm/gfx/tools/windows_metal_exchange.py', 'export', sh / 'cache' / f'b-{chain}', ios / f'b-{chain}', exchange], logs / 'windows_metal_export.log', env=env)
+        manifest = exchange / 'manifest.csv'
+        rows = sum(1 for _ in open(manifest, errors='replace')) - 1 if manifest.exists() else 0
+        if rows:
+            raise BuildError(f'{rows:,} missing iOS Metal sources exported to {exchange}; run scripts/windows_metal_worker.ps1 on Windows, copy its results back, then resume with DMSH_WINDOWS_IOS_CACHE set')
+    if not mac and env.get('DMSH_WINDOWS_IOS_CACHE'):
+        run([py, repo / 'dm/gfx/tools/windows_metal_exchange.py', 'annotate', sh / 'cache' / f'b-{chain}', ios / f'b-{chain}', env['DMSH_WINDOWS_IOS_CACHE']], logs / 'windows_metal_annotate.log', env=env)
     what = 'Mac' if mac else 'iOS'
     n = sum(1 for _ in libs.glob('*_b.metallib')) if libs.is_dir() else 0
     if n == 0: raise BuildError(f'no {what} shader libraries in {libs}')
@@ -1532,6 +1569,8 @@ def build_shaders(py, repo, sh, xlate, env, logs, g, pkg_key=None, mac=False):
         failed = f'; {total - ok:,} failed, reasons at the end of {log}' if ok < total else ''
         note = f'{ok:,} of {total:,} shaders ready{failed}'
         PROG.end(f'{ok:,} of {total:,} shaders ready' + (f' ({int(c.group(1)):,} from the cache)' if c else '') + failed)
+        if env.get('DMSH_WINDOWS_IOS_ONLY') == '1' and ok < total:
+            raise BuildError(f'{total-ok:,} shaders did not have a verified local or Windows iOS metallib; see {log}')
     else: PROG.end()
     shader_regressions(py, repo, sh / 'cache', chain, logs)   # before the key: a stopped build is checked again on the next run
     if key:
@@ -1816,6 +1855,7 @@ def parse_args(argv):
     ap.add_argument('--profile-out', help='where the provisional profile goes (default: <NSP folder>/<title ID>_build/profile)')
     ap.add_argument('--provisional', action='store_true', help='build from a provisional profile even when dm/games has one for the game (tests the guesses)')
     ap.add_argument('--no-heap-check', action='store_true', help='a provisional profile: skip the heap check on the Mac (the alias / heap split stays a guess)')
+    ap.add_argument('--no-glslc-capture', action='store_true', help='package offline shaders without running the ARM64 Mac host for runtime GLSLC capture (e.g. on Intel); runtime-only shader coverage remains unverified')
     ap.add_argument('--progress', choices=('auto', 'bar', 'lines', 'json', 'off'), help='stage lines on the console: bar = one line per stage, redrawn in place; lines = a plain line every BEAT seconds; json = newline-delimited JSON events (no prompts); off = only each stage\'s start and end '
                     '(default: the PROGRESS setting; auto = bar in a terminal or Spyder, lines when the output goes to a file or a pipe)')
     return ap.parse_args(argv)
@@ -1976,6 +2016,9 @@ def main(args=None):
     src = pg.build_sources(game / 'ExeFS', game / 'RomFS', g.words('modules'))
     gfx = src['graphics'][0]   # nvn, vulkan (Hades: the host's Vulkan layer, SPIR-V shaders) or gl (Digimon Story Cyber Sleuth: the host's GL layer, GLSL sources)
     glslc = gfx == 'nvn' and src['glslc_capture'][0]   # shaders the game compiles at run time, captured in the Mac host (capture_glslc)
+    if glslc and args.no_glslc_capture:
+        say('[RED] runtime GLSLC capture disabled: packaging the offline shaders; runtime-only shader coverage remains unverified')
+        glslc = False
     vkcap = gfx == 'vulkan' and src['vk_capture'][0]   # SPIR-V shaders the game generates at run time, captured in the Mac host (capture_shaders)
     glcap = gfx == 'gl' and src['gl_capture'][0]   # GLSL the game puts together at run time (LÖVE), captured in the Mac host (capture_shaders)
     uedec = gfx == 'nvn' and src['ue_decode'][0]   # Unreal Engine shaders, Oodle-compressed in the paks' shader code archives, decoded in the Mac host (decode_ue_shaders)

@@ -541,7 +541,7 @@ def check_before_copy(insl, ctx, ld, idx):
         if writes(p) & (idx | {src}): return None
     else: return None
     return ctx[k - 2]
-def jump_offsets(insl, j, copy_first=False, far_base=False):
+def jump_offsets(insl, j, copy_first=False, far_base=False, lookback=16):
     """The br x18 is preceded by the offset-table form (Engage main+0x12eec94): cmp w18,#N; b.hi; ldrsw x18,[xB,x18,lsl #2]; add x18,x18,xB.
     The index may be another register, and the bounds check may be on a register copied into it: Link's Awakening's GLSLC (subsdk0+0x1be6e8) has
     sub w0,w18,#0xd1; cmp w0,#0x31; b.hi; ldrsw x18,[x17,x0,lsl #2], its movie module (subsdk1+0xae9a4) cmp w21,#7; b.hi; ...; mov w18,w21; ldrsw x18,[x4,x18,lsl #2].
@@ -551,7 +551,7 @@ def jump_offsets(insl, j, copy_first=False, far_base=False):
     256 instructions was set further back, and its writer chain is followed to the function's start (table_base far), every target an instruction of the function: ASTRAL CHAIN main+0x6db498
     and +0x6db70c load bases set 441 and 549 instructions before, x24 in the function's first block and x3 after it, which the loop around their dispatches keeps. A function-wide search
     for the one adrp + add pair that fits (table_cands, as jump_adr_offsets does) finds two for x3 there, the other a table of its own further on. Returns all targets, or None if not recognized"""
-    ctx = insl[max(0, j - 16):j]
+    ctx = insl[max(0, j - lookback):j]
     add = next((p for p in reversed(ctx) if p.mnemonic == 'add' and re.fullmatch(r'x18, x\d+, x\d+', p.op_str)), None)
     if not add: return None
     _, t, rb = add.op_str.split(', ')   # t = the loaded entry, rb = the table base
@@ -562,6 +562,19 @@ def jump_offsets(insl, j, copy_first=False, far_base=False):
     masked = None   # (source, mask, position) when the index is "source & mask"
     k0 = ctx.index(ld); cmp = None
     def wname(r): return 'w' + r[1:]
+    if lookback > 16:
+        # SDK 4 GLSLC (Rabbids subsdk0+0x7340b8) copies w17 into w18
+        # before a long dispatch block; later checks still compare w17.
+        # Only accept a copy whose source stays unchanged until the load.
+        for i in range(k0 - 1, -1, -1):
+            p = ctx[i]
+            if not idx.intersection(wname(p.reg_name(r)) for r in p.regs_access()[1]): continue
+            copy = re.fullmatch(r'(w\d+), (w\d+)', p.op_str) if p.mnemonic == 'mov' else None
+            if copy and copy.group(1) in idx and not any(
+                    copy.group(2) in {wname(q.reg_name(r)) for r in q.regs_access()[1]}
+                    for q in ctx[i + 1:k0] if q.mnemonic not in ('cmp', 'cmn', 'tst')):
+                idx.add(copy.group(2))
+            break
     for i in range(k0 - 1, -1, -1):   # walk back from the load: follow register copies into the index, stop at the bounds check
         p = ctx[i]
         m = re.fullmatch(r'(w\d+), (w\d+)', p.op_str) if p.mnemonic == 'mov' else None
@@ -613,7 +626,10 @@ def jump_offsets(insl, j, copy_first=False, far_base=False):
         return t if all(fa <= x < fb and x % 4 == 0 for x in t) else None
     if page is None: return None
     tb = page + lo
-    return [tb + struct.unpack_from('<i', IMG, tb + 4 * i)[0] for i in range(n)]
+    if lookback > 16 and not (0 < n <= 4096 and 0 <= tb and tb + 4 * n <= len(IMG)): return None
+    targets = [tb + struct.unpack_from('<i', IMG, tb + 4 * i)[0] for i in range(n)]
+    if lookback > 16 and not all(insl[0].address <= t <= insl[-1].address and t % 4 == 0 for t in targets): return None
+    return targets
 def table_base(insl, k, rb, far=False):
     """Address the table-base register rb holds at insl[k]: its writer chain before k must be add rb,rb,#lo after adrp rb (as in jump_offsets); None otherwise.
     The chain is searched 256 instructions back, or with far to the function's start, through no call when rb is caller-saved (capstone lists only x30 as a call's write; a call between
@@ -903,6 +919,7 @@ for fa, fb in funcs:
                     break
             if not (base and width):
                 tgt = jump_offsets(insl, j) or jump_adr_offsets(insl, j)
+                if not tgt: tgt = jump_offsets(insl, j, lookback=128)   # SDK 4's long-lived copied GLSLC index (Rabbids)
                 if not tgt and tail_call(insl, j): tailcalls.add(ins.address); continue
                 if not tgt and (far := jump_bytes_far(insl, j)): jumps[ins.address] = far; continue
                 if not tgt: tgt = jump_offsets(insl, j, copy_first=True, far_base=True)   # the index copied before the check (check_before_copy) or the base set far back, only where every other form failed

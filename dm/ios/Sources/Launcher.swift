@@ -377,14 +377,8 @@ NavigationStack {
                         }
                     }
                     .listStyle(.insetGrouped)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar(.hidden, for: .navigationBar)
+                    .contentMargins(.horizontal, 12, for: .scrollContent)
                 }
-                        }
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .contentMargins(.horizontal, 12, for: .scrollContent)
                 .frame(width: geometry.size.width * 2 / 3)
             }
         }
