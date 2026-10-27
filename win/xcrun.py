@@ -30,7 +30,7 @@ def metal_args(sdk, args):
 def clang_args(args):
     sdk = tc.ios_sdk()
     if not sdk: die('no iPhoneOS SDK (set NXW_IOS_SDK or ios_sdk in win/toolchain.json; win/sdk/extract_xip.py extracts it from Xcode.xip)')
-    fixed = ['NUL' if a == '/dev/null' else a for a in args]
+    fixed = ['NUL' if a == '/dev/null' and tc.WINDOWS else a for a in args]
     return ['-target', f'arm64-apple-ios{tc.setting("ios_deployment", tc.IOS_DEPLOYMENT)}', '-isysroot', str(sdk)] + fixed
 
 
@@ -66,7 +66,7 @@ def main(argv):
     if not exe: die(f'no Windows tool for `xcrun -sdk {sdk} {tool}` (see win/README.md, Prerequisites)')
     if tool == 'metal': rest = metal_args(sdk, rest)
     elif tool == 'clang': rest = clang_args(rest)
-    return subprocess.run([str(exe)] + rest).returncode
+    return subprocess.run(tc.cmd(exe) + rest).returncode   # the Metal tools through Wine off Windows
 
 
 def find(sdk, tool):

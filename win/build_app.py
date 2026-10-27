@@ -19,6 +19,8 @@ REPO = tc.REPO
 DM = REPO / 'dm'
 IOS = DM / 'ios'
 HOST = DM / 'host'
+sys.path.insert(0, str(DM / 'tools'))
+import romfs as rfs   # the RomFS as a folder or as one DMROMFS1 image (nx_extract --romfs-image), read alike
 
 
 def t(msg): print(f'[{time.strftime("%H:%M:%S")}] {msg}', flush=True)
@@ -247,7 +249,8 @@ def main():
     if not (gd / 'game.tsv').exists(): die(f'no game profile {gd}/game.tsv')
     pkg = gp('package')
     patched = Path(env.get('PATCHED') or w / f'build/patched_{pkg}')
-    romfs = Path(env.get('ROMFS') or w / f'data/{pkg}/RomFS')
+    romfs = rfs.Path(env.get('ROMFS') or rfs.source(w / f'data/{pkg}'))   # <extraction>/RomFS.img, else the RomFS folder (build_ipa.sh)
+    image = rfs.is_image(romfs)
     msl_ios = Path(env.get('MSL_IOS') or w / 'build/ios/dmsh_b')
     aoc = Path(env['AOC']) if env.get('AOC') else (None if 'AOC' in env else w / 'data/aoc')
     out_ipa = Path(sys.argv[1]) if len(sys.argv) > 1 else w.parent / gp('ipa')
@@ -268,6 +271,8 @@ def main():
     for m in mods:
         if not ((patched / f'{m}.patched.bin').exists() and (patched / f'{m}.fixups.tsv').exists()): die(f'no rewritten module {patched}/{m} (run dm/tools/patch_nso.py first)')
     if not (romfs / marker).exists(): die(f'no RomFS at {romfs} (missing {marker})')
+    if image and env.get('NXW_MODS_ROMFS'): die('mods\' RomFS folders are laid over a RomFS folder, and this extraction is one RomFS image (RomFS.img)')
+    if image and env.get('NXW_SPLIT_DATA', '') not in ('', '0'): die('a split build copies the RomFS as a folder, and this extraction is one RomFS image (RomFS.img): build without --split-data')
     if env.get('NXW_MODS_ROMFS'):   # mods' RomFS folders (win/mods.py): hard links of the game's files with the mods' laid over them
         import mods
         romfs = mods.overlay_romfs(romfs, env['NXW_MODS_ROMFS'].split(os.pathsep), w / 'build/romfs_mods', log=t)
@@ -396,10 +401,10 @@ def main():
     else:
         maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}')
         if has_aoc: maps.append(f'Payload/DmIOS.app/aoc={aoc}')
-        maps.append(f'Payload/DmIOS.app/romfs={romfs}')
+        maps.append(f'Payload/DmIOS.app/romfs.img={romfs}' if image else f'Payload/DmIOS.app/romfs={romfs}')   # main.m romfs_locate opens <App>/romfs.img (build_ipa.sh)
     t('pack IPA (already-compressed game files stored, everything else deflated)')
     r = subprocess.run([sys.executable, str(IOS / 'tools/pack_ipa.py'), str(out_ipa), '--store', ':'.join(gp('zip_store').split(':')),
-                        '--exec', 'Payload/DmIOS.app/DmIOS', '--skip', 'Payload/DmIOS.app/msl', '--skip', 'Payload/DmIOS.app/aoc', '--skip', 'Payload/DmIOS.app/romfs',
+                        '--exec', 'Payload/DmIOS.app/DmIOS', '--skip', 'Payload/DmIOS.app/msl', '--skip', 'Payload/DmIOS.app/aoc', '--skip', 'Payload/DmIOS.app/romfs', '--skip', 'Payload/DmIOS.app/romfs.img',
                         '--skip', 'Payload/DmIOS.app/pso', *(['--skip-suffix', '_bp.metallib'] if skip_bp else []), *maps])
     if r.returncode: die('pack_ipa')
     sz = out_ipa.stat().st_size; t(f'done: {out_ipa} ({sz / 2**30:.1f} GB)' if sz >= 2**30 else f'done: {out_ipa} ({sz / 2**20:.1f} MB)')

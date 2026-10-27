@@ -17,7 +17,8 @@ SHIM = WIN / 'pyshim'
 
 
 def main():
-    if os.name != 'nt': sys.exit('win/build_ipa_windows.py is the Windows driver: on a Mac run scripts/build_ipa_from_nsp.py')
+    if sys.platform == 'darwin': sys.exit('win/build_ipa_windows.py is the Windows and Linux driver: on a Mac run scripts/build_ipa_from_nsp.py')
+    if os.name != 'nt': os.environ['NXW_LINUX'] = '1'   # Linux: the shim's mappings with native tools, and the Metal Developer Tools for Windows under Wine (win/toolchain.py cmd)
     for bad in ('--prepare-xcode',):
         if bad in sys.argv: sys.exit(f'{bad} needs a Mac with Xcode')
     for i, a in enumerate(sys.argv):
@@ -44,7 +45,10 @@ def main():
     if not any(a == '--bundle-id' or a.startswith('--bundle-id=') for a in sys.argv):
         sys.path.insert(0, str(WIN)); import toolchain as _tc
         os.environ['NXW_BUNDLE_PREFIX'] = _tc.setting('bundle_prefix', 'org.nxnativewindows')
-    sys.path.insert(0, str(SHIM)); import sitecustomize  # noqa: F401
+    # The shim in this process too. By its path: Debian and Ubuntu Pythons load their own sitecustomize (an apport hook) at startup, and an `import sitecustomize`
+    # would then return that one, leaving this process's subprocesses unmapped (bash build_ipa.sh ran as it is). The child Pythons find the shim first on PYTHONPATH
+    if Path(getattr(sys.modules.get('sitecustomize'), '__file__', '') or '').resolve() != (SHIM / 'sitecustomize.py').resolve():
+        _spec = importlib.util.spec_from_file_location('nxw_shim', SHIM / 'sitecustomize.py'); _spec.loader.exec_module(importlib.util.module_from_spec(_spec))
     sys.path.insert(0, str(WIN)); import toolchain as tc, doctor
 
     spec = importlib.util.spec_from_file_location('build_ipa_from_nsp', REPO / 'scripts/build_ipa_from_nsp.py')
@@ -52,7 +56,11 @@ def main():
     BuildError = up.BuildError
 
     extra = [str(p) for p in (tc.llvm_bin(),) if p] + [str(tc.tool_on_path(t).parent) for t in ('spirv-cross', 'zstd', 'glslangValidator') if tc.tool_on_path(t)]
-    up.TOOL_PATHS = extra + [str(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'dotnet')]
+    up.TOOL_PATHS = extra + ([str(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'dotnet')] if tc.WINDOWS else up.TOOL_PATHS)   # upstream's list has ~/.dotnet
+    # the shader chain takes spirv-cross from SPIRV_CROSS, else the repository's Mach-O build (dm/gfx/tools/dmsh_chain.py): here the native one the toolchain names
+    sc = tc.tool_on_path('spirv-cross')
+    if sc: os.environ.setdefault('SPIRV_CROSS', str(sc))
+    if not tc.WINDOWS: os.environ['PATH'] = os.pathsep.join(up.TOOL_PATHS + [os.environ.get('PATH', '')])   # this process's own lookups too (the shim's dotnet, the doctor's checks)
 
     def check_prereqs(env, xlate, mac=False):
         if mac: raise BuildError('the Mac platforms need a Mac')
@@ -69,7 +77,7 @@ def main():
             if not (Path(t) / 'nx_extract.exe').exists(): raise BuildError(f'nx_extract built without an executable (see {logs / "nx_extract_build.log"})')
             up.rmtree(nx.parent); shutil.copytree(t, nx.parent)
         return nx   # Windows starts nx_extract.exe for this path
-    up.build_nx_extract = build_nx_extract
+    if tc.WINDOWS: up.build_nx_extract = build_nx_extract   # on Linux dotnet writes nx_extract, as upstream expects
 
     # address-region cuts for an sdk build sdk_patches.py does not register (win/sdk_auto_cuts.py), for a game with virtual address memory: written beside the rewrite, read by the
     # shim when patch_nso.py imports sdk_patches, and part of the rewrite's cache key (patch_files)
@@ -128,13 +136,13 @@ def main():
     # The profile status line: upstream calls a version red when a registered build's fixes do not reach it. An sdk build that sdk_patches.py does not register gets its
     # address-region cuts here anyway (win/sdk_auto_cuts.py, NXW_AUTO_SDK_CUTS), so when the sdk cuts are all that differ the line is not red
     orig_report = up.report_profile_status
-    def report_profile_status(g, reg, pkg_ver, derived, provisional, artifact='IPA'):
+    def report_profile_status(g, reg, pkg_ver, derived, provisional, *rest, **kw):   # rest: upstream's artifact and patched
         j = os.environ.get('NXW_AUTO_SDK_CUTS'); auto = set()
         try: auto = set(json.loads(Path(j).read_text(encoding='utf-8'))) if j else set()
         except (OSError, ValueError): pass
         lines, say = [], up.say
         up.say = lambda m, *a, **k: lines.append((m, a, k))
-        try: orig_report(g, reg, pkg_ver, derived, provisional, artifact)
+        try: orig_report(g, reg, pkg_ver, derived, provisional, *rest, **kw)
         finally: up.say = say
         if derived and auto:
             row = g.builds().get(pkg_ver, {})
@@ -170,8 +178,19 @@ def main():
         up.PROG.end('set ' + ', '.join(sig) if sig else 'guessed keys kept')
         return type(g)(g.dir)
     up.heap_check = heap_estimate
+
+    def region_skip(repo, d, patched, work, env, logs, g):
+        """The address region check without the Mac host. Upstream boots the game to report where its address regions reach against the profile's alias region: a report,
+        it changes no key. Skipped here, and the profile stamped as upstream's check stamps it, so later builds do not ask again"""
+        up.PROG.stage('address regions (no Mac host)')
+        p = g.dir / 'game.tsv'
+        p.write_text(p.read_text(encoding='utf-8') + f'\n# address regions: {time.strftime("%Y-%m-%d")}, not checked (no Mac host on this PC)\n', encoding='utf-8')
+        up.PROG.end('skipped: it only reports, and needs the game booted in the Mac host')
+        return type(g)(g.dir)
+    up.region_check = region_skip   # newer upstream (after this fork's last sync): heap_check's apple_silicon gate lets it run
     xc = [sys.executable, str(WIN / 'xcrun.py')]
-    up.toolchain = lambda: (('cmd', xc + ['-sdk', 'iphoneos', 'metal', '--version']), ('cmd', xc + ['-sdk', 'macosx', 'metal', '--version']), ('cmd', ['spirv-cross', '--revision']))
+    up.toolchain = lambda repo=None, env=None: (('cmd', xc + ['-sdk', 'iphoneos', 'metal', '--version']), ('cmd', xc + ['-sdk', 'macosx', 'metal', '--version']),
+                                                ('cmd', [os.environ.get('SPIRV_CROSS', 'spirv-cross'), '--revision']))
 
     # Run-time shader captures (GLSLC: Fire Emblem: Three Houses, Portal; Vulkan: Super Mario Galaxy; GL of a non-LÖVE game) are done on the device instead of a Mac. Upstream boots
     # the game in the Mac host with DM_*_CAPTURE and keeps what it compiles; the iPhone runs the same code natively. A first build packs a capture IPA (no shader libraries, the capture
@@ -203,7 +222,7 @@ def main():
         nacp = d / 'control.nacp'
         try: gname = subprocess.run([sys.executable, str(REPO / 'dm/tools/nacp.py'), str(nacp)], capture_output=True, text=True).stdout.strip()
         except OSError: gname = ''
-        cenv = dict(env, GAME=g.id, W=str(work / 'ipa_capture'), PATCHED=str(patched), ROMFS=str(d / 'RomFS'), AOC='', GFXAPI=gfx, DM_ENV_FILE=str(envf), NXW_CAPTURE_IPA='1',
+        cenv = dict(env, GAME=g.id, W=str(work / 'ipa_capture'), PATCHED=str(patched), ROMFS=str(up.rfs.source(d)), AOC='', GFXAPI=gfx, DM_ENV_FILE=str(envf), NXW_CAPTURE_IPA='1',
                     DM_DISPLAY_NAME=f'{gname or stem} (capture)', DM_SHOW_FPS='NO')
         up.PROG.set(step='packing the capture IPA')
         up.run([sys.executable, str(WIN / 'build_app.py'), str(out)], logs_dir(work) / 'capture_ipa.log', env=cenv)
@@ -230,14 +249,14 @@ def main():
     up.UE_DECODE_SECS = up.UE_DECODE_SECS * 20   # emulated, slower than the Mac's native run
 
     derive = up.derive_profile
-    def derive_profile(g, pdir, ver, d, mods, app=None):
+    def derive_profile(g, pdir, ver, d, mods, *rest, **kw):   # rest: upstream's app and shader_only
         """upstream's derived profile, with a RomFS marker this version has: the profile's marker may be a file only its tested version ships (Balatro 1.1.3's NotoSansSC-Bold.ttf,
         absent from v0), and both the IPA build and the app's start (main.m romfs_locate) look for it. Then main.lua (LÖVE) or the largest RomFS file stands in"""
-        disp = derive(g, pdir, ver, d, mods, app)
+        disp = derive(g, pdir, ver, d, mods, *rest, **kw)
         tsv = pdir / 'game.tsv'; T = '\t'
         lines = tsv.read_text(encoding='utf-8').splitlines()
         old = next((l.split(T, 1)[1] for l in lines if l.startswith('romfs_marker' + T)), None)
-        romfs = d / 'RomFS'
+        romfs = up.rfs.source(d)   # RomFS.img (upstream's extraction) or the RomFS folder, read alike
         if old and not (romfs / old).exists():
             files = [p for p in romfs.rglob('*') if p.is_file()]
             new = 'main.lua' if (romfs / 'main.lua').exists() else os.path.relpath(max(files, key=lambda p: p.stat().st_size), romfs).replace('\\', '/') if files else None
@@ -256,7 +275,7 @@ def main():
         up.rmtree(part)
         try: table = g.table(up.CAPTURES['gl']['table'])
         except Exception: table = None
-        r = love_shaders.generate(d / 'ExeFS/main', d / 'RomFS', part, table, log=up.say)
+        r = love_shaders.generate(d / 'ExeFS/main', up.rfs.source(d), part, table, log=up.say)
         if r is None: return device_capture('gl', d, patched, work, env, g, up.capture_wanted(g, 'gl'), lambda c: up.capture_done(c, 'gl'))
         up.rmtree(out); part.rename(out)
         up.PROG.end(f'{len(r[0])} shaders')
