@@ -178,6 +178,14 @@ CUTS = {
   # SDK 10.4.8 sdk 30a1e87b52f5 (Pikmin 4 1.1.1, Unreal Engine 4.26.2): the same cuts as the SDK 10.4.1 build above, whose AddressRegionManager this is at the same offsets (the constructor
   # sdk+0x340e90, the node area limit +0x340ea0 and its occupied length +0x340f3c, AllocateAddressRegion's 1 GB alignment +0x34109c). Unreal's nninitStartup reserves its engine region
   # (-SwitchVirtualAddressSpaceSize, the profile's game_args) in the alias region, so the region starts 62 MB in and a 4 GB region needs no 1 GB alignment slack
+  # Mario + Rabbids Kingdom Battle 1.9.589692 (SDK 4.4.0): this build reserves a 1 GiB AddressRegionManager node area
+  # at sdk+0x93dd8. VammManager::AllocateAddressRegion (sdk+0x93ef4) aligns requests >=1 GiB to 1 GiB
+  # (sdk+0x93fe0). After the game's 0x130000-byte metadata region, the 3 GiB Snowdrop reservation cannot fit
+  # in the remaining 3.375 GiB alias range with that alignment. 32 MiB alignment lets it start at +1.03125 GiB
+  # and end at +4.03125 GiB, within the existing +4.375 GiB alias boundary; class boundaries remain aligned.
+  '9de92bad67c4150268943ab4843ace65': [
+    (0x93fe0, 'ea030232', '0a40a052', 'VammManager::AllocateAddressRegion: alignment for requests >=1 GiB, 1 GiB → 32 MiB'),
+  ],
   '30a1e87b52f5a2ac9879685cbfb93d7c': [
     (0x340ea0, 'e8230b32', '087ca052', 'AddressRegionManager constructor: node area limit orr w8,wzr,#0x3fe00000 → mov w8,#0x3e00000'),
     (0x340f3c, 'e9230b32', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region orr w9,wzr,#0x3fe00000 → mov w9,#0x3e00000'),
@@ -196,5 +204,16 @@ CUTS = {
   '5bcf525f24eb28658a8d67ac27800d9b': [
     (0x346190, '08fca752', '087ca052', 'AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000'),
     (0x34622c, '09fca752', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000'),
+  ],
+}
+
+
+# SDK 4.4.0 reservation diagnostics for Kingdom Battle. The success gate is after
+# AddressSpaceAllocator::AllocateSpace has returned its region node; the failure
+# gate is before VammManager maps its internal Result to 0x1803 / 0x1003.
+OBS = {
+  '9de92bad67c4150268943ab4843ace65': [
+    (0x93f50, 22, 'f94007e8', 'Kingdom Battle VammManager::AllocateAddressRegion success: request in x21; region node in [fp-0x28]'),
+    (0x93f34, 23, '52830068', 'Kingdom Battle VammManager::AllocateAddressRegion failure: raw allocator result in x0; request in x21'),
   ],
 }

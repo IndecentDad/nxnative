@@ -76,6 +76,29 @@ enum { I_CoreMask=0, I_PriorityMask=1, I_AliasAddr=2, I_AliasSize=3, I_HeapAddr=
        I_AslrAddr=12, I_AslrSize=13, I_StackAddr=14, I_StackSize=15, I_SysResTotal=16, I_SysResUsed=17,
        I_ProgramId=18, I_InitProcIdRange=19, I_UserExcAddr=20, I_TotalNonSys=21, I_UsedNonSys=22, I_IsApplication=23, I_FreeThreadCount=24 };
 
+static void rabbids_region_ok(const uint64_t *r) {
+    if (!g_flag.svc) return;
+    uint64_t node = r[29] >= 0x28 ? *(const uint64_t *)(uintptr_t)(r[29] - 0x28) : 0;
+    uint64_t addr = node ? *(const uint64_t *)(uintptr_t)(node + 0x20) : 0;
+    uint64_t size = node ? *(const uint64_t *)(uintptr_t)(node + 0x28) : 0;
+    LOG("[mem] AllocateAddressRegion req=%#llx result=0 addr=%#llx size=%#llx",
+        (unsigned long long)r[21], (unsigned long long)addr, (unsigned long long)size);
+}
+static void rabbids_region_fail(const uint64_t *r) {
+    if (!g_flag.svc) return;
+    uint32_t raw = (uint32_t)r[0];
+    uint32_t result = raw == 2 ? 0x1803 : 0x1003;  // VammManager::AllocateAddressRegion's exact mapping
+    uint64_t out = r[20] ? *(const uint64_t *)(uintptr_t)r[20] : 0;
+    LOG("[mem] AllocateAddressRegion req=%#llx raw=%#x result=%#x addr=%#llx",
+        (unsigned long long)r[21], raw, result, (unsigned long long)out);
+}
+void svc_observe_init(void) {
+#if DM_GAME_PROGRAM_ID == 0x010067300059A000ull
+    gate_obs_set(OBS_RABBIDS_REGION_OK, rabbids_region_ok);
+    gate_obs_set(OBS_RABBIDS_REGION_FAIL, rabbids_region_fail);
+#endif
+}
+
 static uint8_t g_seen[256];
 
 // Stack destinations and their borrowed sources. Physical alias commits live in
@@ -405,7 +428,7 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
     case 0x2C: case 0x2D: {  // MapPhysicalMemory / UnmapPhysicalMemory(addr, size): only allowed inside the alias region (used by the SDK's VammManager)
         uintptr_t a = regs[0]; size_t size = regs[1];
         if (!size || ((a | size) & 0xfff) || !memory_contains((uintptr_t)g_alias, g_alias_cap, a, size)) {
-            LOG("SVC %#x outside the alias region %p+%#zx", num, (void *)a, size); regs[0] = 0xD401; return 0;
+            LOG("SVC %#x outside the alias region %p+%#zx result=%#x", num, (void *)a, size, 0xD401); regs[0] = 0xD401; return 0;
         }
         pthread_mutex_lock(&g_map_lock);
         // The SDK extends committed windows across borrowed stack sources
@@ -423,8 +446,8 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
             int64_t room = (int64_t)APP_POOL - (int64_t)(g_heap_cur + DM_GAME_MEM_USED + big_bss_bytes()) - atomic_load(&g_alias_mapped);
             if (need && need > room) {
                 pthread_mutex_unlock(&g_map_lock);
-                static _Atomic int nref; if (atomic_fetch_add(&nref, 1) < 8) LOG("[mem] MapPhysicalMemory +%#zx refused: %.2f GB mapped, the application pool is full (ResultLimitReached, the SDK frees cached pages and retries)",
-                                                                       size, atomic_load(&g_alias_mapped) / 1073741824.0);
+                static _Atomic int nref; if (atomic_fetch_add(&nref, 1) < 8) LOG("[mem] MapPhysicalMemory +%#zx refused: %.2f GB mapped, the application pool is full (ResultLimitReached=%#x; SDK frees cached pages and retries)",
+                                                                       size, atomic_load(&g_alias_mapped) / 1073741824.0, 0x10801);
                 regs[0] = 0x10801; return 0;
             }
         }
@@ -445,7 +468,7 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
             else (void)madvise((void *)mlo, mhi - mlo, MADV_FREE);
         }
         if (commit && changed) alias_initialize(off, size);
-        if (g_flag.svc) LOG("%sPhysicalMemory %p+%#zx", commit ? "Map" : "Unmap", (void *)a, size);
+        if (g_flag.svc) LOG("%sPhysicalMemory %p+%#zx result=0", commit ? "Map" : "Unmap", (void *)a, size);
         // how deep the alias region is used (one line per 256 MB crossed): for sizing the reservation and alias region (iOS caps a single reservation at 6 GB)
         if (num == 0x2C) { static _Atomic uint64_t hw; uint64_t end = off + size, old = atomic_load(&hw);
             while (end > old && !atomic_compare_exchange_weak(&hw, &old, end)) {}
@@ -500,6 +523,10 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
         case I_UserExcAddr: { static _Alignas(0x1000) uint8_t ctx[0x1000]; v = (uint64_t)ctx; break; }   // user exception context area: newer SDKs' SetDyingMessageRegion writes to +0x1c0 (0 would write through a null pointer)
         default: v = 0; break;
         }
+        if (g_flag.svc && (id == I_AliasAddr || id == I_AliasSize || id == I_HeapAddr || id == I_HeapSize ||
+                           id == I_AslrAddr || id == I_AslrSize || id == I_StackAddr || id == I_StackSize ||
+                           id == I_TotalMem || id == I_SysResTotal))
+            LOG("[mem] GetInfo id=%#llx -> %#llx", (unsigned long long)id, (unsigned long long)v);
         regs[0] = 0; regs[1] = v; return 0;
     }
     default:
