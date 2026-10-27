@@ -55,12 +55,13 @@ def test_unified_settings_and_explicit_conflict_actions_are_present():
     assert "dm_save_folder_sync_clear" in LAUNCHER
     assert "Unlink selected folder" in LAUNCHER
     assert 'Unlink Save Folder?' in LAUNCHER
-    assert "Sync Now" not in LAUNCHER
+    assert 'Button("Sync Now")' not in LAUNCHER
+    assert 'dm_save_folder_sync_now(model.sync)' not in LAUNCHER
     assert "Save Format:" not in LAUNCHER
     assert "Use Folder Saves" in LAUNCHER
     assert "Use Device Saves" in LAUNCHER
     assert "Preserve Both" in LAUNCHER
-    assert 'ForEach(m.settings)' in LAUNCHER
+    assert 'ForEach(m.settings.filter { $0.sectionTitle == section })' in LAUNCHER
     assert 'if let saveSync' in LAUNCHER
     assert 'DmSettingsViewController' not in LAUNCHER
 
@@ -141,17 +142,22 @@ def test_sync_status_reports_in_progress_last_success_and_operation():
     assert 'UIApplication.didBecomeActiveNotification' in LAUNCHER
     assert 'if pendingResume { return .syncing }' in LAUNCHER
     assert 'status.hasPrefix("Save files imported successfully")' in LAUNCHER
-    assert 'dm_save_folder_sync_now' not in LAUNCHER
+    assert 'Button("Sync Now")' not in LAUNCHER
 
 
 def test_save_sync_details_use_selected_folder_and_title_id_paths_with_copy_actions():
-    assert 'url.resourceValues(forKeys: [.volumeNameKey])' in LAUNCHER
-    assert 'getResourceValue(&volumeObject, forKey: .volumeURLKey)' in LAUNCHER
-    assert 'folder.appendingPathComponent(titleID, isDirectory: true)' in LAUNCHER
-    assert 'UIPasteboard.general.string = path' in LAUNCHER
-    assert 'Provider-relative location from iOS Files' in LAUNCHER
-    assert 'Location shown as exposed by iOS Files' in LAUNCHER
-    assert 'Text(path)' in LAUNCHER
+    assert '"/var/mobile/Library/Mobile Documents/com~apple~CloudDocs"' in LAUNCHER
+    assert '"/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs"' in LAUNCHER
+    assert '"iCloud Drive/"' in LAUNCHER
+    assert 'SaveSyncDisplayPath(prefix: prefix, selectedFolder: folder.lastPathComponent, titleID: titleID)' in LAUNCHER
+    assert 'Text("Save Folder")' in LAUNCHER
+    assert 'pathRow(title: "Linked folder"' not in LAUNCHER
+    assert 'pathRow(title: "Save destination"' not in LAUNCHER
+    assert 'Location shown as exposed by iOS Files' not in LAUNCHER
+    assert 'path.styledText' in LAUNCHER
+    assert 'Text(selectedFolder).bold().italic()' in LAUNCHER
+    assert 'Text(titleID).bold().italic()' in LAUNCHER
+    assert 'UIPasteboard.general.string = path.display' in LAUNCHER
     assert '.fixedSize(horizontal: false, vertical: true)' in LAUNCHER
 
 
