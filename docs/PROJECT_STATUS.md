@@ -21,6 +21,7 @@
 ## Mario + Rabbids Kingdom Battle - Windows Metal build (packaged)
 
 - Branch: `game/mario-rabbids-kingdom-battle`, based on integration `1c592426bf22fb8caeff32076ec25ed1afdde27f`.
+- Build/workflow commit: `73541146`. Push is pending GitHub authentication: no HTTPS credential is configured, and SSH host-key verification for github.com fails. Do not bypass host-key verification; push this branch after trusted GitHub access is restored.
 - Windows results validate: 16,797 unique MSL sources, 24,117 unique library keys, 16,797 successful libraries/receipts, exact iOS 18 flags, matching source/reflection hashes, one Metal Developer Tools 6.2 compiler identity, zero failures.
 - All 24,117 libraries and reflection metadata were imported into a separate Windows-only build directory. The Tahoe fallback outputs remain untouched. c1/cb safety tables were generated from existing MSL/reflection metadata; no Tahoe Metal shader compilation ran.
 - Xcode 26.6 Release compiled 180 files. The package used the base game, v1.9.0 update, four DLCs, extracted JPG icon, Eden-compatible Save Folder Sync, and the empty documented PSO prewarm manifest.
