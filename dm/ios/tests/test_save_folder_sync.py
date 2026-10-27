@@ -62,7 +62,8 @@ class SaveFolderSyncContractTests(unittest.TestCase):
         assert "Use Folder Saves" in LAUNCHER
         assert "Use Device Saves" in LAUNCHER
         assert "Preserve Both" in LAUNCHER
-        assert 'ForEach(m.settings)' in LAUNCHER
+        assert 'ForEach(m.settings.filter { $0.sectionTitle == section })' in LAUNCHER
+        assert 'Reset to tested defaults' in LAUNCHER
         assert 'if let saveSync' in LAUNCHER
         assert 'DmSettingsViewController' not in LAUNCHER
 
