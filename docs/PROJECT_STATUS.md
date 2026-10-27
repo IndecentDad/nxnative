@@ -32,4 +32,4 @@
 
 - 19/19 existing Save Sync contract/filesystem tests passed (filesystem tests run via a temporary stdlib compatibility harness because pytest is absent). Relevant stdlib unittest source/profile/translator suite: 47 passed, 4 expected skips; one pytest-only module is not discoverable by unittest. Both official top-level IPA workflows compiled successfully.
 - Preserve validated extraction, shader and Xcode caches for reuse. Removed superseded Echoes IPA and stale Echo build logs after replacement validation; originals, NSP/XCI inputs, keys, saves and Celeste runtime files remain intact.
-- Install/test both IPAs on devices, verify Save Folder Sync using a Files provider and conflict cases, then consider upstreaming general Save Sync and translator fixes. Push `integration` only under the verified IndecentDad account; record any authentication blocker here.
+- Next: device-test the validated IPAs, verify Save Folder Sync with a Files provider and conflict cases, then consider upstreaming general Save Sync and translator fixes. Push the Rabbids branch after trusted IndecentDad access is restored; do not merge it into `main` or `integration` before validation.
