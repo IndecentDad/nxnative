@@ -9,6 +9,8 @@
 # Usage: love_shaders.py <ExeFS main (NSO)> <RomFS> <out folder> [gl_capture.tsv]
 import hashlib, re, struct, sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'dm/tools'))
+import romfs as rfs   # the RomFS as a folder or as one RomFS image (nx_extract --romfs-image), read alike
 
 
 def nso_image(path):
@@ -105,13 +107,13 @@ def generate(main, romfs, out, table=None, log=print):
     if table and Path(table).exists():
         want = {l.strip() for l in Path(table).read_text(encoding='utf-8').splitlines() if l.strip() and not l.startswith('#')}
     # the desktop GL core profile love-nx runs on: GLSL 3 (#version 330 core), not ES. Gamma correction: what the table's default shaders show, else the game's conf.lua (t.gammacorrect)
-    conf = Path(romfs) / 'conf.lua'
+    conf = rfs.Path(romfs) / 'conf.lua'
     gc = bool(conf.exists() and re.search(r'\bgammacorrect\s*=\s*true', conf.read_text(encoding='utf-8', errors='replace')))
     if want:
         for g in (False, True):
             if all(f'{key(s)}.{e}' in want for e, s in love.defaults('glsl3', False, g)): gc = g
     cands = [(ext, s, 'LÖVE default') for ext, s in love.defaults('glsl3', False, gc)]
-    for fs in sorted((Path(romfs) / 'resources/shaders').glob('*.fs')):
+    for fs in sorted((rfs.Path(romfs) / 'resources/shaders').glob('*.fs')):
         code = fs.read_bytes().decode('utf-8', 'surrogateescape')   # bytes as they are: LÖVE hands the file's CRLF line ends to GL, and read_text would turn them into LF
         v, p = love.to_glsl(False, code, True, gc)
         if v: cands.append(('vert', v, fs.name))

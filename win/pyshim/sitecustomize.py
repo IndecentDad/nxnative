@@ -9,7 +9,8 @@
 # It also makes ctypes.CDLL(None) (macOS's "the process itself", used to look up clonefile) return an empty library instead of raising, so the
 # modules that probe for APFS clones import and fall back to plain copies.
 import os, sys
-if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
+# On Linux the driver sets NXW_LINUX: the same mappings hold there (no xcrun, no Xcode, a Mach-O translator apphost), with the Metal tools run under Wine (toolchain.cmd)
+if (os.name == 'nt' or os.environ.get('NXW_LINUX')) and not os.environ.get('NXW_SHIM_OFF'):
     import ctypes, shutil, subprocess
     from pathlib import Path
     _WIN = Path(__file__).resolve().parent.parent
@@ -85,7 +86,7 @@ if os.name == 'nt' and not os.environ.get('NXW_SHIM_OFF'):
         if key not in _XC: _XC[key] = t.metal_tool(sdk, tool)
         exe = _XC[key]
         if not exe: return None
-        return [str(exe)] + (x.metal_args(sdk, rest[3:]) if tool == 'metal' else rest[3:])
+        return t.cmd(exe) + (x.metal_args(sdk, rest[3:]) if tool == 'metal' else rest[3:])
 
     def _map(args):
         if isinstance(args, (str, bytes)) or not args: return args

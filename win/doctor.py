@@ -17,7 +17,8 @@ def checks():
     out = []
     def add(name, ok, detail, how='', required=True): out.append({'name': name, 'ok': bool(ok), 'detail': detail, 'how': how, 'required': required})
 
-    add('Windows', os.name == 'nt', sys.platform, 'this port is for Windows 10/11 x64')
+    if tc.WINDOWS: add('Windows', True, sys.platform)
+    else: add('Linux with Wine (runs the Windows Metal compiler)', tc.wine(), tc.wine() or 'wine not found', 'install wine (apt install wine64), or set "wine" in win/toolchain.json')
     add('Python 3.10+', sys.version_info >= (3, 10), sys.version.split()[0], 'https://www.python.org/downloads/')
     for m, pip in (('lz4.block', 'lz4'), ('capstone', 'capstone'), ('fontTools', 'fonttools'), ('PIL', 'pillow')):
         try: importlib.import_module(m); ok = True
@@ -44,8 +45,8 @@ def checks():
 
     for sdkname in ('iphoneos', 'macosx'):
         m = tc.metal_tool(sdkname, 'metal'); ml = tc.metal_tool(sdkname, 'metallib')
-        rc, txt = run([m, '--version']) if m else (1, '')
-        add(f'Metal compiler ({sdkname})', m and ml, (txt.splitlines() or [str(m or 'not found')])[0],
+        rc, txt = run(tc.cmd(m) + ['--version']) if m else (1, '')   # through Wine off Windows
+        add(f'Metal compiler ({sdkname})', m and ml and rc == 0, (txt.splitlines() or [str(m or 'not found')])[0],
             'Metal Developer Tools for Windows: developer.apple.com/download/all/?q=metal%20developer%20tools%20for%20windows (Apple ID), or set "metal_tools"')
 
     for tool, how, req in (('spirv-cross', 'Vulkan SDK for Windows (vulkan.lunarg.com) or github.com/KhronosGroup/SPIRV-Cross releases; or set "spirv_cross_dir"', True),

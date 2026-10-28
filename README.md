@@ -5,6 +5,7 @@ Build **nxnative** IPAs on a **Windows 10/11 PC, with no Mac**. Use your own leg
 This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnative). nxnative is not an emulator: the game's own arm64 code runs directly on the Apple chip, and the Switch graphics are rebuilt on Metal. Upstream builds IPAs only on a Mac with Xcode. This fork adds a Windows build path in [`win/`](win/) and changes as little of upstream as it can. Nothing from any game is in this repository, and the project has no ties to Nintendo, Apple or any game publisher.
 
 > Panduan langkah demi langkah dalam Bahasa Indonesia: [win/TUTORIAL.md](win/TUTORIAL.md).
+> On Linux the same build runs with native tools and Apple's Metal compiler under Wine: [win/LINUX.md](win/LINUX.md).
 > Upstream's own README (games gallery, Mac packing, playing) is kept as [README.nxnative.md](README.nxnative.md).
 
 <p align="center">
@@ -27,6 +28,7 @@ This repository is a fork of [seedds/nxnative](https://github.com/seedds/nxnativ
 - [The launcher on the device](#the-launcher-on-the-device)
 - [How the Windows build works](#how-the-windows-build-works)
 - [Which games build on Windows](#which-games-build-on-windows)
+- [Building on Linux](#building-on-linux)
 - [Troubleshooting](#troubleshooting)
 - [Differences from upstream](#differences-from-upstream)
 - [Repository layout](#repository-layout)
@@ -334,16 +336,16 @@ The settings screen before the game starts follows upstream's single-screen Swif
 
 | Setting | What it does |
 |---|---|
-| **Frame rate** | 30 or 60 fps, in games whose profile can change it (60 fps patches: Tears of the Kingdom, Breath of the Wild, Octopath Traveler 0 1.0.5, …). Always listed; greyed out where the game sets its own rate. |
-| **Render scale** | 50–100 % of the game's 3D render size, in games whose rewriter has a dynamic-resolution hook (Tears of the Kingdom, Breath of the Wild). Always listed; greyed out elsewhere. To lower the GPU load in any game, pick *Handheld* (most games render at 720p instead of 1080p), with *Upscaling: MetalFX* to sharpen the result. |
+| **Frame rate** | 30 or 60 fps, in games whose profile can change it (60 fps patches: Tears of the Kingdom, Breath of the Wild, Octopath Traveler 0 1.0.5, …). |
+| **Render scale** | 50–100 % of the game's 3D render size, in games whose rewriter has a dynamic-resolution hook (Tears of the Kingdom, Breath of the Wild). To lower the GPU load in any game, pick *Handheld* (most games render at 720p instead of 1080p), with *Upscaling: MetalFX* to sharpen the result. |
 | **Console mode** | *Docked* (the profile's default; touch games such as Balatro default to *Handheld*, because their touches reach the game only in handheld mode). |
 | **Upscaling** | *Standard* or *MetalFX*: Apple's spatial upscaler for the presented picture, in every game. Uses more GPU time and can increase heat. |
-| **Game language** | The Switch system language, among the languages the game's control data declares. Always listed; greyed out when the game declares one language (Balatro chooses its language in its own menu). |
+| **Game language** | The Switch system language, among the languages the game's control data declares (Balatro chooses its language in its own menu). |
 | **Frame-rate counter** | on-screen FPS |
 | **Touch feedback**, **Game rumble**, **Rumble strength** | haptics (*Controls*) |
 | **Frame buffering**, **Metal 4 pipelines**, **Pipeline prebuild**, **Encode thread**, **Hold frames when late**, **Performance HUD** | NVN games' pacing and pipeline options (*Performance*), as upstream documents them |
 
-An `env.txt` in the app's Documents folder (Files app) still overrides any setting, as upstream documents.
+The list itself is upstream's ([`dm/games/settings.tsv`](dm/games/settings.tsv)), so a setting appears only in the games it applies to. An `env.txt` in the app's Documents folder (Files app) still overrides any setting, as upstream documents.
 
 ## How the Windows build works
 
@@ -382,6 +384,10 @@ Upstream lists about 65 playable games in its [games table](dm/games/README.md#g
 - **Games without an upstream profile** (Megabyte Punch) get a provisional profile guessed from a survey. The IPA is a best effort and may not boot until the game is brought up ([docs/agents](docs/agents/README.md)).
 - **Use the tested version.** Another version builds with its own shaders, but the fixes made for the tested build (60 fps patches and others) do not apply, and the build says so.
 
+## Building on Linux
+
+The same driver, `win/build_ipa_windows.py`, also runs on Linux. There it calls native LLVM (clang and ld64.lld, 20 or later), the .NET 10 SDK, spirv-cross and zstd, and starts Apple's `metal.exe` and `metallib.exe` through Wine ([`win/toolchain.py`](win/toolchain.py) `cmd()`). It was tested on Pop!_OS (Ubuntu 24.04 base) with Wine 9.0, LLVM 23.1.4 and .NET SDK 10.0.403, building Pokémon Legends: Arceus 1.0.2 from a provisional profile, which played in game on an iPhone 16. [win/LINUX.md](win/LINUX.md) has the setup, the shader chain lock on Linux, building, installing from Linux, and the Linux problems the port handles.
+
 ## Troubleshooting
 
 | Message or symptom | What to do |
@@ -397,9 +403,8 @@ Upstream lists about 65 playable games in its [games table](dm/games/README.md#g
 
 ## Differences from upstream
 
-- **Windows build path** in [`win/`](win/), and the window `Build-IPA-GUI.bat`.
+- **Windows build path** in [`win/`](win/), and the window `Build-IPA-GUI.bat`. The same path runs on Linux ([win/LINUX.md](win/LINUX.md)).
 - **Default bundle ID `org.nxnativewindows.<title ID>`** in every build path, so these apps install beside upstream-built ones.
-- **Launcher settings for every game**: Frame rate (with *Game default*), Render scale (greyed out where it does nothing), Console mode (docked by default, handheld for touch games) and Game language are always listed ([`dm/games/settings.tsv`](dm/games/settings.tsv)).
 - **Derived profiles** get a RomFS marker that their version has (Balatro v0 lacks 1.1.3's marker file).
 - **`pack_ipa.py --exec`** sets the executable's mode when packing on Windows.
 - **`.gitattributes`** keeps every file byte-identical to upstream on Windows, and the shim writes every pipeline text file with LF line ends, as on a Mac. With CRLF, the host refused the shader libraries' stamp.
@@ -423,6 +428,7 @@ Upstream lists about 65 playable games in its [games table](dm/games/README.md#g
 | `win/doctor.py`, `win/compile_check.py` | toolchain check; compile every app source without game files |
 | `win/tests/test_win.py` | unit tests of the Windows parts |
 | `win/TUTORIAL.md` | the step-by-step guide in Indonesian |
+| `win/LINUX.md` | building on Linux, step by step |
 | `win/README.md` | technical notes on the port |
 | everything else | upstream nxnative ([README.nxnative.md](README.nxnative.md), [docs/development.md](docs/development.md)) |
 
@@ -430,7 +436,7 @@ Local files git ignores: `win/toolchain.json`, `win/gui_settings.json`, `win/sdk
 
 ## Updating from upstream
 
-Last synced with [seedds/nxnative](https://github.com/seedds/nxnative) on 2026-10-26 (46 upstream commits: MetalFX upscaling and the single-screen launcher, offline pipeline archives, the prepare step, hybrid pipelines, Pokémon Shield and Brilliant Diamond, Echoes of Wisdom 1.1.0, thermal frame-rate caps, and more). The offline pipeline archive (`DM_PSO_GPUS`, default for games whose profile sets `pso_mtl4`) builds on Windows too: Metal Developer Tools for Windows ship `metal-tt`.
+Last synced with [seedds/nxnative](https://github.com/seedds/nxnative) on 2026-10-27 (135 upstream commits: Kirby and the Forgotten Land's profile, the RomFS image extraction, the region check, the newer launcher contract, and more). The sync before it, on 2026-10-26 (46 upstream commits), brought MetalFX upscaling and the single-screen launcher, offline pipeline archives, the prepare step, hybrid pipelines, Pokémon Shield and Brilliant Diamond, Echoes of Wisdom 1.1.0 and thermal frame-rate caps. The offline pipeline archive (`DM_PSO_GPUS`, default for games whose profile sets `pso_mtl4`) builds on Windows too: Metal Developer Tools for Windows ship `metal-tt`.
 
 ```
 git remote add upstream https://github.com/seedds/nxnative.git
@@ -440,13 +446,14 @@ python win\tests\test_win.py
 python win\compile_check.py
 ```
 
-`win/build_app.py` checks `dm/host/Makefile`'s source rules and stops with a clear message when upstream changes them.
+`win/build_app.py` checks `dm/host/Makefile`'s source rules and stops with a clear message when upstream changes them. The functions the driver wraps can also change their arguments upstream; after a merge, check them against `scripts/build_ipa_from_nsp.py` before the first build. When a merge brings a new translator build, keep upstream's DLL lines in `dm/gfx/tools/dmsh_chain.lock` and this port's spirv-cross and Metal lines, then run `dmsh_chain.py --header`.
 
 ## Credits and license
 
 - **[seedds/nxnative](https://github.com/seedds/nxnative)** and everything it builds on: [d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile), Ryujinx, Atmosphère, yuzu, LibHac, SPIRV-Cross, glslang, deko3d and the libraries in `dm/third_party` (see [README.nxnative.md](README.nxnative.md#acknowledgements)).
 - **Apple's** Metal Developer Tools for Windows and iPhoneOS SDK are downloaded by each user under Apple's terms and are not part of this repository.
-- **[LLVM](https://llvm.org/)** (clang, ld64.lld) builds the app on Windows.
+- **[LLVM](https://llvm.org/)** (clang, ld64.lld) builds the app on Windows and Linux, and **[Wine](https://www.winehq.org/)** runs Apple's Metal compiler on Linux.
+- Linux support by [amansingh909](https://github.com/amansingh909).
 
 MIT License, as upstream ([LICENSE](LICENSE)).
 

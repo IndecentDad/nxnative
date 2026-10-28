@@ -3,6 +3,7 @@
 #   Metal compiler      Apple's "Metal Developer Tools for Windows" (metal.exe / metallib.exe, separate ios and macos toolchains)
 #   C / ObjC / asm      LLVM for Windows (clang.exe + ld64.lld.exe), targeting arm64-apple-ios with an iPhoneOS SDK taken from Xcode.xip (win/sdk/extract_xip.py)
 #   shader translator   the committed .NET DLLs in dm/gfx/tools/dmsh_xlate_bin, run with `dotnet dmsh_xlate.dll` (the Mach-O apphost next to them cannot run here)
+# On Linux the same toolchain runs with native builds of LLVM, .NET, spirv-cross and zstd; only the Metal Developer Tools for Windows stay Windows programs, run under Wine (cmd()).
 # Paths come from environment variables first, then win/toolchain.json (see win/toolchain.example.json), then well-known install locations.
 import glob, json, os, plistlib, shutil, sys
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 WIN = Path(__file__).resolve().parent
 REPO = WIN.parent
 CONFIG = WIN / 'toolchain.json'
+WINDOWS = os.name == 'nt'
+EXE = '.exe' if WINDOWS else ''   # the file name suffix of the native tools (clang, ld64.lld, spirv-cross, ...)
 
 # Deployment targets: the iOS one matches dm/ios/project.yml (Metal 4 needs iOS 26); shaders keep ios_metal.py's -mios-version-min=18.0
 IOS_DEPLOYMENT = '26.0'
@@ -27,6 +30,22 @@ def setting(key, default=None):
     v = os.environ.get('NXW_' + key.upper())
     if v: return v
     return _cfg().get(key, default)
+
+
+if not WINDOWS:
+    os.environ.setdefault('WINEDEBUG', '-all')   # Wine's own fixme / err lines would fill the shader build's logs
+    if setting('wineprefix'): os.environ.setdefault('WINEPREFIX', os.path.expanduser(setting('wineprefix')))   # a prefix of its own keeps the Metal compiler's module cache apart
+
+
+def wine():
+    """The wine command that runs the Windows Metal tools off Windows: NXW_WINE / "wine" in win/toolchain.json, else wine on PATH"""
+    return setting('wine') or shutil.which('wine')
+
+
+def cmd(tool):
+    """The argv prefix that runs a tool: a Windows program (.exe) goes through Wine off Windows, as ['wine', tool]; anything else runs as it is"""
+    if not WINDOWS and Path(tool).suffix.lower() == '.exe': return [wine() or 'wine', str(tool)]
+    return [str(tool)]
 
 
 def _first(paths):
@@ -67,7 +86,7 @@ def llvm_bin():
 
 def llvm_tool(name):
     b = llvm_bin()
-    if b and (b / f'{name}.exe').exists(): return b / f'{name}.exe'
+    if b and (b / f'{name}{EXE}').exists(): return b / f'{name}{EXE}'
     w = shutil.which(name)
     return Path(w) if w else None
 
@@ -96,7 +115,7 @@ def sdk_settings(sdk):
 
 
 def dotnet():
-    w = shutil.which('dotnet')
+    w = shutil.which('dotnet') or (None if WINDOWS else _first([Path.home() / '.dotnet/dotnet']))   # dotnet-install.sh puts it in ~/.dotnet, which upstream's TOOL_PATHS also searches
     return Path(w) if w else None
 
 
@@ -105,10 +124,10 @@ def xlate_dll():
 
 
 def tool_on_path(name):
-    """A Windows build of a cross-platform tool (spirv-cross, glslangValidator, zstd): win/toolchain.json may name its folder"""
+    """A native build of a cross-platform tool (spirv-cross, glslangValidator, zstd): win/toolchain.json may name its folder"""
     d = setting(name.replace('-', '_') + '_dir')
     if d:
-        p = Path(d) / f'{name}.exe'
+        p = Path(d) / f'{name}{EXE}'
         if p.exists(): return p
     w = shutil.which(name)
     return Path(w) if w else None
@@ -117,10 +136,13 @@ def tool_on_path(name):
 def letter_font():
     """The letters of the button-icon font (make_ext_font.py; upstream: macOS's Arial Rounded Bold): LETTER_FONT, toolchain.json letter_font, else Windows' Arial Rounded MT Bold or Arial Bold"""
     fonts = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
-    return _first([os.environ.get('LETTER_FONT'), setting('letter_font'), fonts / 'ARLRDBD.TTF', fonts / 'arialbd.ttf', fonts / 'arial.ttf'])
+    linux = ['/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf']   # Liberation Sans has Arial's metrics
+    return _first([os.environ.get('LETTER_FONT'), setting('letter_font'), fonts / 'ARLRDBD.TTF', fonts / 'arialbd.ttf', fonts / 'arial.ttf'] + ([] if WINDOWS else linux))
 
 
 def std_font():
-    """The shared-font stand-in (standard.ttf). Upstream copies macOS's Arial Unicode; on Windows: STD_FONT, toolchain.json std_font, else a broad-coverage Windows font"""
+    """The shared-font stand-in (standard.ttf). Upstream copies macOS's Arial Unicode; on Windows: STD_FONT, toolchain.json std_font, else a broad-coverage Windows font
+    (on Linux DejaVu Sans, a TTF with broad coverage but no CJK: set STD_FONT for a game whose text needs it)"""
     windir = os.environ.get('WINDIR', r'C:\Windows')
-    return _first([os.environ.get('STD_FONT'), setting('std_font'), os.path.join(windir, 'Fonts', 'ARIALUNI.TTF'), os.path.join(windir, 'Fonts', 'arial.ttf')])
+    linux = ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf']
+    return _first([os.environ.get('STD_FONT'), setting('std_font'), os.path.join(windir, 'Fonts', 'ARIALUNI.TTF'), os.path.join(windir, 'Fonts', 'arial.ttf')] + ([] if WINDOWS else linux))
