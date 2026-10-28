@@ -64,10 +64,10 @@ def sources(roots):
                     for nm in sorted(a.files):
                         if not nm.endswith('.shad'): continue
                         st = 'vert' if nm.endswith('_vp.shad') else 'frag' if nm.endswith('_fp.shad') else None
-                        yield text_of(a.read(nm)), st, f'/{os.path.relpath(p, r)}:{nm}'
+                        yield text_of(a.read(nm)), st, f'/{os.path.relpath(p, r).replace(os.sep, "/")}:{nm}'
                 elif fn.endswith(('.vert', '.frag')):
                     with open(p, 'rb') as f: source = text_of(f.read())
-                    yield source, fn.rsplit('.', 1)[1], '/' + os.path.relpath(p, r)
+                    yield source, fn.rsplit('.', 1)[1], '/' + os.path.relpath(p, r).replace(os.sep, '/')
 
 # NVIDIA's GLSL compiler accepts more than the GLSL ES 3.20 specification, and glslang does not; these fix-ups run on the preprocessed text (glslang -E, so macros are expanded):
 #   · the GLSL ES 1.0 texture functions (89 of Digimon's fragment shaders call textureCube; with -V glslang reads textureCube as Vulkan's texture type, so a macro cannot rename it);
