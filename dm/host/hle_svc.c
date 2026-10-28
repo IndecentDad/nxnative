@@ -87,7 +87,8 @@ enum { I_CoreMask=0, I_PriorityMask=1, I_AliasAddr=2, I_AliasSize=3, I_HeapAddr=
        I_AslrAddr=12, I_AslrSize=13, I_StackAddr=14, I_StackSize=15, I_SysResTotal=16, I_SysResUsed=17,
        I_ProgramId=18, I_InitProcIdRange=19, I_UserExcAddr=20, I_TotalNonSys=21, I_UsedNonSys=22, I_IsApplication=23, I_FreeThreadCount=24 };
 
-static void rabbids_region_ok(const uint64_t *r) {
+static void rabbids_region_ok(uint64_t *r, int param) {
+    (void)param;
     if (!g_flag.svc) return;
     uint64_t node = r[29] >= 0x28 ? *(const uint64_t *)(uintptr_t)(r[29] - 0x28) : 0;
     uint64_t addr = node ? *(const uint64_t *)(uintptr_t)(node + 0x20) : 0;
@@ -95,7 +96,8 @@ static void rabbids_region_ok(const uint64_t *r) {
     LOG("[mem] AllocateAddressRegion req=%#llx result=0 addr=%#llx size=%#llx",
         (unsigned long long)r[21], (unsigned long long)addr, (unsigned long long)size);
 }
-static void rabbids_region_fail(const uint64_t *r) {
+static void rabbids_region_fail(uint64_t *r, int param) {
+    (void)param;
     if (!g_flag.svc) return;
     uint32_t raw = (uint32_t)r[0];
     uint32_t result = raw == 2 ? 0x1803 : 0x1003;  // VammManager::AllocateAddressRegion's exact mapping

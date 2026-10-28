@@ -2,25 +2,22 @@
 
 ## Active work
 
-- Temporary branch: `game/mario-rabbids-kingdom-battle`. The working branch has reconciled latest upstream `201dfd1280684e9d3ceac8b644236fdac11b6cc2`; `main` and `integration` remain unchanged.
-- Upstream now carries the complete Kingdom Battle profile and fixes: Snowdrop 2 GiB / 512 MiB / 512 MiB pools, 32,768-page large-pool bound, SDK 4.4.0 64 MiB node area and 32 MiB large-region alignment, plus 11,625 shader stages including nested SDF records.
-- The old equal 1 GiB diagnostic patch is superseded. Upstream reports Mac gameplay through early World 1-1; iOS remains unvalidated.
-- Eden-compatible Save Folder Sync was restored onto the upstream launcher, retaining folder selection, automatic save/foreground sync, status/details, conflict resolution and no Sync Now button or legacy iCloud path.
-- The Windows Metal worker and exchange utility remain on this branch. Existing 16,797-source/24,117-key Windows outputs and previous IPAs are preserved as historical fallbacks; they are from the previous chain and are not yet verified reusable for the new 11,625-stage chain.
+- Branch: `game/mario-rabbids-kingdom-battle`; fresh build based on `695c1f8129edd6246bafb5c8bbfdf640fd4e1346`. `main` and `integration` were not changed.
+- Kingdom Battle uses the upstream Snowdrop 2 GiB / 512 MiB / 512 MiB allocator layout, SDK address-region fixes, and 11,625 registered shader stages.
+- Eden-compatible automatic Save Folder Sync and its current conflict/status UI remain in the branch; no Sync Now control or legacy iCloud path.
 
-## Validation and build constraints
+## Clean Intel Tahoe build
 
-- Passed: 15 upstream patch-table tests; 12 Save Sync contract checks; full iOS Swift launcher type-check against the installed SDK. The translator launcher is a universal x86_64/arm64 Mach-O.
-- The existing Windows IPA remains at `/volume1/Media/Roms/iOS/Mario Rabbids - Kingdom Battle/MarioRabbidsKingdomBattle-v1.9.589692-Windows-Metal-6.2-unsigned.ipa` (SHA-256 `e6a466b5a02df9faa047c05774b29fe0c87da0f86313107d66e6f24965c8c87e`). It predates upstream's new shader inventory and compiler chain; it is not a build of this update.
-- A fresh upstream build is blocked on toolchain fingerprints: upstream requires Python 3.12+ and Metal `32023.921`; Tahoe currently has Python 3.9.6 and Metal `32023.883`. The preserved Windows receipts are Metal `32023.850` with the prior no-`-O1` flags. Do not reuse those or enable `--allow-other-metal` without an explicit compatibility decision.
-- NSP extraction and four DLC extractions remain in the existing game workspace. No new shader split, Metal compile, Xcode build or IPA packaging was run because the pinned compiler/source toolchain does not match.
-
-## Other validated builds
-
-- Echoes of Wisdom 1.1.0: unsigned IPA `/volume1/Media/Roms/iOS/Echoes of Wisdom/Build v1.1.0/Echoes-of-Wisdom-v1.1.0.ipa`; 9,858 shaders, 14,159 metallibs; device gameplay and Save Sync provider behavior remain untested.
-- Celeste 1.4.1.1: unsigned IPA `/volume1/Media/Roms/iOS/Celeste/Build integration-2694c28/Celeste-1.4.1.1-integration-2694c28.ipa`; 26 shaders, 38 metallibs; not device-tested.
+- Built from original base, v1.9.0 update, all four DLC NSPs, and the JPG icon in a fresh isolated workspace. No prior game outputs were reused.
+- Tahoe: Intel x86_64, macOS Tahoe 26.7.1, Xcode 26.6 (17F113), iOS SDK 26.5, .NET 10.0.402, Python 3.13.18.
+- Source-built translator is framework-dependent portable IL and reports source SHA `c31111ab3918d09b`. Managed assembly fingerprints are in `dm/gfx/tools/dmsh_chain.lock`.
+- Upstream Metal pin remains 32023.921. This build used actual Metal 32023.883 only through official `--allow-other-metal`; both actual and pinned identities are recorded in the build log. Chain/header: `09b94713e34b`.
+- Fresh compile produced all 11,625 iOS shader stages (0 cache hits); the packaged bundle contains 14,143 metallib files including generated variants. Executable rewrites and Xcode Release succeeded.
+- IPA: `/Volumes/Media/Roms/iOS/Mario Rabbids - Kingdom Battle/MarioRabbidsKingdomBattle-v1.9.589692-Clean-Intel-Xcode26.6-unsigned.ipa` (5,095,625,689 bytes).
+- SHA-256: `b860b76bf1819f1961697c481cda44d4942b3b70e336758013c9d2bb80c178cd`; sidecar is next to the IPA. ZIP CRC check passed. App bundle contains merged `romfs.img`, four `aoc/*.img` DLC images, and the fresh `b-09b94713e34b` shader set. No code-signature directory or provisioning profile is present; package is unsigned.
+- Complete logs, tool/build outputs, and fresh shader inventory are retained under `/Users/kylepyne/nxnative-games/Mario Rabbids - Kingdom Battle/Clean-Tahoe-Xcode26.6-695c1f8/`.
 
 ## Next
 
-- Resolve the matching compiler/runtime requirement (Python 3.12+ and Metal 32023.921 on Tahoe, or a Windows compiler/configuration that matches the new upstream chain). Then run the source pipeline, compare source hashes before reusing any old libraries, compile missing/current outputs consistently, and build the unsigned IPA.
-- The previous Rabbids IPA has not been installed. After a matching build is produced, device-test startup and Save Folder Sync; compiler success alone is not runtime validation.
+- Install through PlumeImpactor and device-test startup/gameplay. Compilation and archive validity do not establish runtime compatibility.
+- Previous IPAs, original NSPs, saves, and prior crash logs were preserved.
