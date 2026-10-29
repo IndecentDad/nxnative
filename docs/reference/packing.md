@@ -55,6 +55,13 @@
 - **Fix:** `unzs` feeds the command the bytes it read (`input=`). No other tool hands an external command a path inside the image. Test: `test_romfs_read.py` `test_zstd_file_inside_an_image`.
 - **Found on:** [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md#shaders): every file of its RomFS is zstd-compressed, 13,744 left out in both versions; the first image-backed build after the folder extraction.
 
+### Windows scanners cannot open files inside a RomFS image
+
+- **Symptom:** shader split stops with `FileNotFoundError: [WinError 3]` for `RomFS.img\data000.cpk` on Windows.
+- **Cause:** `romfs._resolve` split absolute paths on `/`, while Windows normalizes them to backslashes, so virtual file paths fell through to the real filesystem. The bounded reader also used `os.pread`, unavailable on Windows, and opened its descriptor without binary mode.
+- **Fix:** normalize native path separators before resolving image entries. Open image descriptors in binary mode and, where `pread` is unavailable, seek and read through each view's own descriptor, retaining entry bounds. Synthetic Windows tests cover CPK discovery and entry scans, binary CRLF/Control-Z bytes, independent readers, ZIPs and bounded mappings. The folder path remains supported.
+- **Found on:** [Bayonetta 2](../../dm/games/01007960049A0000/README.md#files-and-shaders), reported in [NXNativeWindows issue #5](https://github.com/zenvyzenshiro/NXNativeWindows/issues/5). Reproduced with synthetic images; a full game build and device run remain unverified.
+
 ## Launcher metadata
 
 ### A Mac front end's default settings change Metal execution paths

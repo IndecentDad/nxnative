@@ -61,6 +61,51 @@ class ReadImage(unittest.TestCase):
         with romfs.open(self.virtual / 'data/game.zip', 'rb') as f, zipfile.ZipFile(f) as z:
             self.assertEqual(z.read('member'), b'archive member')
 
+    def test_binary_reads_and_independent_views(self):
+        data = b'first\r\n\x1a\x00last\r\n'
+        (self.src / 'data/binary').write_bytes(data)
+        romfs_image.pack(self.src, self.image)
+        for path in (self.virtual / 'data/binary', (self.virtual / 'data/binary').as_posix()):
+            with self.subTest(path=str(path)), romfs.open(path, 'rb', buffering=0) as a, romfs.open(path, 'rb', buffering=0) as b:
+                self.assertEqual(a.read(7), data[:7])
+                self.assertEqual(b.read(), data)
+                self.assertEqual(a.read(), data[7:])
+                a.seek(-2, 2); self.assertEqual(a.read(100), data[-2:])
+                self.assertEqual(a.read(), b'')
+
+    def test_cpk_jobs_and_entry_reads_inside_image(self):
+        import cpk
+        with patch.dict(os.environ, DM_GAME='01007960049A0000'):
+            import shader_split
+
+        def utf(row):
+            strings = bytearray(b'table\0')
+            def string(s):
+                offset = len(strings); strings.extend(s.encode() + b'\0'); return offset
+            columns, values = bytearray(), bytearray()
+            for name, value in row.items():
+                kind = 0xa if isinstance(value, str) else 6
+                columns.extend(struct.pack('>BI', 0x50 | kind, string(name)))
+                values.extend(struct.pack('>I' if kind == 0xa else '>Q', string(value) if kind == 0xa else value))
+            rows = 0x20 + len(columns); pool = rows + len(values)
+            return b'@UTF' + struct.pack('>IHHIIIHHI', pool + len(strings) - 8, 0, rows - 8, pool - 8,
+                                         pool + len(strings) - 8, 0, len(row), len(values), 1) + columns + values + strings
+
+        def block(magic, table): return magic + struct.pack('<IQ', 0, len(table)) + table
+
+        data = b'payload\r\n\x1a\x00end'
+        header = block(b'CPK ', utf({'TocOffset': 0x800, 'ContentOffset': 0x1000}))
+        toc = block(b'TOC ', utf({'DirName': '', 'FileName': 'shader.dat', 'FileOffset': 0x800,
+                                 'FileSize': len(data), 'ExtractSize': len(data)}))
+        (self.src / 'data000.cpk').write_bytes(header.ljust(0x800, b'\0') + toc.ljust(0x800, b'\0') + data)
+        romfs_image.pack(self.src, self.image)
+        for root in (self.src, self.virtual):
+            path = (root / 'data000.cpk').as_posix()
+            jobs, paths = shader_split.cpk_jobs([(path, 'data000.cpk')])
+            self.assertEqual(paths, {path}); self.assertEqual(len(jobs), 1)
+            self.assertEqual(cpk.read(path, jobs[0][2][0]), data)
+            self.assertEqual(shader_split.scan_file(jobs[0])[1], {})
+
     def test_build_scanners_discover_the_same_inputs_from_image_and_folder(self):
         import gl_shaders
         import vk_shaders
