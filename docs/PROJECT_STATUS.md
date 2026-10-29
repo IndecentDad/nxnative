@@ -1,25 +1,29 @@
 # NXNative Project Status
 
-## Shared integration baseline
+## Mario + Rabbids Kingdom Battle — COMPLETE
 
-- Source/build baseline: `2694c280d563ea573c705b939f54c1ccd34f9e95` (merge of `game/echoes-of-wisdom` into `integration`; parents `fe662e1` and `e358448`). Echo history includes portable translator fix `af582053` and successful Echo build record `e358448`. Fork `main` was not modified.
-- Echoes merge preserved existing integration Save Folder Sync and Intel support. Launcher keeps upstream grouped settings, reset-to-tested-defaults and navigation, with Save Sync entry, folder selection, status/details/conflict handling, manual **Sync Now**, and bridge initialization. Save paths are local `Documents/save` and `<Selected Folder>/<TitleID>/` directly.
-- Local functionality beyond the upstream mirror: Eden-compatible Save Folder Sync module/UI/bridge; Echoes 1.1.0 profile and validated shader data; portable AnyCPU translator build fix. These are candidates for upstream contribution where generally applicable. No game-specific runtime behavior was changed to add Save Sync. Upstream Intel launcher support from `1822616` remains; no launcher-only change was reintroduced by the Echo merge.
+- Successful clean Intel Tahoe IPA build used source commit `3be93c03c7ec19139d53712509e3d4035f66122c` on `game/mario-rabbids-kingdom-battle`. The checkout was clean after that source commit; its translator binaries and shader-chain changes are committed. Annotated validation tag: `rabbids-clean-intel-xcode26.6-2026-10-28`.
+- IPA: `/Volumes/Media/Roms/iOS/Mario Rabbids - Kingdom Battle/MarioRabbidsKingdomBattle-v1.9.589692-Clean-Intel-Xcode26.6-unsigned.ipa` (5,095,625,689 bytes).
+- SHA-256: `b860b76bf1819f1961697c481cda44d4942b3b70e336758013c9d2bb80c178cd`; checksum sidecar is beside the IPA. The archive CRC check and independent checksum verification passed.
+- Build source: original base game, v1.9.0 update, all four DLC NSPs, and JPG icon. The bundle contains merged `romfs.img`, four DLC images, and the fresh shader chain. No old generated game outputs were reused.
+- Toolchain: Intel x86_64 Tahoe 26.7.1; Xcode 26.6 / build 17F113; iOS SDK 26.5; .NET 10.0.402; Python 3.13.18. Source-built portable managed translator reports source SHA `c31111ab3918d09b`; chain/header is `09b94713e34b`.
+- `dmsh_chain.lock` retains upstream Metal 32023.921. The successful build used actual Metal 32023.883 only with official `--allow-other-metal`; both identities are in the retained build log. All 11,625 fresh iOS shader stages compiled with zero cache hits; 14,143 metallib files including variants are packaged. Xcode Release succeeded.
+- Archive inspection confirms an unsigned app without a provisioning profile. The app executable includes the Save Folder Sync section label; source has the status/conflict UI and no Sync Now control or legacy iCloud path. This is package/source inspection, not a sync runtime test.
+- Runtime/device tests passed: none recorded. Launch progression, first rendered frame, gameplay, DLC activation, PlumeImpactor installation, and automatic/conflict Save Folder Sync behavior remain untested.
+- Complete build logs, shader inventory, and generated build records remain under `/Users/kylepyne/nxnative-games/Mario Rabbids - Kingdom Battle/Clean-Tahoe-Xcode26.6-695c1f8/`. Original NSPs, saves, previous IPAs, and crash logs were preserved.
 
-## Intel translator reproducibility
+## Integration validation — candidate only
 
-- Publish managed IL for AnyCPU with no RID, `PublishReadyToRun=false`, and `UseAppHost=false`; Tahoe x86_64 cannot load an ARM64 ReadyToRun image. Keep the checked-in `dmsh_xlate` launcher universal (arm64 + x86_64).
-- Reproduce: `dotnet publish dm/gfx/tools/dmsh_xlate/dmsh_xlate.csproj -c Release -p:PublishReadyToRun=false -p:UseAppHost=false -o /tmp/nxnative-dmsh-xlate`, then `dotnet /tmp/nxnative-dmsh-xlate/dmsh_xlate.dll --source-sha`. Copy managed outputs only; verify launcher architecture, embedded source hash and translator DLL fingerprints against `dmsh_chain.lock` before builds.
-- Translator source fingerprint `e6b5163bbebc6b67`; chain `60ce84a81e3c`. Checked-in translator DLL hashes match the lock. Tahoe local SPIRV-Cross (`42ee93372e51d0ee`) and Metal (`32023.883`) differ from pinned versions; official `own_compilers.py` accepts those local compiler differences while keeping translator integrity checks strict. Do not update the lock/header to silence local compiler notices.
+- Isolated worktree/branch: `/Users/kylepyne/nxnative-integration-validation`, `integration-validation/rabbids-clean-build`. Base `integration` was `57e0837a7ac8efd09ac49692627c6fa7890b625a`; candidate merge checkpoint is `b4b69bb574360eed5926245d533b5cd8f8717b98`. The simulated merge had no conflicts. No changes were made to `integration` or `main`, and no regression tests were run on the candidate.
+- The Rabbids branch is 187 commits ahead of integration and changes 745 files (about 593k insertions / 2.9k deletions), including a broad upstream update through `201dfd1280684e9d3ceac8b644236fdac11b6cc2`. Do not fast-forward integration until the checklist below passes.
+- Direct profile changes for Celeste, Metroid Dread, and Echoes of Wisdom are documentation-only (2, 21, and 5 lines respectively); their game profile data is unchanged. Shared host, NVN/graphics, shader, extraction, and iOS launcher changes still require regression coverage for all three.
+- Save Folder Sync's Objective-C sync core is unchanged relative to integration. The candidate adds the SwiftUI status/conflict section and changes launcher/settings wiring. Test existing sync state migration, automatic sync, background/resume, conflicts, and resolution before promoting it.
+- Translator DLLs are portable managed IL and ran on Intel Tahoe, but not yet on Windows or Apple Silicon in this build. Keep the new translator fingerprints isolated until cross-host chain checks and representative shader outputs pass. Keep Metal 32023.921 as the shared pin; use `--allow-other-metal` only for explicitly validated alternate compiler builds.
 
-## Validated builds
+### Regression checklist before integration promotion
 
-- Echoes of Wisdom 1.1.0, update `v196608`, built from baseline above, bundle `org.nxnative.01008cf01baac000`, 9,858/9,858 shaders and 14,159 metallibs, Xcode Release unsigned, 135 source files compiled. IPA: `/volume1/Media/Roms/iOS/Echoes of Wisdom/Build v1.1.0/Echoes-of-Wisdom-v1.1.0.ipa`; 8,414,216,443 bytes; SHA-256 `4ea74679bc334abb869d8f70fef7ef2f33e50d919f8b45d77b9470bd238cf76b`.
-- Celeste update `v589824` (profile 1.4.1.1; app metadata 1.4.1), same baseline and translator, bundle `org.nxnative.01002b30028f6000`, 26/26 shaders and 38 metallibs, Xcode Release unsigned, 135 source files compiled. IPA: `/volume1/Media/Roms/iOS/Celeste/Build integration-2694c28/Celeste-1.4.1.1-integration-2694c28.ipa`; 924,915,261 bytes; SHA-256 `ff8500309f931f67974dc070ff93f0cd7b62d1db3689b4fc9203a1b33d1a344f`.
-- Both IPAs have intact ZIPs, expected bundle metadata, Save Sync resources/code, and no legacy iCloud messages or `env.txt`. Increased Memory Limit entitlement must be applied by signing/install tooling. Echoes rebuilt IPA and Celeste regression have not been device-tested; Save Folder Sync provider bookmark/sync behavior still needs device validation. Two Echoes shaders remain flagged not proven bounded.
-
-## Verification and next steps
-
-- 19/19 existing Save Sync contract/filesystem tests passed (filesystem tests run via a temporary stdlib compatibility harness because pytest is absent). Relevant stdlib unittest source/profile/translator suite: 47 passed, 4 expected skips; one pytest-only module is not discoverable by unittest. Both official top-level IPA workflows compiled successfully.
-- Preserve validated extraction, shader and Xcode caches for reuse. Removed superseded Echoes IPA and stale Echo build logs after replacement validation; originals, NSP/XCI inputs, keys, saves and Celeste runtime files remain intact.
-- Install/test both IPAs on devices, verify Save Folder Sync using a Files provider and conflict cases, then consider upstreaming general Save Sync and translator fixes. Push `integration` only under the verified IndecentDad account; record any authentication blocker here.
+- Run upstream Python, host, shader, iOS packaging, and profile checks on the validation branch; inspect any failures against the old integration baseline.
+- Build and smoke-test Celeste, Metroid Dread, and Echoes of Wisdom; check launch, rendering, audio, input, save loading, memory/address regions, and shader cache behavior.
+- Exercise Save Folder Sync migration, auto-sync, app suspend/resume, status reporting, conflict detection/resolution, and confirm no Sync Now or legacy iCloud path returns.
+- Verify translator `--source-sha` and chain checks on Intel macOS, Apple Silicon macOS, and Windows .NET; compile representative shaders on each supported host. Confirm default Metal pin validation and the explicit alternate-Metal override separately.
+- Re-run unsigned IPA structure/integrity checks and verify per-game content before any merge to integration.
