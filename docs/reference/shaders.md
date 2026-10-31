@@ -890,6 +890,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Found on:** [The Legend of Zelda: Breath of the Wild](../../dm/games/01007EF00011E000/README.md#found-on-this-game), during review of its offline archive path with synthetic libraries and pair lists; no new gameplay or iPhone run. The empty pair list on [ANIMAL WELL](../../dm/games/010020D01AD24000/README.md#found-on-this-game).
 - **Check:** `dm/tools/tests/test_pso_offline.py` changes vertex and fragment library bytes without changing entries or stamps, and exercises the all-constant plan, the header-only pair list and pairs all left out. `t_pso_bundle` rejects bare headers, truncated archives, malformed load commands and out-of-range universal slices, accepts real offline and serialized archives, and rejects zero-probe coverage.
 
+### Offline pipeline archive and profile depth disagree
+
+- Symptom: a bundled archive stamp and run stamp name different depths, while pipeline bases compile during play despite a successful archive build.
+- Cause: offline builds use the profile depth_mode (gl when omitted), while runtime vertex entries follow nvnDeviceSetDepthMode. An archive built with main0 cannot supply a near-zero base using main0_z.
+- Fix: declare the observed mode in the profile and rebuild the archive. The regression harness records runtime depth and compares it with the tested profile on NVN smoke runs. It also detects bundled archive stamp rejection for chain, depth, or pair-list mismatch. An absent depth log is unknown, not evidence for GL.
+- Found on: The Legend of Zelda: Echoes of Wisdom, update 1.1.0, GitHub issue #758.
+- Check: dm/tools/tests/test_pso_offline.py exercises the real profile with synthetic libraries; dm/tools/tests/test_regress.py checks runtime depth and archive-rejection logs.
+
 ### Metal's build folders left by pipeline archive flushes
 
 - **Symptom:** the user cache folder (`getconf DARWIN_USER_CACHE_DIR`, then `com.apple.gpuarchiver/`) fills with `gpuarchiver-*` folders of 0.3–5 MB each, one per pipeline archive flush (456 folders, 2.5 GB after two days). A later compile can fail with `cannot open '…/gpuarchiver-…/PersistentState': No such file or directory`.

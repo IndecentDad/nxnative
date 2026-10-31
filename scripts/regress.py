@@ -685,6 +685,13 @@ def read_log(text):
     return red, crash, float(m[-1]) if m else None, pb
 
 
+def pipeline_status(text, zero):
+    """Compare NVN runtime depth with profile input and detect a rejected bundled archive."""
+    modes = re.findall(r'\[(?:nvn-mtl|nvn)\] depth mode:? near=(0|-w)\b', text)
+    return {'depth_profile': 'zero' if zero else 'gl', 'depth_runtime': list(dict.fromkeys('zero' if m == '0' else 'gl' for m in modes)),
+            'stamp_mismatch': bool(re.search(r'pipeline archive bundled with the app: made for [^\n]*, this run needs ', text))}
+
+
 def crash_report(t0):
     d = Path.home() / 'Library/Logs/DiagnosticReports'
     for p in sorted(d.glob('dmhost*.ips'), key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []:
@@ -780,6 +787,7 @@ def smoke_run(g, tree, art, route, quick, outdir, a):
                     frames=outdir / 'frames.tsv' if g.kind == 'nvn' else None)
     text = (outdir / 'log.txt').read_text(errors='replace')
     red, crash_line, prep, _ = read_log(text)
+    if g.kind == 'nvn': res['pipeline'] = pipeline_status(text, g.get_depth_zero)
     res.update(exit=r['exit'], hang_at_s=r['hang_at_s'], first_frame_s=r['first_frame_s'], max_frame=r['max_frame'], peak_footprint_mb=r['peak_mb'], busy=r['busy'],
                prepare_s=prep, red=dict(red), crash=None)
     if crash_line or (r['exit'] not in (None, 0)):
@@ -885,6 +893,10 @@ def run_failures(r, route):
     if r.get('hang_at_s') is not None: f.append(f"hang (no frame after {r['hang_at_s']} s)")
     if r.get('reached') is False and route.get('reach'): f.append(f"frame {route['reach'][0]} not reached by {route['reach'][1]:g} s (max {r.get('max_frame')})")
     if r.get('max_frame', -1) < 0: f.append('no frame')
+    pipeline = r.get('pipeline') or {}
+    for mode in pipeline.get('depth_runtime', []):
+        if mode != pipeline['depth_profile']: f.append(f"profile depth_mode {pipeline['depth_profile']} disagrees with runtime depth_mode {mode}: rebuild the pipeline archive with the observed mode")
+    if pipeline.get('stamp_mismatch'): f.append('bundled pipeline archive stamp does not match this run (chain, depth or pairs): rebuild the archive')
     pb = r.get('prebuild')
     if pb:
         if pb.get('exit') != 0: f.append(f"prebuild did not exit successfully (exit {pb.get('exit')})")

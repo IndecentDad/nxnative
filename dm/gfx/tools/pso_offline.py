@@ -44,7 +44,7 @@ def pair_text(paths):
 def read_pairs(text):
     """(vertex key, pixel key) per line, in order, without empty lines, comments and repeated lines (pso_prebuild's reading)"""
     seen, out = set(), []
-    for line in text.decode('utf-8').split('\n'):
+    for line in text.decode('utf-8').splitlines():
         if not line or line.startswith('#') or line in seen: continue
         seen.add(line); c = line.split('\t')
         if len(c) >= 2: out.append((c[0], c[1]))
