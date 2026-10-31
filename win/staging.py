@@ -1,5 +1,5 @@
 """Local workspace staging for game files on SMB shares."""
-import ctypes, hashlib, json, os, re, shutil, sys, tempfile, zipfile
+import ctypes, hashlib, json, os, re, shutil, sys, tempfile, uuid, zipfile
 from pathlib import Path, PureWindowsPath
 
 GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
@@ -55,6 +55,51 @@ def _sha256(path):
     with Path(path).open('rb') as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b''): h.update(block)
     return h.hexdigest()
+
+
+def local_ipa_output(files, ipa_destination):
+    """Put the IPA under this game's persistent local SMB workspace."""
+    files = [Path(f) for f in files]
+    tid = base_title_id(files) or hashlib.sha256(str(files[0].parent).casefold().encode()).hexdigest()[:16]
+    return local_workspace_root() / tid / 'outputs' / PureWindowsPath(os.fspath(ipa_destination)).name
+
+
+def prepare_output_destination(destination):
+    """Create and write-probe the final output directory before starting a build."""
+    parent = Path(destination).parent
+    parent.mkdir(parents=True, exist_ok=True)
+    fd, probe = tempfile.mkstemp(prefix='.nxw-output-check-', dir=parent)
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(b'NXNative output preflight')
+            f.flush(); os.fsync(f.fileno())
+    finally:
+        try: os.unlink(probe)
+        except FileNotFoundError: pass
+    return Path(destination)
+
+
+def safe_staged_copy(source, destination):
+    """Copy to a unique sibling partial, verify bytes, then atomically publish it."""
+    source, destination = Path(source), Path(destination)
+    before = source.stat()
+    digest = _sha256(source)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    partial = destination.with_name(f'{destination.name}.nxw-partial-{os.getpid()}-{uuid.uuid4().hex}')
+    try:
+        shutil.copy2(source, partial)
+        after = source.stat()
+        if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+            raise OSError(f'completed output changed during transfer: {source}')
+        if partial.stat().st_size != before.st_size:
+            raise OSError(f'incomplete transfer to {destination}: expected {before.st_size} bytes, got {partial.stat().st_size}')
+        if _sha256(partial) != digest:
+            raise OSError(f'transfer verification failed for {destination}')
+        os.replace(partial, destination)
+        return destination
+    finally:
+        try: partial.unlink()
+        except FileNotFoundError: pass
 
 
 def _atomic_copy(source, destination, expected_stat=None):
@@ -192,11 +237,9 @@ def zip_split_data(data_dir, destination, progress=None):
     if not data_dir.is_dir(): raise OSError(f'split-data folder is missing: {data_dir}')
     if is_network_path(data_dir): raise OSError(f'split-data must be compressed from a local folder: {data_dir}')
     local_zip = data_dir.with_name(data_dir.name + '.zip')
-    local_partial = local_zip.with_name(local_zip.name + '.partial')
+    local_partial = local_zip.with_name(f'{local_zip.name}.partial-{os.getpid()}-{uuid.uuid4().hex}')
     destination.parent.mkdir(parents=True, exist_ok=True)
-    remote_partial = destination.with_name(destination.name + '.partial')
     try:
-        if local_partial.exists(): local_partial.unlink()
         files = sorted(p for p in data_dir.rglob('*') if p.is_file())
         with zipfile.ZipFile(local_partial, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
             for index, path in enumerate(files, 1):
@@ -207,15 +250,9 @@ def zip_split_data(data_dir, destination, progress=None):
             bad_file = archive.testzip()
             if bad_file: raise OSError(f'corrupt local split-data ZIP entry: {bad_file}')
         os.replace(local_partial, local_zip)
-        if remote_partial.exists(): remote_partial.unlink()
-        shutil.copyfile(local_zip, remote_partial)
-        if remote_partial.stat().st_size != local_zip.stat().st_size:
-            raise OSError(f'incomplete archive transfer to {destination}')
-        os.replace(remote_partial, destination)
-        return destination
+        return safe_staged_copy(local_zip, destination)
     finally:
-        for partial in (local_partial, remote_partial):
-            try:
-                if partial.exists(): partial.unlink()
-            except OSError:
-                pass
+        try:
+            if local_partial.exists(): local_partial.unlink()
+        except OSError:
+            pass

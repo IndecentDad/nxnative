@@ -28,6 +28,37 @@ class SmbStagingTests(unittest.TestCase):
             work = staging.local_split_data_folder([self.source], r'\\nas\out\Celeste.ipa')
         self.assertEqual(work, exe.parent / '0100000000000000' / 'outputs' / 'Celeste-data')
 
+    def test_local_ipa_output_is_under_the_per_game_workspace(self):
+        with patch.object(staging, 'local_workspace_root', return_value=self.workspace):
+            out = staging.local_ipa_output([self.source], r'\\nas\Roms\iOS\Celeste\Celeste.ipa')
+        self.assertEqual(out, self.workspace / '0100000000000000' / 'outputs' / 'Celeste.ipa')
+
+    def test_destination_preflight_creates_and_probes_parent(self):
+        out = self.workspace / 'new' / 'game.ipa'
+        self.assertEqual(staging.prepare_output_destination(out), out)
+        self.assertTrue(out.parent.is_dir())
+        self.assertEqual(list(out.parent.iterdir()), [])
+
+    def test_safe_staged_copy_publishes_verified_file(self):
+        src = self.workspace / 'completed.ipa'; src.parent.mkdir(parents=True); src.write_bytes(b'complete IPA')
+        dst = self.workspace / 'share' / 'game.ipa'; dst.parent.mkdir(); dst.write_bytes(b'old output')
+        self.assertEqual(staging.safe_staged_copy(src, dst), dst)
+        self.assertEqual(dst.read_bytes(), b'complete IPA')
+        self.assertFalse(list(dst.parent.glob('*.nxw-partial-*')))
+
+    def test_failed_staged_copy_preserves_previous_destination_and_local_output(self):
+        src = self.workspace / 'completed.ipa'; src.parent.mkdir(parents=True); src.write_bytes(b'complete IPA')
+        dst = self.workspace / 'share' / 'game.ipa'; dst.parent.mkdir(); dst.write_bytes(b'old output')
+        def fail_after_partial(_src, target):
+            Path(target).write_bytes(b'incomplete')
+            raise OSError('simulated network write failure')
+        with patch.object(staging.shutil, 'copy2', side_effect=fail_after_partial):
+            with self.assertRaisesRegex(OSError, 'simulated network write failure'):
+                staging.safe_staged_copy(src, dst)
+        self.assertEqual(dst.read_bytes(), b'old output')
+        self.assertEqual(src.read_bytes(), b'complete IPA')
+        self.assertFalse(list(dst.parent.glob('*.nxw-partial-*')))
+
     def test_split_data_is_zipped_locally_then_transferred_as_one_file(self):
         data = self.workspace / 'Celeste-data'; (data / 'romfs').mkdir(parents=True)
         (data / 'romfs' / 'asset.bin').write_bytes(b'asset')
@@ -47,16 +78,15 @@ class SmbStagingTests(unittest.TestCase):
         (data / 'asset').write_bytes(b'local complete data')
         destination = self.workspace / 'share' / 'Celeste-data.zip'; destination.parent.mkdir()
         destination.write_bytes(b'previous completed archive')
-        def fail_transfer(_src, dst):
-            Path(dst).write_bytes(b'incomplete')
+        def fail_transfer(_src, _dst):
             raise OSError('simulated network write failure')
-        with patch.object(staging.shutil, 'copyfile', side_effect=fail_transfer):
+        with patch.object(staging, 'safe_staged_copy', side_effect=fail_transfer):
             with self.assertRaisesRegex(OSError, 'simulated network write failure'):
                 staging.zip_split_data(data, destination)
         self.assertEqual(destination.read_bytes(), b'previous completed archive')
         self.assertEqual((data / 'asset').read_bytes(), b'local complete data')
         self.assertTrue((self.workspace / 'Celeste-data.zip').is_file())
-        self.assertFalse(destination.with_name(destination.name + '.partial').exists())
+        self.assertFalse(list(destination.parent.glob('*.nxw-partial-*')))
 
     def test_application_root_in_script_mode_uses_local_per_user_fallback(self):
         with patch.dict(staging.os.environ, {'LOCALAPPDATA': str(self.workspace)}):
