@@ -1,0 +1,170 @@
+"""Local workspace staging for game files on SMB shares."""
+import ctypes, hashlib, json, os, re, shutil, tempfile
+from pathlib import Path, PureWindowsPath
+
+GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
+
+
+def is_network_path(path):
+    """Recognize UNC paths and mapped Windows network drives."""
+    value = os.fspath(path)
+    if value.startswith(('\\\\', '//')): return True
+    if os.name != 'nt': return False
+    drive = PureWindowsPath(value).drive
+    if not drive: return False
+    try: return ctypes.windll.kernel32.GetDriveTypeW(drive + '\\') == 4  # DRIVE_REMOTE
+    except (AttributeError, OSError): return False
+
+
+def local_workspace_root():
+    """Choose and create a persistent workspace on a local disk."""
+    candidates = [Path(os.environ['LOCALAPPDATA'])] if os.environ.get('LOCALAPPDATA') else []
+    candidates.append(Path(tempfile.gettempdir()))
+    errors = []
+    for root in candidates:
+        if is_network_path(root): continue
+        workspace = root / 'NXNative' / 'SMB'
+        try: workspace.mkdir(parents=True, exist_ok=True)
+        except OSError as e: errors.append(f'{workspace}: {e}'); continue
+        return workspace
+    detail = '; '.join(errors)
+    raise OSError('No writable local Windows workspace is available.' + (f' {detail}' if detail else ' LOCALAPPDATA and the temporary folder are on network paths.'))
+
+
+def base_title_id(files):
+    ids = []
+    for f in files:
+        name = Path(f).name
+        m = re.search(r'\[([0-9A-Fa-f]{16})\]', name)
+        if m: ids.append(m.group(1).upper())
+    return next((x for x in ids if x.endswith('000')), ids[0] if ids else None)
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''): h.update(block)
+    return h.hexdigest()
+
+
+def _atomic_copy(source, destination, expected_stat=None):
+    source, destination = Path(source), Path(destination)
+    before = expected_stat or source.stat()
+    partial = destination.with_name(destination.name + '.nxw-partial')
+    try:
+        if partial.exists(): partial.unlink()
+        shutil.copy2(source, partial)
+        after = source.stat()
+        if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+            raise OSError(f'game file changed while it was copied: {source}')
+        if partial.stat().st_size != before.st_size:
+            raise OSError(f'incomplete local copy of {source}: expected {before.st_size} bytes, got {partial.stat().st_size}')
+        digest = _sha256(partial)
+        os.replace(partial, destination)
+        return digest
+    finally:
+        if partial.exists(): partial.unlink()
+
+
+def _load_manifest(path):
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+        return value if value.get('schema') == 1 and isinstance(value.get('files'), dict) else {}
+    except (OSError, ValueError, AttributeError): return {}
+
+
+def stage_folder(files, workspace_root=None, network_detector=is_network_path):
+    """Return (folder, copied_names). UNC/SMB inputs are copied to a persistent local workspace.
+
+    Local sources retain the existing behavior: use their folder when it contains only the selected
+    game files, otherwise stage beside the sources and prefer same-volume hard links.
+    """
+    files = [Path(f).resolve() for f in files]
+    if not files: raise ValueError('select at least one game file')
+    parent = files[0].parent
+    network = any(network_detector(f) for f in files)
+    if network:
+        root = Path(workspace_root) if workspace_root else local_workspace_root()
+        if network_detector(root): raise OSError(f'build workspace must be on a local disk: {root}')
+        tid = base_title_id(files)
+        key = tid or hashlib.sha256(str(parent).casefold().encode()).hexdigest()[:16]
+        dst = root / key / 'inputs'
+        dst.mkdir(parents=True, exist_ok=True)
+        manifest_path = dst / '.nxw-inputs.json'
+        old = _load_manifest(manifest_path).get('files', {})
+        copied, updated = [], {}
+        for src in files:
+            target = dst / src.name
+            st = src.stat()
+            record = old.get(src.name, {})
+            if not isinstance(record, dict): record = {}
+            reusable = (record.get('source') == str(src).casefold() and
+                        record.get('size') == st.st_size and record.get('mtime_ns') == st.st_mtime_ns and
+                        target.is_file() and target.stat().st_size == st.st_size and
+                        _sha256(target) == record.get('sha256'))
+            if reusable:
+                updated[src.name] = record
+                continue
+            digest = _atomic_copy(src, target, st)
+            copied.append(src.name)
+            updated[src.name] = {'source': str(src).casefold(), 'size': st.st_size,
+                                 'mtime_ns': st.st_mtime_ns, 'sha256': digest}
+        tmp_manifest = manifest_path.with_name(manifest_path.name + '.partial')
+        try:
+            tmp_manifest.write_text(json.dumps({'schema': 1, 'files': updated}, indent=2), encoding='utf-8')
+            os.replace(tmp_manifest, manifest_path)
+        finally:
+            if tmp_manifest.exists(): tmp_manifest.unlink()
+        selected = {p.name for p in files}
+        for p in dst.iterdir():
+            if p.is_file() and p.suffix.lower() in GAME_EXT and p.name not in selected: p.unlink()
+        return dst, copied
+
+    if all(f.parent == parent for f in files) and {p.resolve() for p in parent.iterdir() if p.suffix.lower() in GAME_EXT} == set(files): return parent, None
+    tid = base_title_id(files)
+    dst = parent / f'{(tid or files[0].stem)[:40]}_nxw'
+    dst.mkdir(exist_ok=True)
+    copied = []
+    for src in files:
+        target = dst / src.name
+        if target.exists():
+            try:
+                if os.path.samefile(src, target): continue
+            except OSError: pass
+            try:
+                os.link(src, target.with_name(target.name + '.nxw-partial'))
+                os.replace(target.with_name(target.name + '.nxw-partial'), target)
+                continue
+            except OSError:
+                partial = target.with_name(target.name + '.nxw-partial')
+                try:
+                    _atomic_copy(src, partial)
+                    os.replace(partial, target)
+                finally:
+                    if partial.exists(): partial.unlink()
+                copied.append(src.name)
+                continue
+        try: os.link(src, target)
+        except OSError:
+            _atomic_copy(src, target)
+            copied.append(src.name)
+    selected = {p.name for p in files}
+    for p in dst.iterdir():
+        if p.suffix.lower() in GAME_EXT and p.name not in selected: p.unlink()
+    return dst, copied
+
+
+def default_network_output(files, repo):
+    """Place the default output beside the originals, never in the local build workspace."""
+    files = [Path(f) for f in files]
+    tid = base_title_id(files)
+    name = None
+    if tid:
+        profile = Path(repo) / 'dm/games' / tid / 'game.tsv'
+        try:
+            for line in profile.read_text(encoding='utf-8').splitlines():
+                if line.startswith('ipa\t'):
+                    name = line.split('\t', 1)[1].strip(); break
+        except OSError: pass
+    if not name: name = files[0].stem + '.ipa'
+    return files[0].parent / Path(name).name

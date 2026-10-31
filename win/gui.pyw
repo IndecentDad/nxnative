@@ -11,6 +11,7 @@ from tkinter import ttk, filedialog, messagebox
 WIN = Path(__file__).resolve().parent
 REPO = WIN.parent
 sys.path.insert(0, str(WIN))
+from staging import stage_folder, is_network_path, default_network_output
 SETTINGS = WIN / 'gui_settings.json'   # the last picked files and keys (this PC only; git ignores it)
 GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
 
@@ -46,26 +47,6 @@ def save_settings(d):
 
 def title_id(files):
     return next((m.group(1).upper() for f in files if (m := re.search(r'\[([0-9A-Fa-f]{16})\]', Path(f).name))), None)
-
-
-def stage_folder(files):
-    """The folder to hand the pipeline: the files' own folder when it holds exactly these game files, else a folder of their own beside them with hard links (copies across drives)"""
-    files = [Path(f).resolve() for f in files]
-    parent = files[0].parent
-    if all(f.parent == parent for f in files) and {p.resolve() for p in parent.iterdir() if p.suffix.lower() in GAME_EXT} == set(files): return parent, None
-    tid = title_id(files)
-    dst = parent / f'{(tid or files[0].stem)[:40]}_nxw'
-    dst.mkdir(exist_ok=True)
-    for p in dst.iterdir():
-        if p.suffix.lower() in GAME_EXT and p.name not in {f.name for f in files}: p.unlink()   # files of an earlier pick no longer chosen
-    copied = []
-    for f in files:
-        t = dst / f.name
-        if t.exists() and t.stat().st_size == f.stat().st_size: continue
-        if t.exists(): t.unlink()
-        try: os.link(f, t)
-        except OSError: shutil.copy2(f, t); copied.append(f.name)
-    return dst, copied
 
 
 def dark_title_bar(win):
@@ -475,14 +456,17 @@ class App(tk.Tk):
         if self.proc or not (self.files and self.keys): return
         if not Path(self.keys).is_file(): messagebox.showwarning('prod.keys', 'The prod.keys file is gone. Choose it again.'); return
         try: folder, copied = stage_folder(self.files)
-        except OSError as e: messagebox.showerror('Game files', str(e)); return
+        except (OSError, ValueError) as e: messagebox.showerror('Game files', str(e)); return
+        network_sources = any(is_network_path(f) for f in self.files)
+        output = self.out or (str(default_network_output(self.files, REPO)) if network_sources else '')
         cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', self.keys, '--progress', 'json']
-        if self.out: cmd += ['-o', self.out]
+        if output: cmd += ['-o', output]
         if self.split: cmd += ['--split-data']
         cmd += ['--entitlements' if self.iml else '--no-entitlements']
         self.s.update(files=self.files, keys=self.keys); save_settings(self.s)
         self._clear_log()
-        self._write(f'Game folder  {folder}' + ('  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n', 'dim')
+        self._write(f'Game folder  {folder}' + ('  (local workspace for SMB inputs)' if network_sources else '  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n', 'dim')
+        if network_sources: self._write(f'Output  {output}\n', 'dim')
         if copied: self._write(f'Copied (another drive, no hard link possible): {", ".join(copied)}\n', 'dim')
         self.out_ipa, self.started, self.warn = None, time.time(), []
         env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
