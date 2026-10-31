@@ -95,18 +95,23 @@ class SmbStagingTests(unittest.TestCase):
     def test_unc_path_is_classified_as_network(self):
         self.assertTrue(staging.is_network_path(r'\\nas\games\Celeste.nsp'))
 
-    def test_network_inputs_copy_to_local_workspace_and_default_outputs_stay_by_source(self):
+    def test_network_inputs_copy_to_local_workspace_and_default_outputs_use_nas_game_folder(self):
         folder, copied = staging.stage_folder([self.source], self.workspace, self.network)
         self.assertEqual(folder, self.workspace / '0100000000000000' / 'inputs')
         self.assertEqual(copied, [self.source.name])
         self.assertEqual((folder / self.source.name).read_bytes(), self.source.read_bytes())
-        self.assertEqual(staging.default_network_output([self.source], self.repo), self.source.parent / 'Celeste.ipa')
+        self.assertEqual(str(staging.default_network_output([self.source], self.repo)), r'\KPSynology\Media\Roms\iOS\Celeste\Celeste.ipa')
         self.assertEqual(self.source.read_bytes(), b'game input bytes')
 
     def test_default_network_output_uses_roms_ios_game_folder(self):
         source = r'\\KPSynology\Media\Roms\Switch\Celeste [0100000000000000].nsp'
         output = staging.default_network_output([source], self.repo)
         self.assertEqual(str(output), r'\\KPSynology\Media\Roms\iOS\Celeste\Celeste.ipa')
+
+    def test_downloads_input_defaults_to_nas_roms_ios_game_folder(self):
+        source = r'D:\Downloads\Celeste [0100000000000000].nsp'
+        output = staging.default_network_output([source], self.repo)
+        self.assertEqual(str(output), r'\KPSynology\Media\Roms\iOS\Celeste\Celeste.ipa')
 
     def test_verified_local_copy_is_reused_then_refreshed_when_source_changes(self):
         folder, _ = staging.stage_folder([self.source], self.workspace, self.network)

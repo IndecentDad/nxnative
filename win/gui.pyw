@@ -461,7 +461,7 @@ class App(tk.Tk):
         if self.proc or not (self.files and self.keys): return
         if not Path(self.keys).is_file(): messagebox.showwarning('prod.keys', 'The prod.keys file is gone. Choose it again.'); return
         network_sources = any(is_network_path(f) for f in self.files)
-        output = self.out or (str(default_network_output(self.files, REPO)) if network_sources else '')
+        output = self.out or str(default_network_output(self.files, REPO))
         network_output = bool(output and is_network_path(output))
         build_output = output
         self.final_ipa_destination = output if network_output else None

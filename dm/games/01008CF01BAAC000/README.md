@@ -56,3 +56,4 @@ The development build is `01008CF01BAAC000_build/` beside the NSPs, with runs an
 - **Mac app pair tables:** [Shader-pair tables in a Mac app](../../../docs/reference/shaders.md#shader-pair-tables-in-a-mac-app).
 - **An archive built for the profile's default GL depth was rejected at runtime:** [Offline pipeline archive and profile depth disagree](../../../docs/reference/shaders.md#offline-pipeline-archive-and-profile-depth-disagree).
 - **Unused conditional cube inputs are not rendering errors:** [A 2D texture in a cube slot binds the zero cube](../../../docs/reference/rendering.md#a-2d-texture-in-a-cube-slot-binds-the-zero-cube).
+- **A stale `DM_ROMFS` crashed the game 0.3 s after `nnMain`:** [A stale `DM_ROMFS` path crashes the game soon after `nnMain`](../../../docs/reference/packing.md#a-stale-dm_romfs-path-crashes-the-game-soon-after-nnmain).

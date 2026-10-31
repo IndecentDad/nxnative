@@ -225,10 +225,10 @@ def default_network_output(files, repo):
     ipa_name = PureWindowsPath(name).name
     roms_root = PureWindowsPath(files[0]).parent
     while roms_root != roms_root.parent:
-        if roms_root.name.casefold() == 'roms':
-            return roms_root / 'iOS' / PureWindowsPath(ipa_name).stem / ipa_name
+        if roms_root.name.casefold() == 'roms': break
         roms_root = roms_root.parent
-    return files[0].parent / Path(ipa_name).name
+    else: roms_root = PureWindowsPath(r'\KPSynology\Media\Roms')
+    return roms_root / 'iOS' / PureWindowsPath(ipa_name).stem / ipa_name
 
 
 def zip_split_data(data_dir, destination, progress=None):
