@@ -1,5 +1,14 @@
 # Notes for agents
 
+## Environment Routing
+
+- **Windows:** Physical Windows 11 PC, not a VM. The NXNative Windows checkout is `D:\NXNativeWindows`; Windows GUI, Windows-specific build tools and Windows branches belong there.
+- **macOS:** Tahoe, accessed with the existing `ssh tahoe` alias, for Intel-compatible macOS/iOS builds and the existing macOS checkout.
+- **Linux:** The current Codex environment and its local clones; these are not the Windows or Tahoe working directories.
+- **GitHub:** Shared repository and branch history, not a substitute for inspecting uncommitted work on the target machine.
+
+Identify the target platform and current execution machine before running commands, and use that machine's existing connection. Never assume a Windows path is accessible through Tahoe SSH. If Windows access is unavailable, say so immediately and provide PowerShell commands for the Windows PC; do not search unrelated environments. Never initialize or replace an inaccessible platform checkout. Preserve uncommitted changes and build artifacts.
+
 - This repository runs Nintendo Switch games natively on Apple platforms: the game's own code runs, rewritten only where Apple's kernel requires it (`dm/tools/patch_nso.py`), on a host that answers Horizon's SVCs and the SDK's services (`dm/host`) and implements NVN, Vulkan and NVIDIA's desktop OpenGL on Metal (`dm/gfx/nvn`, `dm/gfx/vk`, `dm/gfx/gl`). Seventy-six games are playable, each tested on the Mac or the iPhone (a Mac gameplay test is enough to count); the [games table](dm/games/README.md#games) lists each with its build, SDK, engine and graphics API, and links its note, `dm/games/<id>/README.md`: what its profile needs and why, what was found on it, how to drive it on the Mac, what is open. [README.md](README.md) is the player-facing page (games, packing, playing); [docs/development.md](docs/development.md) has the internals, the script's options, building by hand, prewarm lists and power.
 - Where to start:
 
