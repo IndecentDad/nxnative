@@ -174,11 +174,13 @@ static void import_progress(void *ctx, uint64_t done, uint64_t total, uint64_t f
             BGContinuedProcessingTaskRequest *rq = [[BGContinuedProcessingTaskRequest alloc] initWithIdentifier:ident title:@"Importing game data"
                 subtitle:[NSString stringWithFormat:@"%@ for %@", [NSByteCountFormatter stringFromByteCount:(long long)total countStyle:NSByteCountFormatterCountStyleFile], NSBundle.mainBundle.infoDictionary[@"CFBundleDisplayName"] ?: @"the game"]];
             rq.strategy = BGContinuedProcessingTaskRequestSubmissionStrategyFail;
-            [BGTaskScheduler.sharedScheduler submitTaskRequest:rq completionHandler:^(NSError *e) {
-                if (!e) { fprintf(stderr, "import: running as a continued-processing task (%s)\n", ident.UTF8String); return; }
-                fprintf(stderr, "import: continued-processing task refused (%s); importing in the foreground\n", e.localizedDescription.UTF8String);
-                dispatch_async(dispatch_get_main_queue(), ^{ NxwDataHelpVC *vc = pending; pending = nil; if (vc) [vc runImport:url scoped:scoped total:total task:nil]; });
-            }];
+            NSError *e = nil;
+            if ([BGTaskScheduler.sharedScheduler submitTaskRequest:rq error:&e]) {
+                fprintf(stderr, "import: continued-processing task submitted (%s)\n", ident.UTF8String);
+                return;
+            }
+            fprintf(stderr, "import: continued-processing task refused (%s); importing in the foreground\n", e.localizedDescription.UTF8String);
+            dispatch_async(dispatch_get_main_queue(), ^{ NxwDataHelpVC *vc = pending; pending = nil; if (vc) [vc runImport:url scoped:scoped total:total task:nil]; });
             return;
         }
     }

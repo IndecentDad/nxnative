@@ -29,7 +29,7 @@
 # unless ALLOW_OTHER_METAL / --allow-other-metal. Issue #242 reported corruption with another compiler; the cause is still unconfirmed.
 # Python 3.12+ is required for bounded archive mappings inside images. The Python running this file needs lz4, capstone and fonttools (and backports.zstd before Python 3.14); also needed: Xcode, xcodegen, .NET SDK 10, zstd. SPIRV-Cross is the in-repo build. A first run takes 2 (Metroid Dread) to 10 minutes (Breath of the Wild: 5 of them the shader split), longer when shader libraries must be compiled; a repeat run with unchanged inputs takes about 20 s (Metroid Dread), mostly packing the IPA. Key values are never printed.
 # The console shows one line per stage ([k/n] stage, with a bar, done/total, percent, elapsed time and ETA where the work can be counted); the tools' own output goes only to logs/ (PROGRESS / --progress). --progress json writes newline-delimited JSON events to stdout.
-import ast, collections, ctypes, errno, getpass, hashlib, importlib.util, json, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types
+import ast, collections, ctypes, errno, getpass, hashlib, importlib.util, json, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types, uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dm/tools"))
 import romfs as rfs
@@ -928,11 +928,53 @@ def extracted(log):   # (files, bytes) from the summary lines nx_extract wrote t
     return (sum(int(n) for n, _ in rows), int(sum(float(mb) for _, mb in rows) * 2**20)) if rows else None
 
 
+def romfs_image_mode(env=None):
+    """The Windows driver sets NXW_SPLIT_DATA before entering the upstream pipeline; split data needs a folder, normal IPAs keep the compact image."""
+    env = os.environ if env is None else env
+    return env.get('NXW_SPLIT_DATA', '') in ('', '0')
+
+
+def extraction_reusable(dst, marker, image):
+    """Reuse only a complete extraction in the requested on-disk RomFS format."""
+    try:
+        main = (dst / 'ExeFS' / 'main').is_file()
+        img, folder = dst / 'RomFS.img', dst / 'RomFS'
+        if not main: return False
+        if image:
+            return img.is_file() and not folder.exists() and (rfs.source(dst) / marker).exists()
+        return folder.is_dir() and not img.exists() and (folder / marker).exists()
+    except (OSError, ValueError, struct.error):
+        return False
+
+
+def extraction_command(nx, keys, base, upd, tmp, image, allow_damaged):
+    return [nx, keys, base, upd or '-', tmp] + (['--romfs-image'] if image else []) + (['--allow-damaged'] if allow_damaged else [])
+
+
+def install_extraction(tmp, dst, marker, image):
+    """Install a new extraction. On a valid mode switch replace only RomFS, preserving ExeFS and generated sibling artifacts."""
+    if not extraction_reusable(tmp, marker, image):
+        raise BuildError(f'nx_extract did not produce the expected {"RomFS.img" if image else "RomFS folder"} at {tmp}')
+    if not extraction_reusable(dst, marker, not image):
+        swap_in(tmp, dst)
+        return
+    old, new = ((dst / 'RomFS', tmp / 'RomFS.img') if image else (dst / 'RomFS.img', tmp / 'RomFS'))
+    target = dst / ('RomFS.img' if image else 'RomFS')
+    backup = dst / f'.romfs-mode-backup-{uuid.uuid4().hex}'
+    old.rename(backup)
+    try:
+        new.rename(target)
+    except BaseException:
+        backup.rename(old)
+        raise
+    rmtree(backup)
+    rmtree(tmp)
+
+
 def extract(nx, keys, ex, name, base, upd, cmp_dir, logs, g):   # the build IDs are checked by the caller (build_mismatch)
     dst, marker, log = ex / name, g.get('romfs_marker'), logs / f'extract_{name}.log'
-    try: reusable = (dst / 'ExeFS' / 'main').exists() and (dst / 'RomFS.img').is_file() and not (dst / 'RomFS').exists() and (rfs.source(dst) / marker).exists()
-    except (OSError, ValueError, struct.error): reusable = False
-    if reusable:
+    image = romfs_image_mode()
+    if extraction_reusable(dst, marker, image):
         PROG.stage(f'extract {name}')
         say(f'reusing the extracted {name}: {dst}')
         PROG.end('reused')
@@ -942,8 +984,8 @@ def extract(nx, keys, ex, name, base, upd, cmp_dir, logs, g):   # the build IDs 
     def poll():
         n, b = tree_size(tmp); return {'done': b, 'note': f'{n:,} files'}
     PROG.stage(f'extract {name}', poll=poll, unit='B', total=last[1] if last else base.stat().st_size + (upd.stat().st_size if upd else 0), est=not last)
-    run([nx, keys, base, upd or '-', tmp, '--romfs-image'] + (['--allow-damaged'] if ALLOW_DAMAGED else []), log)
-    swap_in(tmp, dst)
+    run(extraction_command(nx, keys, base, upd, tmp, image, ALLOW_DAMAGED), log)
+    install_extraction(tmp, dst, marker, image)
     n, b = extracted(log) or (0, 0)
     PROG.end(f'{n:,} files, {amount(b, "B")}')
     return dst
