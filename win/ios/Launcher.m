@@ -8,6 +8,8 @@
 // A variable an env file set (DM_ENV_FILE_KEYS, main.m) is shown but kept. A row marked "disabled" (settings.tsv always/<condition>: listed for every game, but this one has
 // nothing it acts on) is shown greyed out and never applied. Only a choice that differs from the game's default is kept, in NSUserDefaults under "launcher.<ENV>", as the Swift launcher does.
 #import <UIKit/UIKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import "CloudSaves.h"
 #include <math.h>
 #include <os/proc.h>
 #include <stdio.h>
@@ -212,25 +214,38 @@ static int increased_memory_limit(void) {
 }
 
 // ---- the settings list ----
-@interface DmSettingsVC : UITableViewController
+@interface DmSettingsVC : UITableViewController <UIDocumentPickerDelegate>
 @property (strong) DmLauncherModel *m; @property (strong) NSTimer *timer; @property (strong) UILabel *memory;
+@property (copy) NSString *cloudFolder, *cloudNote;
 @end
 @implementation DmSettingsVC
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.tableView.backgroundColor = UIColor.clearColor;
     self.tableView.rowHeight = UITableViewAutomaticDimension; self.tableView.estimatedRowHeight = 56;
+    [self refreshCloudSaves];
     __weak DmSettingsVC *w = self;
     self.timer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *t) { w.memory.text = [NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]; }];
 }
 - (void)dealloc { [self.timer invalidate]; }
 - (NSInteger)resetSection { return self.m.sections.count; }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.m.sections.count + 2; }   // the sections, Reset, Memory available
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec { return sec < (NSInteger)self.m.sections.count ? (NSInteger)[self.m inSection:self.m.sections[sec]].count : sec > self.resetSection ? 2 : 1; }
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)sec { return sec < (NSInteger)self.m.sections.count ? self.m.sections[sec] : nil; }
+- (NSInteger)cloudSection { return self.resetSection + 1; }
+- (NSInteger)memorySection { return self.resetSection + 2; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.m.sections.count + 3; }   // settings, Reset, Cloud saves, Memory
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec {
+    if (sec < (NSInteger)self.m.sections.count) return (NSInteger)[self.m inSection:self.m.sections[sec]].count;
+    if (sec == self.resetSection) return 1;
+    if (sec == self.cloudSection) return self.cloudFolder.length ? 3 : 2;
+    return sec == self.memorySection ? 2 : 0;
+}
+- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)sec {
+    if (sec < (NSInteger)self.m.sections.count) return self.m.sections[sec];
+    return sec == self.cloudSection ? @"Cloud saves" : nil;
+}
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)sec {
     if (sec == self.resetSection) return @"Brings back all settings this game was tested with.";
-    if (sec > self.resetSection && !increased_memory_limit())
+    if (sec == self.cloudSection) return self.cloudNote.length ? self.cloudNote : @"Choose a folder in iCloud Drive, then choose the same folder in the Mac app. Saves sync when the game starts and after each save; replaced saves are kept in save-backups.";
+    if (sec == self.memorySection && !increased_memory_limit())
         return @"Increased Memory Limit is off: iOS gives this app less memory, and a big game can be closed when an area loads. A free Apple ID cannot turn it on (the signing app drops it); a paid developer account can. Texture memory saver (Performance) helps meanwhile.";
     return nil;
 }
@@ -239,6 +254,14 @@ static int increased_memory_limit(void) {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     c.selectionStyle = UITableViewCellSelectionStyleNone;
     UIView *v = c.contentView; UILayoutGuide *g = v.layoutMarginsGuide;
+    if (ip.section == self.cloudSection) {
+        c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
+        c.selectionStyle = ip.row == 0 ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleDefault;
+        if (ip.row == 0) { c.textLabel.text = @"Cloud saves"; c.detailTextLabel.text = self.cloudFolder.length ? self.cloudFolder.lastPathComponent : @"Off"; c.detailTextLabel.textColor = UIColor.secondaryLabelColor; }
+        else if (ip.row == 1) { c.textLabel.text = self.cloudFolder.length ? @"Choose a different folder…" : @"Choose a folder in iCloud Drive…"; c.textLabel.textColor = UIColor.systemPinkColor; }
+        else { c.textLabel.text = @"Turn off cloud saves"; c.textLabel.textColor = UIColor.systemRedColor; }
+        return c;
+    }
     if (ip.section == self.resetSection) {   // Reset to tested defaults: a button row, enabled while a choice differs from the defaults
         UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration]; cfg.title = @"Reset to tested defaults"; cfg.contentInsets = NSDirectionalEdgeInsetsZero;
         __weak DmSettingsVC *w = self;
@@ -248,7 +271,7 @@ static int increased_memory_limit(void) {
             [b.centerYAnchor constraintEqualToAnchor:v.centerYAnchor], [v.heightAnchor constraintGreaterThanOrEqualToConstant:48]]];
         return c;
     }
-    if (ip.section > self.resetSection && ip.row == 1) {   // Increased Memory Limit: On (green) / Off (orange)
+    if (ip.section == self.memorySection && ip.row == 1) {   // Increased Memory Limit: On (green) / Off (orange)
         UILabel *l = body_label(@"Increased Memory Limit");
         int on = increased_memory_limit();
         UILabel *st = value_label(on ? @"● On" : @"● Off"); st.textColor = on ? UIColor.systemGreenColor : UIColor.systemOrangeColor;
@@ -258,7 +281,7 @@ static int increased_memory_limit(void) {
             [v.heightAnchor constraintGreaterThanOrEqualToConstant:48]]];
         return c;
     }
-    if (ip.section > self.resetSection) {   // Memory available
+    if (ip.section == self.memorySection) {   // Memory available
         UILabel *l = body_label(@"Memory available");
         self.memory = value_label([NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]);
         [v addSubview:l]; [v addSubview:self.memory];
@@ -309,6 +332,31 @@ static int increased_memory_limit(void) {
     [cs addObject:[v.heightAnchor constraintGreaterThanOrEqualToConstant:48]];
     [NSLayoutConstraint activateConstraints:cs];
     return c;
+}
+
+- (void)refreshCloudSaves {
+    BOOL stale = NO; NSString *path = dm_cloud_saves_path(&stale);
+    self.cloudFolder = path ?: @"";
+    if (stale && !path) self.cloudNote = @"The previously chosen folder is no longer readable with this app signature. Please choose it again.";
+}
+- (void)chooseCloudSavesFolder {
+    UIDocumentPickerViewController *pk = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:NO];
+    pk.delegate = self; pk.allowsMultipleSelection = NO; pk.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:pk animated:YES completion:nil];
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)pk {}
+- (void)documentPicker:(UIDocumentPickerViewController *)pk didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSURL *url = urls.firstObject; if (!url) return;
+    if (dm_store_cloud_saves(url)) self.cloudNote = @"Saved. This folder will be used when you press Play.";
+    else self.cloudNote = @"That folder could not be remembered. Please choose it again.";
+    [self refreshCloudSaves];
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:self.cloudSection] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [tv deselectRowAtIndexPath:ip animated:YES];
+    if (ip.section != self.cloudSection) return;
+    if (ip.row == 1) { [self chooseCloudSavesFolder]; return; }
+    if (ip.row == 2) { dm_clear_cloud_saves(); self.cloudNote = nil; [self refreshCloudSaves]; [tv reloadSections:[NSIndexSet indexSetWithIndex:self.cloudSection] withRowAnimation:UITableViewRowAnimationNone]; }
 }
 
 - (UIMenu *)menuFor:(DmSetting *)s button:(UIButton *)b {
