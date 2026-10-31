@@ -11,3 +11,4 @@
 - Shader chain files are unchanged from the Windows baseline (`dmsh_chain.h` `9a8bbaaf`, `dmsh_chain.lock` `3d7d5754`). Fetched current upstream has different fingerprints (`8cdb0742`, `d3d525eb`); do not reuse assets built for that chain without pipeline stamp checks.
 - Full current upstream `main` was not merged because it conflicts with Windows graphics/frontend code. Relevant save-sync follow-up from `0c94284e` was applied selectively.
 - Next: from an interactive Windows user session, push `windows/main` to `origin`; then validate a new IPA on iPad. Preserve untracked `prod.keys` and `win/gui.pyw.backup-20261030-172745`.
+- Packaged Windows SMB workspace roots at the running GUI EXE directory; inputs/build artifacts stay under <TitleID> subfolders and split data is transferred as one ZIP. Nine focused tests pass; no game rebuilt.

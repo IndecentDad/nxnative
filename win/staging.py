@@ -1,5 +1,5 @@
 """Local workspace staging for game files on SMB shares."""
-import ctypes, hashlib, json, os, re, shutil, tempfile
+import ctypes, hashlib, json, os, re, shutil, sys, tempfile, zipfile
 from pathlib import Path, PureWindowsPath
 
 GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
@@ -16,19 +16,22 @@ def is_network_path(path):
     except (AttributeError, OSError): return False
 
 
+def application_root(executable=None, frozen=None):
+    """Root workspace at the packaged GUI executable; use a local per-user fallback in source mode."""
+    frozen = getattr(sys, 'frozen', False) if frozen is None else frozen
+    if frozen:
+        return Path(executable or sys.executable).resolve().parent
+    fallback = Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir()) / 'NXNative' / 'SMB'
+    return Path(os.environ.get('NXNATIVE_WORKSPACE') or fallback).resolve()
+
+
 def local_workspace_root():
-    """Choose and create a persistent workspace on a local disk."""
-    candidates = [Path(os.environ['LOCALAPPDATA'])] if os.environ.get('LOCALAPPDATA') else []
-    candidates.append(Path(tempfile.gettempdir()))
-    errors = []
-    for root in candidates:
-        if is_network_path(root): continue
-        workspace = root / 'NXNative' / 'SMB'
-        try: workspace.mkdir(parents=True, exist_ok=True)
-        except OSError as e: errors.append(f'{workspace}: {e}'); continue
-        return workspace
-    detail = '; '.join(errors)
-    raise OSError('No writable local Windows workspace is available.' + (f' {detail}' if detail else ' LOCALAPPDATA and the temporary folder are on network paths.'))
+    """Use the exe's directory for persistent inputs and build caches, and reject network roots."""
+    root = application_root()
+    if is_network_path(root): raise OSError(f'workspace root must be on a local disk: {root}')
+    try: root.mkdir(parents=True, exist_ok=True)
+    except OSError as e: raise OSError(f'cannot create local build workspace at {root}: {e}') from e
+    return root
 
 
 def base_title_id(files):
@@ -38,6 +41,13 @@ def base_title_id(files):
         m = re.search(r'\[([0-9A-Fa-f]{16})\]', name)
         if m: ids.append(m.group(1).upper())
     return next((x for x in ids if x.endswith('000')), ids[0] if ids else None)
+
+
+def local_split_data_folder(files, ipa_output):
+    """Place split data under the same local root as the SMB build workspace."""
+    files = [Path(f) for f in files]
+    tid = base_title_id(files) or hashlib.sha256(str(files[0].parent).casefold().encode()).hexdigest()[:16]
+    return local_workspace_root() / tid / 'outputs' / (Path(ipa_output).stem + '-data')
 
 
 def _sha256(path):
@@ -168,3 +178,38 @@ def default_network_output(files, repo):
         except OSError: pass
     if not name: name = files[0].stem + '.ipa'
     return files[0].parent / Path(name).name
+
+
+def zip_split_data(data_dir, destination, progress=None):
+    """Zip a completed local split-data folder, then atomically transfer one file to its destination."""
+    data_dir, destination = Path(data_dir), Path(destination)
+    if not data_dir.is_dir(): raise OSError(f'split-data folder is missing: {data_dir}')
+    if is_network_path(data_dir): raise OSError(f'split-data must be compressed from a local folder: {data_dir}')
+    local_zip = data_dir.with_name(data_dir.name + '.zip')
+    local_partial = local_zip.with_name(local_zip.name + '.partial')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    remote_partial = destination.with_name(destination.name + '.partial')
+    try:
+        if local_partial.exists(): local_partial.unlink()
+        files = sorted(p for p in data_dir.rglob('*') if p.is_file())
+        with zipfile.ZipFile(local_partial, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
+            for index, path in enumerate(files, 1):
+                arcname = (Path(data_dir.name) / path.relative_to(data_dir)).as_posix()
+                archive.write(path, arcname)
+                if progress and (index == 1 or index % 100 == 0 or index == len(files)): progress(index, len(files))
+        with zipfile.ZipFile(local_partial, 'r') as archive:
+            bad_file = archive.testzip()
+            if bad_file: raise OSError(f'corrupt local split-data ZIP entry: {bad_file}')
+        os.replace(local_partial, local_zip)
+        if remote_partial.exists(): remote_partial.unlink()
+        shutil.copyfile(local_zip, remote_partial)
+        if remote_partial.stat().st_size != local_zip.stat().st_size:
+            raise OSError(f'incomplete archive transfer to {destination}')
+        os.replace(remote_partial, destination)
+        return destination
+    finally:
+        for partial in (local_partial, remote_partial):
+            try:
+                if partial.exists(): partial.unlink()
+            except OSError:
+                pass

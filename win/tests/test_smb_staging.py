@@ -1,5 +1,5 @@
 """SMB routing tests; uses temporary local files and never extracts a game."""
-import hashlib, json, tempfile, unittest
+import hashlib, json, tempfile, unittest, zipfile
 from pathlib import Path
 from unittest.mock import patch
 import sys
@@ -20,6 +20,47 @@ class SmbStagingTests(unittest.TestCase):
     def tearDown(self): self.tmp.cleanup()
 
     def network(self, path): return Path(path) == self.source
+
+    def test_packaged_workspace_root_is_the_executable_directory(self):
+        exe = Path(r'D:\\NXNativeBuilds\\NXNative.exe')
+        self.assertEqual(staging.application_root(executable=exe, frozen=True), exe.parent)
+        with patch.object(staging, 'local_workspace_root', return_value=exe.parent):
+            work = staging.local_split_data_folder([self.source], r'\\nas\out\Celeste.ipa')
+        self.assertEqual(work, exe.parent / '0100000000000000' / 'outputs' / 'Celeste-data')
+
+    def test_split_data_is_zipped_locally_then_transferred_as_one_file(self):
+        data = self.workspace / 'Celeste-data'; (data / 'romfs').mkdir(parents=True)
+        (data / 'romfs' / 'asset.bin').write_bytes(b'asset')
+        (data / 'README.txt').write_text('copy the extracted folder')
+        destination = self.workspace / 'share' / 'Celeste-data.zip'
+        result = staging.zip_split_data(data, destination)
+        self.assertEqual(result, destination)
+        self.assertTrue(data.is_dir())
+        with zipfile.ZipFile(destination) as archive:
+            self.assertEqual(archive.read('Celeste-data/romfs/asset.bin'), b'asset')
+            self.assertEqual(archive.getinfo('Celeste-data/romfs/asset.bin').compress_type, zipfile.ZIP_DEFLATED)
+            self.assertIn('Celeste-data/README.txt', archive.namelist())
+        self.assertTrue((self.workspace / 'Celeste-data.zip').is_file())
+
+    def test_failed_archive_transfer_preserves_old_archive_and_local_data(self):
+        data = self.workspace / 'Celeste-data'; data.mkdir(parents=True)
+        (data / 'asset').write_bytes(b'local complete data')
+        destination = self.workspace / 'share' / 'Celeste-data.zip'; destination.parent.mkdir()
+        destination.write_bytes(b'previous completed archive')
+        def fail_transfer(_src, dst):
+            Path(dst).write_bytes(b'incomplete')
+            raise OSError('simulated network write failure')
+        with patch.object(staging.shutil, 'copyfile', side_effect=fail_transfer):
+            with self.assertRaisesRegex(OSError, 'simulated network write failure'):
+                staging.zip_split_data(data, destination)
+        self.assertEqual(destination.read_bytes(), b'previous completed archive')
+        self.assertEqual((data / 'asset').read_bytes(), b'local complete data')
+        self.assertTrue((self.workspace / 'Celeste-data.zip').is_file())
+        self.assertFalse(destination.with_name(destination.name + '.partial').exists())
+
+    def test_application_root_in_script_mode_uses_local_per_user_fallback(self):
+        with patch.dict(staging.os.environ, {'LOCALAPPDATA': str(self.workspace)}):
+            self.assertEqual(staging.application_root(frozen=False), self.workspace / 'NXNative' / 'SMB')
 
     def test_unc_path_is_classified_as_network(self):
         self.assertTrue(staging.is_network_path(r'\\nas\games\Celeste.nsp'))

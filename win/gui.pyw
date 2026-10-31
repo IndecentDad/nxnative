@@ -11,7 +11,7 @@ from tkinter import ttk, filedialog, messagebox
 WIN = Path(__file__).resolve().parent
 REPO = WIN.parent
 sys.path.insert(0, str(WIN))
-from staging import stage_folder, is_network_path, default_network_output
+from staging import stage_folder, is_network_path, default_network_output, local_split_data_folder, zip_split_data
 SETTINGS = WIN / 'gui_settings.json'   # the last picked files and keys (this PC only; git ignores it)
 GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
 
@@ -198,6 +198,8 @@ class App(tk.Tk):
         self.keys = self.s.get('keys', '') if Path(self.s.get('keys', '') or '.').is_file() else ''
         self.out = ''
         self.proc, self.q, self.out_ipa, self.started, self.n, self.details = None, queue.Queue(), None, 0, 1, False
+        self.split_data_work = self.split_data_archive = self.final_data_artifact = None
+        self.archive_complete = self.archive_running = self.archive_started = False
         self._ttk(); self._build(); self._toggle_details(); self._intro(); self._refresh()
         threading.Thread(target=self._doctor, daemon=True).start()
         self.after(100, self._pump); self.after(60, lambda: dark_title_bar(self))
@@ -376,7 +378,7 @@ class App(tk.Tk):
             tk.Label(rb, text='No prod.keys selected yet', bg=FIELD, fg=FAINT, font=(FONT, 10), anchor='w').pack(side='left', padx=12)
         for i, tl in enumerate(self.tiles): tl.select(i == int(self.split))
         for i, tl in enumerate(self.iml_tiles): tl.select(i == int(not self.iml))
-        what = 'The IPA and its data folder are' if self.split else 'The IPA is'
+        what = 'The IPA and split-data output are' if self.split else 'The IPA is'
         if self.out: self.out_lbl.configure(text=f'Saves to  {self.out}'); self.out_reset.pack(side='left')
         else: self.out_lbl.configure(text=f'{what} saved next to your game files'); self.out_reset.pack_forget()
         if not self.proc:
@@ -461,12 +463,22 @@ class App(tk.Tk):
         output = self.out or (str(default_network_output(self.files, REPO)) if network_sources else '')
         cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', self.keys, '--progress', 'json']
         if output: cmd += ['-o', output]
-        if self.split: cmd += ['--split-data']
+        self.split_data_work = self.split_data_archive = self.final_data_artifact = None
+        self.archive_complete = self.archive_running = self.archive_started = False
+        network_output = bool(output and is_network_path(output))
+        if self.split and network_output:
+            try: self.split_data_work = local_split_data_folder(self.files, output)
+            except OSError as e: messagebox.showerror('Local workspace', str(e)); return
+            self.split_data_archive = str(Path(output).with_name(Path(output).stem + '-data.zip'))
+            cmd += [f'--split-data={self.split_data_work}']
+        elif self.split:
+            cmd += ['--split-data']
         cmd += ['--entitlements' if self.iml else '--no-entitlements']
         self.s.update(files=self.files, keys=self.keys); save_settings(self.s)
         self._clear_log()
         self._write(f'Game folder  {folder}' + ('  (local workspace for SMB inputs)' if network_sources else '  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n', 'dim')
         if network_sources: self._write(f'Output  {output}\n', 'dim')
+        if self.split_data_archive: self._write(f'Split data will be zipped locally, then transferred as one file: {self.split_data_archive}\n', 'dim')
         if copied: self._write(f'Copied (another drive, no hard link possible): {", ".join(copied)}\n', 'dim')
         self.out_ipa, self.started, self.warn = None, time.time(), []
         env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
@@ -502,6 +514,11 @@ class App(tk.Tk):
                 elif kind == 'line':
                     if v.strip(): self._write(v + '\n', 'red' if '[RED]' in v or 'Traceback' in v or 'Error' in v else None)
                 elif kind == 'exit': self._done(v)
+                elif kind == 'archive_done': self._archive_done(v)
+                elif kind == 'archive_progress':
+                    done, total = v
+                    self.btn.set('running', 'Compressing split data', 0.96 + (0.035 * done / max(1, total)))
+                    self.status.configure(text=f'Compressing locally: {done:,} / {total:,} files; then transferring one ZIP to the share')
                 elif kind == 'doctor': self._doctor_done(v)
         except queue.Empty: pass
         self.after(80, self._pump)
@@ -542,12 +559,25 @@ class App(tk.Tk):
     def _done(self, rc):
         self.proc = None; self.cancel.pack_forget()
         took = time.time() - self.started
+        if rc == 0 and self.out_ipa and self.split_data_work and self.split_data_archive and not self.archive_started:
+            self.archive_started = True
+            self.archive_running = True
+            self.btn.set('running', 'Compressing split data', 0.96)
+            self.status.configure(text='Compressing locally before transferring one archive to the network share…', fg=MUTED)
+            threading.Thread(target=self._archive_data, daemon=True).start()
+            return
         if rc == 0 and self.out_ipa:
             self.btn.set('done', 'Build again'); self.btn.frac = 0
-            self.status.configure(text=f'Finished in {int(took) // 60}:{int(took) % 60:02d}' + (f'   ·   {len(self.warn)} warning(s), see details' if self.warn else ''),
-                                  fg=MUTED)
+            self.status.configure(text=(f'IPA ready; data archive failed. Local data preserved at {self.split_data_work}' if self.split_data_work and self.split_data_archive and not self.archive_complete else f'Finished in {int(took) // 60}:{int(took) % 60:02d}' + (f'   ·   {len(self.warn)} warning(s), see details' if self.warn else '')),
+                                  fg=BAD if self.split_data_work and self.split_data_archive and not self.archive_complete else MUTED)
             data = Path(self.out_ipa).with_name(Path(self.out_ipa).stem + '-data')
-            if self.split and data.is_dir():
+            if self.archive_complete and self.final_data_artifact:
+                self.res_path.configure(text=f'{self.out_ipa}\n{self.final_data_artifact}')
+                self.res_hint.configure(text="Extract the ZIP, then copy its complete data folder into the app's Documents. The folder contains README.txt with install steps.")
+            elif self.split_data_work and self.split_data_archive and self.final_data_artifact:
+                self.res_path.configure(text=f'{self.out_ipa}\nLocal split data: {self.final_data_artifact}')
+                self.res_hint.configure(text='The IPA was built, but ZIP transfer failed. The completed local data folder is preserved; see details before retrying.')
+            elif self.split and data.is_dir():
                 self.res_path.configure(text=f'{self.out_ipa}\n{data}')
                 self.res_hint.configure(text="Install the IPA with Sideloadly, then copy the data folder into the app's Documents\n(Apple Devices app > Files, or the Files app). README.txt inside it explains.")
             else:
@@ -562,6 +592,25 @@ class App(tk.Tk):
                 self._write(f'\nThe build stopped (exit code {rc}). Each stage\'s full log is in <TitleID>_build\\logs next to the game files.\n', 'red')
                 if not self.details: self._toggle_details()
             self.cancelled = False
+
+    def _archive_data(self):
+        try:
+            result = zip_split_data(self.split_data_work, self.split_data_archive, lambda done, total: self.q.put(('archive_progress', (done, total))))
+            self.q.put(('archive_done', (str(result), None)))
+        except Exception as e:
+            self.q.put(('archive_done', (None, str(e))))
+
+    def _archive_done(self, result):
+        archive, error = result
+        self.archive_running = False
+        self.archive_complete = bool(archive)
+        self.final_data_artifact = archive or str(self.split_data_work)
+        if error:
+            self.warn.append('split-data ZIP transfer failed: ' + error)
+            self._write(f'\n[RED] split-data archive failed: {error}\nLocal data remains at {self.split_data_work}\n', 'red')
+        else:
+            self._write(f'\nSplit-data archive ready: {archive}\n', 'ok')
+        self._done(0)
 
     def _doctor_done(self, bad):
         if not bad: self._pill('All tools ready', OK); return
@@ -580,6 +629,7 @@ class App(tk.Tk):
         self.log.configure(state='normal'); self.log.delete('1.0', 'end'); self.log.configure(state='disabled')
 
     def _close(self):
+        if self.archive_running and not messagebox.askyesno('Data transfer running', 'Close while the data ZIP is being transferred? The local data folder will be kept.'): return
         if self.proc and self.proc.poll() is None:
             if not messagebox.askyesno('Build running', 'Stop the build and close?'): return
             self._cancel()
