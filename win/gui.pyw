@@ -222,13 +222,43 @@ class App(tk.Tk):
         self.after(100, self._pump); self.after(60, lambda: dark_title_bar(self))
         self.protocol('WM_DELETE_WINDOW', self._close)
 
+    def _scroll_form(self, event):
+        # Let the details Text widget retain its own mouse-wheel behavior.
+        if getattr(self, 'log', None) is event.widget:
+            return
+        if not getattr(self, 'form_canvas', None) or not event.delta:
+            return
+        steps = max(1, round(abs(event.delta) / 120))
+        self.form_canvas.yview_scroll((-1 if event.delta > 0 else 1) * steps, 'units')
+        return 'break'
+
     def _ttk(self):
         st = ttk.Style(self); st.theme_use('clam')
         st.configure('Dark.Vertical.TScrollbar', background=FIELD_HI, troughcolor=BG, bordercolor=BG, arrowcolor=FAINT, lightcolor=FIELD_HI, darkcolor=FIELD_HI, gripcount=0)
 
     # ---- layout ----
     def _build(self):
-        wrap = tk.Frame(self, bg=BG); wrap.pack(fill='both', expand=True, padx=28, pady=(22, 18))
+        # NXNATIVE_SCROLL_FIX_V1: a scrollable settings form and a fixed build footer.
+        outer = tk.Frame(self, bg=BG)
+        outer.pack(fill='both', expand=True, padx=28, pady=(22, 18))
+
+        scroll_host = tk.Frame(outer, bg=BG)
+        scroll_host.pack(fill='both', expand=True)
+        self.form_canvas = tk.Canvas(scroll_host, bg=BG, highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(scroll_host, orient='vertical',
+                                  command=self.form_canvas.yview,
+                                  style='Dark.Vertical.TScrollbar')
+        self.form_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+        self.form_canvas.pack(side='left', fill='both', expand=True)
+
+        wrap = tk.Frame(self.form_canvas, bg=BG)
+        form_window = self.form_canvas.create_window((0, 0), window=wrap, anchor='nw')
+        self.form_canvas.bind('<Configure>',
+                              lambda e: self.form_canvas.itemconfigure(form_window, width=e.width))
+        wrap.bind('<Configure>',
+                  lambda e: self.form_canvas.configure(scrollregion=self.form_canvas.bbox('all')))
+        self.bind_all('<MouseWheel>', self._scroll_form, add='+')
 
         hdr = tk.Frame(wrap, bg=BG); hdr.pack(fill='x', pady=(0, 18))
         logo = tk.Canvas(hdr, width=46, height=46, bg=BG, highlightthickness=0); logo.pack(side='left')
@@ -285,8 +315,8 @@ class App(tk.Tk):
         self.out_reset = Link(out, 'Reset', self._reset_out, color=MUTED)
 
         # build
-        self.btn = BuildButton(wrap, self._start); self.btn.pack(fill='x')
-        under = tk.Frame(wrap, bg=BG); under.pack(fill='x', pady=(10, 0), padx=4)
+        self.btn = BuildButton(outer, self._start); self.btn.pack(fill='x', pady=(10, 0))
+        under = tk.Frame(outer, bg=BG); under.pack(fill='x', pady=(10, 0), padx=4)
         self.status = tk.Label(under, text='', bg=BG, fg=MUTED, font=(FONT, 9), anchor='w'); self.status.pack(side='left', fill='x', expand=True)
         self.cancel = Link(under, 'Cancel', self._cancel, bg=BG, color=BAD)
         self.det_link = Link(under, 'Show details', self._toggle_details, bg=BG, color=MUTED); self.det_link.pack(side='right')
