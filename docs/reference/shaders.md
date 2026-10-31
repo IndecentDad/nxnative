@@ -896,7 +896,8 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - Cause: offline builds use the profile depth_mode (gl when omitted), while runtime vertex entries follow nvnDeviceSetDepthMode. An archive built with main0 cannot supply a near-zero base using main0_z.
 - Fix: declare the observed mode in the profile and rebuild the archive. The regression harness records runtime depth and compares it with the tested profile on NVN smoke runs. It also detects bundled archive stamp rejection for chain, depth, or pair-list mismatch. An absent depth log is unknown, not evidence for GL.
 - Found on: The Legend of Zelda: Echoes of Wisdom, update 1.1.0, GitHub issue #758.
-- Check: dm/tools/tests/test_pso_offline.py exercises the real profile with synthetic libraries; dm/tools/tests/test_regress.py checks runtime depth and archive-rejection logs.
+- Also confirmed in supported Windows profiles: NieR:Automata, Portal, and Raging Loop. Their evidence is recorded in each game note; rebuilt archive acceptance and performance remain unverified.
+- Check: dm/tools/tests/test_pso_offline.py checks the supported profiles with synthetic libraries; dm/tools/tests/test_regress.py checks runtime depth and archive-rejection logs.
 
 ### Metal's build folders left by pipeline archive flushes
 
