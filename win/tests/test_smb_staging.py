@@ -73,6 +73,11 @@ class SmbStagingTests(unittest.TestCase):
         self.assertEqual(staging.default_network_output([self.source], self.repo), self.source.parent / 'Celeste.ipa')
         self.assertEqual(self.source.read_bytes(), b'game input bytes')
 
+    def test_default_network_output_uses_roms_ios_game_folder(self):
+        source = r'\\KPSynology\Media\Roms\Switch\Celeste [0100000000000000].nsp'
+        output = staging.default_network_output([source], self.repo)
+        self.assertEqual(str(output), r'\\KPSynology\Media\Roms\iOS\Celeste\Celeste.ipa')
+
     def test_verified_local_copy_is_reused_then_refreshed_when_source_changes(self):
         folder, _ = staging.stage_folder([self.source], self.workspace, self.network)
         copied_file = folder / self.source.name

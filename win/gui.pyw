@@ -380,6 +380,9 @@ class App(tk.Tk):
         for i, tl in enumerate(self.iml_tiles): tl.select(i == int(not self.iml))
         what = 'The IPA and split-data output are' if self.split else 'The IPA is'
         if self.out: self.out_lbl.configure(text=f'Saves to  {self.out}'); self.out_reset.pack(side='left')
+        elif self.files and any(is_network_path(f) for f in self.files):
+            default_output = default_network_output(self.files, REPO)
+            self.out_lbl.configure(text=f'Saves to  {default_output.parent}'); self.out_reset.pack_forget()
         else: self.out_lbl.configure(text=f'{what} saved next to your game files'); self.out_reset.pack_forget()
         if not self.proc:
             if self.files and self.keys: self.btn.set('ready', 'Build IPA')

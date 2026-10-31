@@ -165,7 +165,7 @@ def stage_folder(files, workspace_root=None, network_detector=is_network_path):
 
 
 def default_network_output(files, repo):
-    """Place the default output beside the originals, never in the local build workspace."""
+    """Default network-source output to Media/Roms/iOS/<game>, when the source is under Media/Roms."""
     files = [Path(f) for f in files]
     tid = base_title_id(files)
     name = None
@@ -177,7 +177,13 @@ def default_network_output(files, repo):
                     name = line.split('\t', 1)[1].strip(); break
         except OSError: pass
     if not name: name = files[0].stem + '.ipa'
-    return files[0].parent / Path(name).name
+    ipa_name = PureWindowsPath(name).name
+    roms_root = PureWindowsPath(files[0]).parent
+    while roms_root != roms_root.parent:
+        if roms_root.name.casefold() == 'roms':
+            return roms_root / 'iOS' / PureWindowsPath(ipa_name).stem / ipa_name
+        roms_root = roms_root.parent
+    return files[0].parent / Path(ipa_name).name
 
 
 def zip_split_data(data_dir, destination, progress=None):
