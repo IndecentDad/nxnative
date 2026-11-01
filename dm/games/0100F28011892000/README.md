@@ -1,8 +1,21 @@
 # Overcooked! All You Can Eat (`0100F28011892000`)
 
-Update 1.0.11 (v720896) over the base game, SDK 10.4.1. Unity 2019.4.11f1 IL2CPP with FMOD and Pia on NVN. Plays on the Mac. Tested there in a 35-minute run (63,000 frames): the menus, the Winter Wonderland and Night of the Hangry Horde world maps and a level on each, with music and no `[RED]` line; then 4.5 minutes at 60 fps. iOS is untested.
+PR #836 tested v1.0.11 (v720896) on Mac. This profile targets v1.0.12 (v786432); Windows compilation and packaging succeeded, but device gameplay is untested.
+
+## v1.0.12 Windows build
+
+Main build ID 5582cbf6d1a747428e93752eaee8d5c3. Version-specific profile and shader tables were generated; no v1.0.11 tables were reused. Unity filters retained 45,221 of 520,394 shaders (91.3% reduction); all 45,221 translated and compiled with no failures. Reused extraction, filtered inventory, and 69,392 Metal cache entries; 21,628 Metal libraries compiled, with zero per-shader cache hits. Increased Memory Limit entitlement was parsed from the IPA signature and is enabled.
+
+Base XCI SHA-256: 27BCE5EB3E44495BBF13FFA15E6FAC78229B784EA43DC781312380D7F238ECA3. Update NSP SHA-256: 160A29C3952729040283FCD9E1C2218847D0379C7D3105D44D558070D9BCC3A6.
+
+IPA: D:\NXNativeBuilds\OCAYCE-preflight-0100F28011892000\v1.0.12\artifacts\OvercookedAllYouCanEat-v1.0.12.ipa (41.2 MB), SHA-256 E216EB6F62E691BC4499EDB3A787D52D78FB10F26D68096B50546D5AF19C0BAA.
+Data ZIP: D:\NXNativeBuilds\OCAYCE-preflight-0100F28011892000\v1.0.12\artifacts\OvercookedAllYouCanEat-v1.0.12-data.zip (8,002,966,375 bytes), SHA-256 68edd2d789488591582334f6f9efedfbccd1c4766f378020bc08800158cfd01d.
+
+The build used shader chain 98b359d837d7 from the original Windows working tree; other pre-existing Windows edits remain preserved on codex/overcooked-ayce-1.0.12 and were excluded from this focused merge. Many missing shader facts used defaults, and no offline pipeline archive was built. Validate shader requests, first-use pipelines, memory, controls, and gameplay on device.
 
 ## What it needs
+
+The following settings and runtime measurements preserve upstream v1.0.11 evidence; treat them as candidates for v1.0.12 until device validation.
 
 | Setting | Where | Why |
 |---|---|---|
