@@ -191,6 +191,10 @@ def list_files(src):
     Listed once per build"""
     src = Path(src)
     if src in _LISTED: return _LISTED[src]
+    if src.is_file():
+        out = [(str(src), src.name, src.stat().st_size)]
+        _LISTED[src] = out
+        return out
     out, stack = [], [(str(src), '')]
     while stack:
         d, rel = stack.pop()
@@ -208,7 +212,10 @@ def split_data(data, parts, stamp, name, skip_suffix=()):
     (another drive). A folder that a build with the same stamp and the same files filled is kept as it is; otherwise it is made again in <folder>.partial and swapped in,
     so it never mixes files from two builds. Returns (files, bytes)"""
     import concurrent.futures as cf
-    todo = [(f, f'{rel}/{r}', n) for rel, src in parts.items() for f, r, n in list_files(src) if not r.endswith(tuple(skip_suffix))]
+    todo = []
+    for rel, src in parts.items():
+        listed = list_files(src)
+        todo.extend((f, rel if Path(src).is_file() else f'{rel}/{r}', n) for f, r, n in listed if not r.endswith(tuple(skip_suffix)))
     count, size = len(todo), sum(n for _, _, n in todo)
     sig = stamp + f'files\t{count}\nbytes\t{size}\n'
     if (data / 'nxw_data.tsv').is_file() and (data / 'nxw_data.tsv').read_text(encoding='utf-8') == sig:
@@ -272,7 +279,6 @@ def main():
         if not ((patched / f'{m}.patched.bin').exists() and (patched / f'{m}.fixups.tsv').exists()): die(f'no rewritten module {patched}/{m} (run dm/tools/patch_nso.py first)')
     if not (romfs / marker).exists(): die(f'no RomFS at {romfs} (missing {marker})')
     if image and env.get('NXW_MODS_ROMFS'): die('mods\' RomFS folders are laid over a RomFS folder, and this extraction is one RomFS image (RomFS.img)')
-    if image and env.get('NXW_SPLIT_DATA', '') not in ('', '0'): die('a split build copies the RomFS as a folder, and this extraction is one RomFS image (RomFS.img): build without --split-data')
     if env.get('NXW_MODS_ROMFS'):   # mods' RomFS folders (win/mods.py): hard links of the game's files with the mods' laid over them
         import mods
         romfs = mods.overlay_romfs(romfs, env['NXW_MODS_ROMFS'].split(os.pathsep), w / 'build/romfs_mods', log=t)
@@ -398,7 +404,8 @@ def main():
         # Split build: the IPA holds only the app (small, quick to sign and install); the game files and shader libraries go to a data folder the player copies
         # into the app's Documents (dm/ios/Sources/main.m looks for <Documents>/romfs and <Documents>/<folder>/romfs, and takes msl/ and aoc/ beside it)
         data = Path(split) if split not in ('1', 'YES') else out_ipa.with_name(out_ipa.stem + '-data')
-        split_data(data, {'romfs': romfs, f'msl/{msldir}': msl_ios / msldir, **({'aoc': aoc} if has_aoc else {})},
+        romfs_path = 'romfs.img' if image else 'romfs'   # main.m accepts Documents/romfs.img as well as a RomFS folder
+        split_data(data, {romfs_path: romfs, f'msl/{msldir}': msl_ios / msldir, **({'aoc': aoc} if has_aoc else {})},
                    f'game\t{game}\nbundle_id\t{bundle_id}\nversion\t{version}\nchain\t{v}\ngfx\t{gfx}\n', name, skip_suffix=('_bp.metallib',) if skip_bp else ())
     else:
         maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}')
