@@ -2,6 +2,7 @@
 // The game files (RomFS) ship inside the App at <App>/romfs; Documents/romfs.img (one image, scripts/push_romfs.sh) or a Documents/romfs folder is also accepted (lets you swap them without reinstalling).
 // A split build (win/build_app.py, NXW_SPLIT_DATA) ships no game files: its "<Game>-data" folder (romfs/, msl/, aoc/) goes into Documents, whole or its contents.
 #import <UIKit/UIKit.h>
+#import <Metal/Metal.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -92,6 +93,17 @@ static NSString *data_dir(NSString *name) {
 // Why a slim build found no usable game files: the verdict on Documents/romfs.img, in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
 static char g_boot_message[640];
 const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
+// Create the first Metal device only after the launcher applies its settings, then refuse GPUs without the BC formats used by game textures.
+const char *front_ios_device_check(void) {
+    static char msg[320]; static int done;
+    if (done++) return msg[0] ? msg : NULL;
+    id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();
+    if (gpu.supportsBCTextureCompression) return NULL;
+    snprintf(msg, sizeof msg, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
+             gpu ? gpu.name.UTF8String : "no Metal device");
+    fprintf(stderr, "[RED] boot: %s\n", msg);
+    return msg;
+}
 static void romfs_identity_report(NSString *doc) {
     romfs_id want, got;
     int rc = romfs_id_check([NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs.id"].fileSystemRepresentation,
