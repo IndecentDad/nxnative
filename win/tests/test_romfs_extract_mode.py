@@ -32,8 +32,8 @@ class RomFSExtractionMode(unittest.TestCase):
         self.assertFalse(upstream.romfs_image_mode({'NXW_SPLIT_DATA': '1'}))
         self.assertFalse(upstream.romfs_image_mode({'NXW_SPLIT_DATA': r'D:\Games\Title-data'}))
         base = ['nx_extract', 'keys', 'base.nsp', '-', 'out']
-        self.assertEqual(upstream.extraction_command(*base, True, False), base + ['--romfs-image'])
-        self.assertEqual(upstream.extraction_command(*base, False, False), base)
+        self.assertEqual(upstream.extraction_command(*base, True, 0x0100000000000000, False), base + ['--romfs-image', '--app', '0100000000000000'])
+        self.assertEqual(upstream.extraction_command(*base, False, 0x0100000000000000, False), base + ['--app', '0100000000000000'])
 
     def test_reuse_requires_the_requested_format(self):
         with tempfile.TemporaryDirectory() as d:

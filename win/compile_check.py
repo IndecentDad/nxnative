@@ -12,6 +12,7 @@ game = sys.argv[1] if len(sys.argv) > 1 else '010015100B514000'
 work = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(tempfile.gettempdir()) / 'nxw_compile_check'
 sdk = tc.ios_sdk() or ba.die('no iPhoneOS SDK'); clang = tc.llvm_tool('clang') or ba.die('no clang')
 (work / 'profile').mkdir(parents=True, exist_ok=True)
+ba.py(ba.DM / 'gfx/tools/host_msl.py', '--sdk', 'iphoneos', '--sources-only', work / 'profile/host_msl_gen.h', *sorted((ba.DM / 'gfx/msl').glob('*.metal')))
 ba.py(ba.DM / 'games/game.py', 'header', game, work / 'profile/game_profile.h')
 files, incs = ba.host_sources(work / 'profile')
 files += [p.resolve() for p in sorted((ba.IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), (WIN / 'ios/DataHelp.m').resolve(), (WIN / 'ios/nxw_unzip.c').resolve()]

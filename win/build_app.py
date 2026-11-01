@@ -313,6 +313,7 @@ def main():
     if app.exists(): shutil.rmtree(app)
     (gen / 'profile').mkdir(parents=True); app.mkdir(parents=True)
     t('generate Gen/ (profile header, embedded modules, tables)')
+    py(DM / 'gfx/tools/host_msl.py', '--sdk', 'iphoneos', '--sources-only', gen / 'host_msl_gen.h', *sorted((DM / 'gfx/msl').glob('*.metal')))
     py(DM / 'games/game.py', 'header', game, gen / 'profile/game_profile.h')
     flags = py(IOS / 'tools/gen_embed.py', patched, gen / 'embed.S', *mods)
     es = gen / 'embed.S'
@@ -351,6 +352,7 @@ def main():
     py(DM / 'tools/make_ext_font.py', dmres / 'font/nintendo_ext.ttf', tc.letter_font() or die('no bold TTF for the button icons: set LETTER_FONT'))
 
     files, incs = host_sources(gen / 'profile')
+    incs.append(gen.resolve())   # host_msl.m includes the generated source fallback header
     files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), (WIN / 'ios/DataHelp.m').resolve(), (WIN / 'ios/nxw_unzip.c').resolve(), es.resolve()]
     fws = frameworks(sdk, files)
     rt = compat_rt_needed(clang)

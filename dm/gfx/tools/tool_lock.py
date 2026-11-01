@@ -18,11 +18,18 @@ def tools_now():
     sc = shutil.which(SPIRV_CROSS)
     t['spirv-cross'] = sha16(sc) if sc else 'missing'
     for sdk in ('macosx', 'iphoneos'):
-        t['metal_' + sdk] = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '--version'], capture_output=True, text=True).stdout.splitlines()[0:1] or ['missing']
+        cmd = ['xcrun', '-sdk', sdk, 'metal', '--version']
+        if os.name == 'nt': cmd = [sys.executable, str(__import__('pathlib').Path(__file__).resolve().parents[3] / 'win' / 'xcrun.py'), *cmd[1:]]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        t['metal_' + sdk] = r.stdout.splitlines()[0:1] or ['missing']
         t['metal_' + sdk] = t['metal_' + sdk][0]
     return t
 
 NO_RUN = 'does not run'
+def active_lock():
+    # The upstream LOCK remains the default and remains part of dmsh_chain.version(). An alternate lock is opt-in and must be paired with its isolated build workspace.
+    return os.environ.get('DMSH_TOOLCHAIN_LOCK') or LOCK
+
 def xlate_embedded():
     """The source digest the translator embeds (dmsh_xlate --source-sha), or 'does not run (<its first error line>)': without a .NET 10 runtime for the architecture it starts as (a Python
     under Rosetta starts the universal apphost as x86_64) it exits 131 with nothing on stdout, which read as an empty digest and a stale translator (docs/reference/packing.md)"""
@@ -34,7 +41,8 @@ def xlate_embedded():
 def no_run_message(embedded): return f'the translator {embedded}: it needs the .NET 10 runtime for this Mac\'s architecture (brew install --cask dotnet-sdk); unset DOTNET_ROOT if it names another one'
 
 def check_tools():
-    want = dict(l.rstrip('\n').split('\t', 1) for l in open(LOCK) if '\t' in l and not l.startswith('#'))
+    lock = active_lock()
+    want = dict(l.rstrip('\n').split('\t', 1) for l in open(lock, encoding='utf-8') if '\t' in l and not l.startswith('#'))
     now = tools_now(); ran = not now['xlate_source'].startswith(NO_RUN)
     bad = [f'{k}: lock {want.get(k)} / actual {v}' for k, v in now.items() if want.get(k) != v and (ran or k != 'xlate_source')]
     if not ran: bad.append(no_run_message(now['xlate_source']))
@@ -47,8 +55,9 @@ if __name__ == '__main__':
         t = tools_now()
         if t['xlate_source'].startswith(NO_RUN): sys.exit('[RED] ' + no_run_message(t['xlate_source']))
         if t['xlate_source'] != xlate_source_sha(): sys.exit(f'[RED] the translator was not built from the in-repo source (embedded {t["xlate_source"]} / in repo {xlate_source_sha()}): rebuild dmsh_xlate first')
-        open(LOCK, 'w').write('# Translation chain tool fingerprints (written by tool_lock.py --update-lock; regenerate after changing tools and commit it)\n' + ''.join(f'{k}\t{v}\n' for k, v in t.items()))
-        print('wrote', LOCK)
+        lock = active_lock()
+        open(lock, 'w', encoding='utf-8', newline='\n').write('# Translation chain tool fingerprints (written by tool_lock.py --update-lock; regenerate after changing tools and commit it)\n' + ''.join(f'{k}\t{v}\n' for k, v in t.items()))
+        print('wrote', lock)
     elif a == ['--check-tools']:
         bad = check_tools()
         for b in bad: print('[RED] translation chain tools do not match the lock file: ' + b)

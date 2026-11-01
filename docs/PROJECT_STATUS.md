@@ -12,4 +12,9 @@
 - Upstream/main tip 5474c6f3 is merged at 357465aa; Windows SMB staging/output routing and conflict resolutions are retained.
 - Focused archive suite: 18 passed, 2 skipped; isolated depth/stamp classification passed. The full regression module needs Darwin libproc and t_nvn is Mac-only. Windows compile_check passed for 186/186 app sources.
 - Overcooked v1.0.12 compiled 45,221/45,221 filtered shaders and produced a 41.2 MB IPA plus an 8.00 GB data ZIP. The Increased Memory Limit entitlement was verified. Build outputs and hashes are in the game note; device gameplay remains untested.
-- Next: install and test v1.0.12 on device. Keep the local merge unpushed until separately requested; preserve untracked prod.keys and win/gui.pyw.backup-20261030-172745.
+- Current upstream merge is still in progress in the linked worktree: HEAD cbc877e1, MERGE_HEAD cd859c38, no unresolved paths. It includes Bananza v458752 profile data; no commit or push yet.
+- Current Windows Metal tools report 32023.850; upstream shader-chain lock requires 32023.922.4. No matching installer was found in the checked download/build locations; Apple download requires sign-in. Keep lock and cache validation unchanged.
+- Restored the iOS memory guard independently (FPS cap and malloc relief); texture-page discard remains omitted because upstream NVN relies on dirty-page tracking. Extraction, SMB staging, and Windows build helper tests pass; Metal translation/build is blocked on the compiler fingerprint.
+
+- The merged upstream translator builds successfully for Windows using the normal per-project NuGet graph; the earlier shared intermediate-path override caused the missing dependency errors. Isolated output runs on .NET 10.0.14 and reports source hash bff706efc1b71e0e. Its DLL hashes differ from the upstream lock, so it is not placed in the game cache or repo binary directory.
+- Tahoe is RUNNING but SSH timed out after startup; its documented OpenCore VNC selection is still required before Xcode/Metal availability can be checked.
