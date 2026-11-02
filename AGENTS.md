@@ -1,11 +1,4 @@
 # Notes for agents
-## Environment Routing
-
-- Windows: Physical Windows 11 PC, not a VM. NXNative checkout: `D:\NXNativeWindows`; Windows GUI, build tools and branches belong here.
-- macOS: Tahoe, accessed with the existing `ssh tahoe` alias, for Intel-compatible macOS/iOS builds and the existing macOS checkout.
-- Linux: Codex execution environment and its local clones; these are not the Windows or Tahoe working directories.
-- GitHub: Shared repository and branch history, not a substitute for inspecting uncommitted work on the target machine.
-- Identify the target platform and current machine before commands; use that machine's existing connection. Never assume Windows paths are accessible through Tahoe. If Windows access is unavailable, say so and provide PowerShell commands; do not search unrelated environments. Never initialize or replace an inaccessible checkout. Preserve uncommitted changes and build artifacts.
 
 - This repository runs Nintendo Switch games natively on Apple platforms: the game's own code runs, rewritten only where Apple's kernel requires it (`dm/tools/patch_nso.py`), on a host that answers Horizon's SVCs and the SDK's services (`dm/host`) and implements NVN, Vulkan and NVIDIA's desktop OpenGL on Metal (`dm/gfx/nvn`, `dm/gfx/vk`, `dm/gfx/gl`). Every game in the [games table](dm/games/README.md#games) is playable, tested on the Mac or the iPhone (a Mac gameplay test is enough to count); the table lists each with its build, SDK, engine and graphics API, and links its note, `dm/games/<id>/README.md`: what its profile needs and why, what was found on it, how to drive it on the Mac, what is open. [README.md](README.md) is the player-facing page (games, packing, playing); [docs/development.md](docs/development.md) has the internals, the script's options, building by hand, prewarm lists and power.
 - Where to start:
@@ -36,21 +29,4 @@
   The translator is `dm/gfx/tools/dmsh_xlate_bin`, which matches `dmsh_chain.lock`; a fresh `dotnet publish` does not.
 - A change to the chain, host or tools runs `scripts/regress.py check --games` on the five local games it is most likely to reach (`regress.py impact` helps): more only when truly needed, fewer when its reach is narrow and clear. Its report, naming the games and why, goes into the PR ([06-dev-loop.md](docs/agents/06-dev-loop.md)).
 - iOS builds are unsigned IPAs that the user sideloads and tests; diagnostics come back as the app's `Documents/log.txt`. Do not sign or install builds on the user's devices.
-- Commit only when asked, with `git -c user.name=seedds -c user.email=seedds@gmail.com commit`.
-
-
-## Windows Build Worker
-
-- SSH from the Synology Codex container through the dedicated alias:
-  `ssh -o BatchMode=yes nxwindows "whoami"`
-  The alias targets `RTXGAMINGPC`, account `kylep`; the checkout is `D:\NXNativeWindows`. Run remote PowerShell commands with `ssh nxwindows "powershell -NoProfile -Command \"Set-Location 'D:\NXNativeWindows'; <commands>\""`. Do not put passwords, private keys, or connection secrets in this repository.
-- The iPhoneOS SDK is `D:\NXNativeWindows\win\sdk\out\iPhoneOS.sdk`. `win/toolchain.py` discovers SDKs recursively under `win\sdk\out`, so this checkout-local location persists without `win\toolchain.json` or an environment override. Verify the worker with `python win\doctor.py`; it checks Python modules, .NET 10, LLVM/clang and ld64.lld, SDK, Metal compilers, spirv-cross, zstd, glslangValidator, and fonts. Do not reinstall tools that pass.
-- The Windows fork build entry point is `python win\build_ipa_windows.py <NSP-folder> -k <prod.keys>`. A split package uses `--split-data` (or `--split-data=<destination>`) and automatically extracts RomFS as a directory, producing a small IPA plus a sibling `<IPA-name>-data` folder for the app's Documents. Inspect the build output and generated data folder before transferring anything.
-- Split-data extraction omits `--romfs-image`, so `nx_extract` writes a RomFS directory; conventional IPA extraction retains `RomFS.img`. When switching modes in an existing workspace, the build stages the requested format and replaces only the old RomFS representation, preserving `ExeFS` and sibling shader captures or other generated artifacts. No manual cleanup or separate conversion utility is needed. The shader split is keyed by RomFS paths and sizes, and shader-library reuse is keyed by the shader package and chain inputs; preserve those outputs and let the pipeline validate reuse.
-- Build outputs and reusable intermediates live beside the NSPs under `<title ID>_build`, including extraction, rewrite outputs, shader packages/caches, and generated iOS artifacts. Preserve these and existing game data. Do not clean or replace shader outputs as part of RomFS preparation; any future conversion cache must be isolated from shader directories and keyed/validated against the source image and extractor version. Reuse the official top-level build script and its cache checks.
-- Remote examples:
-  ```powershell
-  ssh nxwindows "powershell -NoProfile -Command \"Set-Location 'D:\NXNativeWindows'; python win\doctor.py\""
-  ssh nxwindows "powershell -NoProfile -Command \"Set-Location 'D:\NXNativeWindows'; git status --short --branch\""
-  ```
-- Get approval before launching a full game build, changing extraction or RomFS packaging code, deleting/replacing build or shader-cache contents, changing Windows authentication or SSH server settings, or copying game data to another device. Respect Apple SDK licensing terms.
+- Follow `docs/branch-workflow.md` for fork branches and IndecentDad identity; commit only when asked.

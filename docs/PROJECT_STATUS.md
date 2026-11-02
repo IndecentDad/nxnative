@@ -1,27 +1,22 @@
-# NXNative Windows integration status
+# NXNative Project Status
 
-- Working branch: `windows/main`; current baseline includes Windows cloud-save integration (`4ddec77b`).
-- GUI scrolling fix is present at `a8b462f5`; Windows RomFS extraction-mode and iOS task submission fixes are committed at `904b93bb`.
-- Upstream cloud-save engine from `123c7ff0` is integrated at `0096df7a`; Windows UIKit folder selection, build source discovery, and the upstream fetch-thread failure fix are at `c899e93a`.
-- Root `AGENTS.md` now documents Windows, Tahoe, Linux, and GitHub routing.
-- Windows toolchain doctor passed. Four RomFS mode tests passed. `win/compile_check.py` compiled all 186 app sources for iOS SDK 26.5, including `save_sync.c`, `CloudSaves.m`, `SaveSync.m`, `front_ios.m`, and the UIKit launcher.
-- Windows SMB builds keep staging and build artifacts under the running GUI EXE directory; network-source IPA and split-data outputs default to Media/Roms/iOS/<Game Name>, with split data zipped locally before transfer. Ten focused tests pass.
-- The upstream `t_save_sync` host test was not run on Windows; its harness uses Darwin APIs. iCloud Drive behavior still needs device validation on iPad.
-- The GUI process stayed alive when started through SSH, but SSH launched it in Session 0 without a visible window handle; interactive scrolling and settings controls remain unverified.
-- Shader chain files are unchanged from the Windows baseline (`dmsh_chain.h` `9a8bbaaf`, `dmsh_chain.lock` `3d7d5754`). Fetched current upstream has different fingerprints (`8cdb0742`, `d3d525eb`); do not reuse assets built for that chain without pipeline stamp checks.
-- Upstream Switch 2 main tip `cd859c38` is integrated via merge `692b53dc`; the Bananza release source is `e9d66e9a953f6f014c9e2cdbf8dbe66e23159222`, targeted by annotated tag `bananza-ios-working-20261101`. No local `nx2` exists; `origin/nx2` has one unique commit and `upstream/nx2` has seven; neither ref was deleted.
-- Focused archive suite: 18 passed, 2 skipped; isolated depth/stamp classification passed. The full regression module needs Darwin libproc and t_nvn is Mac-only. Windows compile_check passed for 186/186 app sources.
-- Overcooked v1.0.12 compiled 45,221/45,221 filtered shaders and produced a 41.2 MB IPA plus an 8.00 GB data ZIP. The Increased Memory Limit entitlement was verified. Build outputs and hashes are in the game note; device gameplay remains untested.
-- Upstream lock still requires Metal 32023.922.4; Windows Metal 32023.850 is separately identified in dmsh_chain.windows.lock. The original dmsh_chain.lock is unchanged. Tahoe SSH remains blocked at the documented OpenCore picker; exact Mac compiler availability is unverified.
-- The iOS BC-texture device guard was restored with explicit Metal import in `47a7c6b7`; unsafe legacy texture-page discard remains disabled. Windows regression suite: 31 passed, one optional decoder test skipped.
+## Stable branches
 
-- Windows translator variant is a Release win-x64 .NET 10 build, source hash bff706efc1b71e0e, validated against its explicit lock. Upstream ARM64 translator lock/binaries remain untouched.
-- Bananza dump under D:\Downloads\Donkey Kong Bananza is update 458752 with base/updates/dlc; source is unchanged and the isolated workspace uses directory junctions. Upstream pack produced an 8.6 GB RomFS image and one DLC image.
-- Upstream shader split found 23,638 entries. Vertex f9c807930abd1234, geometry 5d537f7630ec3671, and compute 56493833ce173d1b passed translation and iOS Metal compilation: 5 outputs, 20 variants compiled, 1 compatible cache reuse.
-- Full Bananza build completed for update `v458752`: all 23,638 discovered shaders were translated and compiled under `DMSH_CHAIN=b7cd656abd7c` and the Windows lock SHA-256 `f8b7006a216af00bb53fe5fe9e26677c6780fb1bc7786c072d8356f1c979dcb7` (Metal 32023.850); initial compile reused zero pre-existing shader artifacts. This is not equivalent to upstream Mac Metal 32023.922.4.
-- The installed DLC shader content differs from the registered tables; the upstream pipeline generated a shader-only derived profile while preserving registered module fixes. IPA packaging and the split-data ZIP integrity check passed.
-- Final Bananza outputs are published under `/volume1/Media/Roms/iOS/Donkey Kong Bananza/`: `Donkey Kong Bananza.ipa` 25,954,933 bytes, SHA-256 `33af03a80fec0fe7fa01d3e5e56bd38c077f80849b80283cf94beb79d9e8188c`; `Donkey Kong Bananza-data.zip` 10,877,593,877 bytes, SHA-256 `0bec5bfbd197fdc1ad9e29e7a2e37e63fdccb763fc680e8221b972cc8a3c301c`. The SMB host returned Windows error 1326; transfer used the existing `nxwindows` SFTP connection and both staged hashes matched.
-- Runtime follow-up: `main.m` now checks each direct Documents child for `romfs.img`, using the same completeness and `romfs.id` validation as the root image. Commit `e9d66e9a`; the corrected IPA was rebuilt, its executable contains the updated diagnostic, and its IPA archive passed validation.
-- Corrected IPA is published at `/volume1/Media/Roms/iOS/Donkey Kong Bananza/Donkey Kong Bananza-romfs-lookup-fix.ipa` (25,955,310 bytes, SHA-256 `29f441c6e908fc0d365ff1c0bbe4aa0acd818ef1d2b1d793a6bb6821a71e5236`). The user confirmed it runs successfully on iPadOS at 60 fps; the earlier IPA and game-data ZIP remain unchanged.
-- Bananza remains unsigned for PlumeImpactor signing. User-confirmed gameplay reaches 60 fps; long-session stability, battery efficiency, full-game compatibility, and iPad memory behavior remain untested. Supported hardware needs BC texture compression (M1 iPad or newer per the guard).
-- Windows build fixes include UTF-8 shader table outputs, dump copy fallback when APFS cp is unavailable, explicit XLATE selection, variant-aware Metal validation, and a Windows thread pool for patch_nso scans. The full cross-platform Python suite is not clean on Windows (770 tests: 27 failures, 138 errors, 41 skips); graphics suite also has host-specific failures. Do not describe those suites as passing.
+- `main` is the primary IndecentDad fork. Local `main` is `cc72bcf1`, based on upstream `4a2a81a6` with the reviewed Save Folder Sync and Intel Tahoe changes. Remote `origin/main` remains `40e6baed`, an ancestor; no remote branch has been changed.
+- `windows/main` remains at `4637781741c571c8942f57d71e04246f62c42cca`. It carries 89 branch-only commits and is 33 upstream commits behind. Its unique work includes the Windows build/GUI, Windows-to-Mac Metal shader pipeline, staging, caches, split builds, IPA packaging, Bananza support and custom Unity shader selection.
+- The local `integration` branch is preserved at `a5ae0470` and backed up at `backup/integration-before-upstream-2026-11-02`. Do not retire it before Windows reconciliation and validation.
+- Stable tips have local backups: `backup/main-before-consolidation-2026-11-02`, `backup/origin-main-before-consolidation-2026-11-02`, and `backup/windows-main-before-consolidation-2026-11-02`.
+
+## Windows reconciliation candidate
+
+- `feature/windows-main-reconcile` starts at the fetched Windows tip and merges local `main`. Shared files use current upstream behavior where Windows had only older copies. The candidate retains the Windows-specific Unity tier/keyword/pass shader filters and docs. `patch_nso.py` uses the current POSIX fork worker path and the tested Windows thread fallback.
+- The physical Windows worktree `D:\NXNativeWindows` is on `codex/overcooked-ayce-1.0.12` with uncommitted Overcooked source/profile/test/build work. Preserve it exactly. A separate worktree, `D:\NXNativeBuilds\OCAYCE-merge-0100F28011892000`, has clean `windows/main` at `46377817`.
+- The Windows clone's local `main` is the historical `269d61ff` ancestor of `windows/main`; it is not the new primary fork branch. Do not move any Windows branch ref until the physical checkout and its unique work are reviewed.
+- The Synology candidate is source-only and unpromoted. Run focused Windows source tests after resolving it; a representative build on the physical PC remains required before advancing `windows/main`.
+
+## Validation and preserved work
+
+- Local primary-branch Save Folder Sync and documentation tests passed 30/30. No macOS/iOS or Windows build, shader recompilation, or Mario Kart World compilation was run.
+- Other dirty worktrees remain untouched: `/tmp/nxnative-metroid-shaderdiag` changes `dmsh_build.py`; `nxnative-sidestore` has SideStore status/source/test/doc changes. The Windows Overcooked worktree and its key material were not read or modified.
+- Do not push, force-push, delete remote branches or remove worktrees during this consolidation. Retire `integration` only after both stable branches are backed up and validated. Propose remote deletions separately.
+- Mario Kart World work starts from a temporary `feature/*` branch after the stable branches are reconciled.
