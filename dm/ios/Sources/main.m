@@ -35,14 +35,14 @@ static int romfs_image_complete(NSString *path) {
     }
     romfs_image_close(m); return 1;
 }
-// The data root: the folder holding romfs/ (and, for a split build, msl/ and aoc/). After the RomFS images, looked for in Documents, then in each folder directly inside
-// Documents (a split build's "<Game>-data" folder copied over whole), then in the App. Only a romfs/ containing the game profile's romfs_marker path counts (Mario: System/Resource)
+// The data root may hold romfs.img or romfs/ (and, for a split build, msl/ and aoc/). Check Documents first, then each direct child folder
+// (a split build's "<Game>-data" folder copied over whole), then the App. A folder RomFS counts only when it contains the profile marker.
 static NSString *g_data_root;
-// A build made with DM_COPY_ROMFS=NO carries <App>/romfs.id (dm/host/romfs_identity.h): only a Documents/romfs.img with that identity is used. No romfs.id (the default build): any complete image
+// A build made with DM_COPY_ROMFS=NO carries <App>/romfs.id (dm/host/romfs_identity.h): candidate RomFS images must have that identity. No romfs.id (the default build): any complete image
 static int romfs_identity_accepts(NSString *img) {
     romfs_id want, got;
     int rc = romfs_id_check([NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs.id"].fileSystemRepresentation, img.fileSystemRepresentation, &want, &got);
-    if (rc != ROMFS_ID_OK && rc != ROMFS_ID_NONE) fprintf(stderr, "[RED] boot: Documents/romfs.img is not the image this build needs (verdict %d); not used\n", rc);
+    if (rc != ROMFS_ID_OK && rc != ROMFS_ID_NONE) fprintf(stderr, "[RED] boot: RomFS image %s is not the image this build needs (verdict %d); not used\n", img.fileSystemRepresentation, rc);
     return rc == ROMFS_ID_OK || rc == ROMFS_ID_NONE;
 }
 static NSString *romfs_locate(void) {
@@ -73,6 +73,8 @@ static NSString *romfs_locate(void) {
     }
     [roots addObject:NSBundle.mainBundle.resourcePath];
     for (NSString *r in roots) {
+        NSString *image = [r stringByAppendingPathComponent:@"romfs.img"];
+        if (romfs_image_complete(image) && romfs_identity_accepts(image)) { g_data_root = r; return image; }
         NSString *d = [r stringByAppendingPathComponent:@"romfs"];
         if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) { g_data_root = r; return d; }
     }
