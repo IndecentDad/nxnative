@@ -9,14 +9,17 @@
 
 ## Windows reconciliation candidate
 
-- `feature/windows-main-reconcile` starts at the fetched Windows tip and merges local `main`. Shared files use current upstream behavior where Windows had only older copies. The candidate retains the Windows-specific Unity tier/keyword/pass shader filters and docs. `patch_nso.py` uses the current POSIX fork worker path and the tested Windows thread fallback.
+- `feature/windows-main-reconcile` is committed as `b1efbec19d7b29dd3b90ab82eba345d384e6b199`. It has parents `4637781741c571c8942f57d71e04246f62c42cca` (`windows/main`) and `a5ae0470f8f94c6a2310f5947640affe021e5f34` (consolidated `main` history, including `cc72bcf1`).
+- The merge keeps current upstream shared behavior, Windows compiler/toolchain and shader pipeline, GUI, SMB staging, cache handling, split builds, packaging, Bananza support, Unity filters and `patch_nso_parallel` fallback. It also retains the Windows-only Overcooked profile already on the stable Windows branch; no dirty checkout changes or key material are included.
+- Local candidate checks: 63 passed, 1 skipped. Full collection is not available on Synology: missing `lz4` and `capstone`, unset game-specific `DM_GAME`, and macOS-only `/usr/lib/libproc.dylib` prevent 17 test modules from collecting.
+- Windows isolated worktree `D:\NXNativeBuilds\validation-windows-main-reconcile` is clean at the candidate SHA. Python compileall passes and `win/tests/test_win.py` passes 10 tests with 1 optional texture decoder test skipped. `win/compile_check.py` stops because no iPhoneOS SDK is configured on Windows; GUI startup and representative build validation remain pending.
 - The physical Windows worktree `D:\NXNativeWindows` is on `codex/overcooked-ayce-1.0.12` with uncommitted Overcooked source/profile/test/build work. Preserve it exactly. A separate worktree, `D:\NXNativeBuilds\OCAYCE-merge-0100F28011892000`, has clean `windows/main` at `46377817`.
 - The Windows clone's local `main` is the historical `269d61ff` ancestor of `windows/main`; it is not the new primary fork branch. Do not move any Windows branch ref until the physical checkout and its unique work are reviewed.
-- The Synology candidate is source-only and unpromoted. Run focused Windows source tests after resolving it; a representative build on the physical PC remains required before advancing `windows/main`.
+- `windows/main` and local `main` have not been promoted or pushed. Remote refs were checked and remain at `origin/main=40e6baed`, `origin/windows/main=4637781741`, and `origin/integration=d0098143`. Because the Windows compile check could not execute and the GUI/build have not been validated, do not advance or push stable branches yet.
 
 ## Validation and preserved work
 
 - Local primary-branch Save Folder Sync and documentation tests passed 30/30. No macOS/iOS or Windows build, shader recompilation, or Mario Kart World compilation was run.
 - Other dirty worktrees remain untouched: `/tmp/nxnative-metroid-shaderdiag` changes `dmsh_build.py`; `nxnative-sidestore` has SideStore status/source/test/doc changes. The Windows Overcooked worktree and its key material were not read or modified.
-- Do not push, force-push, delete remote branches or remove worktrees during this consolidation. Retire `integration` only after both stable branches are backed up and validated. Propose remote deletions separately.
+- Preserve `backup/integration-before-upstream-2026-11-02`; its target is `a5ae0470`. Keep the integration branch and worktree until both stable branches are validated and confirmed remotely. Proposed remote deletion after that point: `origin/integration` at its then-current SHA `d009814376160f657c57c67040a912696d2f3ccf`; do not delete it without a separate explicit request.
 - Mario Kart World work starts from a temporary `feature/*` branch after the stable branches are reconciled.
