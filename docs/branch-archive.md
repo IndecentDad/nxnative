@@ -3,12 +3,9 @@
 Celeste's control IPA was confirmed fully functional on iPhone on 2026-10-25,
 unlocking branch cleanup and focused Save Folder Sync migration.
 
-## Active branch model
+## Historical branch model
 
-- `main`: exact fetched upstream mirror (`787523f`); no custom commits.
-- `integration`: validated upstream `6a068772` plus Intel launcher and documentation.
-- `feature/eden-save-folder-sync`: temporary validation candidate, not merged.
-- Validated tags remain immutable, including `validated/celeste-ios-c6f19d5`.
+The branch layout recorded during the 2026-10-25 archival work has been superseded. The current stable-branch strategy is documented in [branch workflow](branch-workflow.md): `main` is the primary custom fork and `windows/main` inherits its applicable changes. Keep validated tags immutable, including `validated/celeste-ios-c6f19d5`.
 
 ## Recovery references
 

@@ -33,9 +33,11 @@ Before delivery verify embedded ARM64 code sections and packaged rewriter tables
 
 ## Updating upstream
 
-1. Fetch `upstream` and `origin`; back up relevant refs and local changes. Verify remotes and IndecentDad identity. Fast-forward `main` to `upstream/main` and push normally to the fork. Never add custom commits to `main`, force-push, or push to upstream.
-2. Branch temporarily from `integration`, merge the pinned upstream revision, and resolve conflicts while retaining the README modification inventory. Keep `integration` at its known-working checkpoint during validation.
-3. Check the translator/lock, profiles and artifact-generation requirements. Use isolated directories and the official pipeline for affected games. Preserve the old validated artifacts.
-4. After successful device validation, fast-forward/merge the validated candidate into `integration`, create a new immutable annotated checkpoint tag, and retire the temporary feature branch. Only then is the upstream update complete.
+1. Fetch `upstream` and `origin`; inspect every relevant worktree and back up stable refs before moving them. Verify remotes and IndecentDad identity.
+2. Update `main` from `upstream/main`, retaining only required, reviewed custom functionality. Validate the source changes and preserve the last known-working artifacts.
+3. Create a temporary `feature/*` or `fix/*` branch from `windows/main`, merge the updated `main`, and resolve shared-code conflicts without dropping Windows build tools, GUI, shader compilation, staging, caching, split builds or packaging. Validate on the physical Windows checkout before advancing `windows/main`.
+4. Record exact source and artifact provenance. Create immutable annotated tags for device-validated checkpoints. Retire temporary branches after merge; retire `integration` only once its required changes are safely present in both stable branches and the Windows validation is complete.
+
+Do not force-push, delete remote branches or rewrite published history without a separate review and explicit authorization. Local consolidation does not authorize remote writes.
 
 Eden Save Folder Sync passed the device-validation gate for both Metroid Dread and Celeste. The candidate manifests identify source commit `a51aad6e0ae2fef570a94c05e5291fc0f3b5105e`; their recorded IPA SHA-256 values match the preserved files. The immutable integration checkpoint is `validated/save-folder-sync-v1`. Continue follow-up work on `fix/save-sync-polish` without rebuilding or replacing those confirmed IPAs unless requested.

@@ -1,25 +1,23 @@
 # NXNative Project Status
 
-## Shared integration baseline
+## Branch strategy and current source
 
-- Source/build baseline: `2694c280d563ea573c705b939f54c1ccd34f9e95` (merge of `game/echoes-of-wisdom` into `integration`; parents `fe662e1` and `e358448`). Echo history includes portable translator fix `af582053` and successful Echo build record `e358448`. Fork `main` was not modified.
-- Echoes merge preserved existing integration Save Folder Sync and Intel support. Launcher keeps upstream grouped settings, reset-to-tested-defaults and navigation, with Save Sync entry, folder selection, status/details/conflict handling, manual **Sync Now**, and bridge initialization. Save paths are local `Documents/save` and `<Selected Folder>/<TitleID>/` directly.
-- Local functionality beyond the upstream mirror: Eden-compatible Save Folder Sync module/UI/bridge; Echoes 1.1.0 profile and validated shader data; portable AnyCPU translator build fix. These are candidates for upstream contribution where generally applicable. No game-specific runtime behavior was changed to add Save Sync. Upstream Intel launcher support from `1822616` remains; no launcher-only change was reintroduced by the Echo merge.
+- `main` is the primary IndecentDad fork based on `seedds/nxnative/main`; it carries only required, tested custom changes. `windows/main` inherits applicable `main` changes and retains Windows build, GUI, shader, SMB staging, cache, split-build and IPA packaging support.
+- Use temporary `feature/*` and `fix/*` branches from the stable branch being changed. Retire `integration` only after its required custom changes are incorporated into both stable branches, backed up and validated.
+- Current upstream: `4a2a81a64f029d0a75ade9523c8ffc6c89465375`. Local `main` currently equals upstream. The previous fork `origin/main` tip is `40e6baed`; no remote refs have been changed.
+- Local `integration` contains the resolved upstream merge and has local backup `backup/integration-before-upstream-2026-11-02`. Its net custom delta is Save Folder Sync alongside upstream Cloud Saves, Intel AnyCPU translator settings, and project/provenance docs. An outdated provider-path source assertion was corrected; focused Save Sync and documentation tests pass (30/30).
+- Local backups: `backup/main-before-consolidation-2026-11-02`, `backup/origin-main-before-consolidation-2026-11-02`, `backup/windows-main-before-consolidation-2026-11-02`.
+- Remote-tracking `origin/windows/main` is `4637781741c571c8942f57d71e04246f62c42cca`; it contains 89 branch-only commits and is 33 upstream commits behind. It retains the Windows toolchain/GUI, Windows-to-Mac Metal pipeline, staging, cache, split-build, packaging, and Bananza-related changes. The physical Windows worktree is not accessible from this host, so its uncommitted state and Windows validation remain unknown. Do not advance or retire this branch until audited on Windows.
 
-## Intel translator reproducibility
+## Retained custom functionality and validated builds
 
-- Publish managed IL for AnyCPU with no RID, `PublishReadyToRun=false`, and `UseAppHost=false`; Tahoe x86_64 cannot load an ARM64 ReadyToRun image. Keep the checked-in `dmsh_xlate` launcher universal (arm64 + x86_64).
-- Reproduce: `dotnet publish dm/gfx/tools/dmsh_xlate/dmsh_xlate.csproj -c Release -p:PublishReadyToRun=false -p:UseAppHost=false -o /tmp/nxnative-dmsh-xlate`, then `dotnet /tmp/nxnative-dmsh-xlate/dmsh_xlate.dll --source-sha`. Copy managed outputs only; verify launcher architecture, embedded source hash and translator DLL fingerprints against `dmsh_chain.lock` before builds.
-- Translator source fingerprint `e6b5163bbebc6b67`; chain `60ce84a81e3c`. Checked-in translator DLL hashes match the lock. Tahoe local SPIRV-Cross (`42ee93372e51d0ee`) and Metal (`32023.883`) differ from pinned versions; official `own_compilers.py` accepts those local compiler differences while keeping translator integrity checks strict. Do not update the lock/header to silence local compiler notices.
+- Save Folder Sync uses native `Documents/save` and Eden-compatible `<Selected Folder>/<TitleID>/` payloads. Metroid Dread and Celeste builds from `a51aad6e0ae2fef570a94c05e5291fc0f3b5105e` are user-confirmed working on iPhone; checkpoint `validated/save-folder-sync-v1` is immutable.
+- Intel Tahoe translator support publishes architecture-neutral managed IL (`PublishReadyToRun=false`, `UseAppHost=false`) and keeps the universal ARM64/x86_64 launcher. Existing shader lock and translator fingerprints remain unchanged.
+- Echoes of Wisdom profile/history needed by the prior integration is already available upstream and is not an extra custom delta in this update.
+- Existing unsigned IPA records remain under `/volume1/Media/Roms/iOS/`; do not replace or rebuild them as part of branch consolidation.
 
-## Validated builds
+## Local workspace preservation and next steps
 
-- Echoes of Wisdom 1.1.0, update `v196608`, built from baseline above, bundle `org.nxnative.01008cf01baac000`, 9,858/9,858 shaders and 14,159 metallibs, Xcode Release unsigned, 135 source files compiled. IPA: `/volume1/Media/Roms/iOS/Echoes of Wisdom/Build v1.1.0/Echoes-of-Wisdom-v1.1.0.ipa`; 8,414,216,443 bytes; SHA-256 `4ea74679bc334abb869d8f70fef7ef2f33e50d919f8b45d77b9470bd238cf76b`.
-- Celeste update `v589824` (profile 1.4.1.1; app metadata 1.4.1), same baseline and translator, bundle `org.nxnative.01002b30028f6000`, 26/26 shaders and 38 metallibs, Xcode Release unsigned, 135 source files compiled. IPA: `/volume1/Media/Roms/iOS/Celeste/Build integration-2694c28/Celeste-1.4.1.1-integration-2694c28.ipa`; 924,915,261 bytes; SHA-256 `ff8500309f931f67974dc070ff93f0cd7b62d1db3689b4fc9203a1b33d1a344f`.
-- Both IPAs have intact ZIPs, expected bundle metadata, Save Sync resources/code, and no legacy iCloud messages or `env.txt`. Increased Memory Limit entitlement must be applied by signing/install tooling. Echoes rebuilt IPA and Celeste regression have not been device-tested; Save Folder Sync provider bookmark/sync behavior still needs device validation. Two Echoes shaders remain flagged not proven bounded.
-
-## Verification and next steps
-
-- 19/19 existing Save Sync contract/filesystem tests passed (filesystem tests run via a temporary stdlib compatibility harness because pytest is absent). Relevant stdlib unittest source/profile/translator suite: 47 passed, 4 expected skips; one pytest-only module is not discoverable by unittest. Both official top-level IPA workflows compiled successfully.
-- Preserve validated extraction, shader and Xcode caches for reuse. Removed superseded Echoes IPA and stale Echo build logs after replacement validation; originals, NSP/XCI inputs, keys, saves and Celeste runtime files remain intact.
-- Install/test both IPAs on devices, verify Save Folder Sync using a Files provider and conflict cases, then consider upstreaming general Save Sync and translator fixes. Push `integration` only under the verified IndecentDad account; record any authentication blocker here.
+- Other worktrees have unrelated uncommitted work: `/tmp/nxnative-metroid-shaderdiag` modifies `dm/gfx/tools/dmsh_build.py`; `nxnative-sidestore` has modified status documentation and untracked SideStore source/tests/docs. Preserve these unchanged.
+- Next: complete local `main` consolidation, create a temporary Windows reconciliation branch from the fetched `origin/windows/main`, and review shared-source conflicts. Run the provided read-only PowerShell audit in `D:\NXNativeWindows`, then validate and promote Windows changes on that machine. Only after that, retire `integration`; propose remote branch deletions separately.
+- Mario Kart World work starts later from a temporary feature branch after both stable branches are reconciled; no Mario Kart World compilation has been run.
