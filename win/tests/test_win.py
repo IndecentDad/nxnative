@@ -36,6 +36,14 @@ class Shim(unittest.TestCase):
         self.assertIn('which 0 True', r.stdout, r.stderr); self.assertIn('py3 42', r.stdout); self.assertIn('clone None', r.stdout)
 
     @unittest.skipUnless(os.name == 'nt', 'the shim is active on Windows only')
+    @unittest.skipUnless(os.name == 'nt', 'the Windows shim is active only on Windows')
+    def test_pread_raw_bytes(self):
+        r = self.run_mapped('import os, tempfile\n'
+                            'f = tempfile.NamedTemporaryFile(delete=False); f.write(b"prefix\\r\\n\\x1apayload"); f.close(); fd = os.open(f.name, os.O_RDONLY)\n'
+                            'print(os.pread(fd, 10, 6).hex(), os.lseek(fd, 0, os.SEEK_CUR)); os.close(fd); os.unlink(f.name)')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), '0d0a1a7061796c6f6164 0')
+
     def test_xlate_and_build_ipa_mapping(self):
         r = self.run_mapped('import sitecustomize, subprocess\n'
                             'try: subprocess.run(["C:/r/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate", "--source-sha"])\nexcept OSError: pass\n'

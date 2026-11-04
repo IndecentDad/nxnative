@@ -26,6 +26,21 @@ if (os.name == 'nt' or os.environ.get('NXW_LINUX')) and not os.environ.get('NXW_
         return _open(file, mode, buffering, encoding, errors, newline, closefd, opener)
     io.open = builtins.open = _lf_open
 
+    # POSIX pread is a raw byte read. Windows os.open defaults descriptors to text mode, where Ctrl-Z and CRLF are transformed.
+    if not hasattr(os, 'pread'):
+        import msvcrt, threading
+        _pread_lock = threading.Lock()
+        def _win_pread(fd, size, offset):
+            with _pread_lock:
+                msvcrt.setmode(fd, os.O_BINARY)
+                pos = os.lseek(fd, 0, os.SEEK_CUR)
+                try:
+                    os.lseek(fd, offset, os.SEEK_SET)
+                    return os.read(fd, size)
+                finally:
+                    os.lseek(fd, pos, os.SEEK_SET)
+        os.pread = _win_pread
+
     # os.replace as on a Mac: Windows refuses to replace a file another thread has open, which POSIX rename allows. The shader build's content-addressed caches
     # (dmsh_mtlcache.py) have threads finish the same entry at once; a replace that keeps failing onto an existing file of the same size is that race, and the copy goes
     import time as _time
