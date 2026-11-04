@@ -1,5 +1,5 @@
 // NVNformat (nvn.h 0x01–0x9C) → Metal. The table is written entry by entry in NVN enum order; unlisted formats (including 0 and out of range) return 0.
-// Component remapping: "no alpha" formats such as RGBX / RGB_DXT1 read a as 1; RGB-family 16-bit packed formats swap r/b; all others are identity.
+// Component remapping: no-alpha formats read a as 1; RGB-family packed formats swap r/b, RGBA4 reverses all four; all others are identity.
 // BC1–7 on iOS require GPU BC support (MTLDevice.supportsBCTextureCompression, iOS 16.4+; A19 supports it). Without it (A16 and older) nvn_bc_soft is set at device creation and
 // nvn_fmt_to_mtl answers each BC format with the uncompressed format bc_soft_target names, which the uploads decode into (bc_soft.c)
 #include "nvn_fmt_mtl.h"
@@ -87,5 +87,6 @@ int nvn_fmt_to_mtl(int f, uint32_t *mtl, uint8_t swz[4]) {
     if (kind && nvn_bc_soft) { uint32_t soft = bc_soft_target(pf, NULL); if (soft) { pf = soft; kind = 2; } }   // a GPU without BC: the uploads decode the blocks into this format (bc_soft.h)
     if (mtl) *mtl = kind ? pf : 0;
     if (swz) { swz[0] = e.rb ? NVN_SWZ_B : NVN_SWZ_R; swz[1] = NVN_SWZ_G; swz[2] = e.rb ? NVN_SWZ_R : NVN_SWZ_B; swz[3] = e.noalpha ? NVN_SWZ_ONE : NVN_SWZ_A; }
+    if (swz && e.rb == 2) { swz[0] = NVN_SWZ_A; swz[1] = NVN_SWZ_B; swz[2] = NVN_SWZ_G; swz[3] = NVN_SWZ_R; }
     return kind;
 }

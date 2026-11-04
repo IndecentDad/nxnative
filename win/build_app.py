@@ -51,7 +51,7 @@ def host_sources(game_h_dir):
     gfx = sorted(gfx, key=lambda p: os.path.relpath(p, HOST).replace('\\', '/'))   # make's $(sort) orders the words as text
     vpx = DM / 'third_party/libvpx'
     vpx_src = sorted(vpx.rglob('*.c'), key=lambda p: p.as_posix())
-    incs = [DM / 'gfx/nvn/include', DM / 'third_party/vulkan-headers/include', game_h_dir, vpx, DM / 'third_party/stb_vorbis', vpx / 'config', IOS / 'Sources']
+    incs = [DM / 'gfx/nvn/include', DM / 'third_party/vulkan-headers/include', game_h_dir, vpx, DM / 'third_party/dav1d/include', DM / 'third_party/dav1d/config', DM / 'third_party/stb_vorbis', vpx / 'config', IOS / 'Sources']
     files = []
     for s in src + gfx + vpx_src:
         s = s.resolve()
