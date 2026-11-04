@@ -50,6 +50,7 @@ class HostSources(unittest.TestCase):
         names = {f.name for f in files}
         self.assertIn('main.c', names); self.assertIn('entry.S', names); self.assertNotIn('front_mac.m', names)
         self.assertTrue(any(f.parent.name == 'nvn' for f in files)); self.assertTrue(any('libvpx' in str(f) for f in files))
+        self.assertTrue(any('/dav1d/src/' in f.as_posix() for f in files))
         self.assertTrue(all(f.exists() for f in files))
         self.assertEqual(incs[0], (REPO / 'dm/gfx/nvn/include').resolve())
 

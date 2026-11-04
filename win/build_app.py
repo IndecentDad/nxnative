@@ -51,9 +51,14 @@ def host_sources(game_h_dir):
     gfx = sorted(gfx, key=lambda p: os.path.relpath(p, HOST).replace('\\', '/'))   # make's $(sort) orders the words as text
     vpx = DM / 'third_party/libvpx'
     vpx_src = sorted(vpx.rglob('*.c'), key=lambda p: p.as_posix())
-    incs = [DM / 'gfx/nvn/include', DM / 'third_party/vulkan-headers/include', game_h_dir, vpx, DM / 'third_party/dav1d/include', DM / 'third_party/dav1d/config', DM / 'third_party/stb_vorbis', vpx / 'config', IOS / 'Sources']
+    dav1d = DM / 'third_party/dav1d'
+    dav1d_src = [p for p in (dav1d / 'src').glob('*.c') if not p.stem.endswith('_tmpl')]+[dav1d / 'src/arm/cpu.c']
+    dav1d_src += sorted((dav1d / 'config/tmpl').glob('*.c'), key=lambda p: p.as_posix())
+    dav1d_src += [p for p in sorted((dav1d / 'src/arm/64').glob('*.S'), key=lambda p: p.as_posix()) if not p.stem.endswith('_tmpl') and p.name != 'util.S']
+    dav1d_src = sorted(dav1d_src, key=lambda p: p.as_posix())
+    incs = [DM / 'gfx/nvn/include', DM / 'third_party/vulkan-headers/include', game_h_dir, vpx, DM / 'third_party/dav1d', DM / 'third_party/dav1d/include', DM / 'third_party/dav1d/config', DM / 'third_party/stb_vorbis', vpx / 'config', IOS / 'Sources']
     files = []
-    for s in src + gfx + vpx_src:
+    for s in src + gfx + vpx_src + dav1d_src:
         s = s.resolve()
         if s.stem.endswith('_mac'): continue   # Mac-only sources (front_mac.m): front_ios.m implements front.h
         if s.parent == (IOS / 'Sources').resolve(): continue   # iOS sources the host borrows are compiled once, as iOS sources
