@@ -521,7 +521,7 @@ The bundle holds what the IPA holds, with the Mac's shader libraries:
 
 ```
 <game name>.app/Contents/
-  Info.plist                 name, version, bundle ID, the profile's app_category; DMTitleID, DMRomfsMarker, DMLanguage, DMModuleFiles and DMSettings for the launcher
+  Info.plist                 name, version, bundle ID, the profile's app_category, LSSupportsGameMode false (reference/frame-rate.md); DMTitleID, DMRomfsMarker, DMLanguage, DMModuleFiles and DMSettings for the launcher
   MacOS/nxnative             the launcher (dm/mac/launcher.c, linked by pack_app.py with swiftc and its settings window: dm/mac/Launcher.swift, LauncherSettings.swift and LauncherRow.swift)
   MacOS/dmhost               the Mac host built for the profile
   Resources/romfs.img        the packed version's RomFS image
@@ -648,6 +648,7 @@ Notes on these steps:
 - `dmsh_build.py` stops when a tool differs from `dm/gfx/tools/dmsh_chain.lock`. To try another Metal compiler, run `DM_ALLOW_OTHER_METAL=1 dm/gfx/tools/own_compilers.py` with the same arguments and environment. It reports the actual compiler and keeps its cached libraries separate from the tested compiler's; the translator and SPIRV-Cross must still match.
 - After a chain change, `python3 dm/gfx/tools/shader_regressions.py $W/build/cache/metal_shader_cache` lists the shaders that translated in the previous `b-*/` there and fail in the current one (exit status 1), as the NSP script does after its shader step.
 - `dmsh_build.py` compiles each shader's Metal source through a cache keyed by that source, the compile flags and the compiler (`dm/gfx/tools/dmsh_mtlcache.py`, in `<cache>/cas/metallib/`). A chain change that leaves a shader's MSL unchanged costs that shader no Metal compile while the cache format and compiler stay unchanged. Before building, the cache takes libraries from earlier `b-*/` folders beside its output (and beside `IOSOUT`), and from `DMSH_PREFILL=<Mac root>[=<iOS root>]` (several separated by `:`). Every imported library must record the current flags and compiler identity in its reflection; unmarked legacy libraries are rebuilt. A fresh compile of two shaders per stage also checks their bytes. The summary line `Metal cache:` shows reused, compiled and filled counts per target.
+- Its Metal compiles use a precompiled header of Metal's texture classes (`dm/gfx/tools/dmsh_pch.py`), about half of a compile's CPU, with byte-identical output ([Each Metal compile instantiates Metal's texture classes again](reference/shaders.md#each-metal-compile-instantiates-metals-texture-classes-again)). `DMSH_PCH=0` compiles without it.
 - Each shader's cache key (`shader_key`) includes `CODE_FP`, a hash of the *code form* (`dmsh_chain.code_form`: the AST, with docstrings and the rule functions' bodies removed) of `dmsh_build.py` and its helper modules. An edit that cannot change the output (a comment, a docstring, blank lines, formatting) keeps every shader's key, so the next build restores them all instead of translating them again; any change to code, a constant, a string literal or a default argument still rebuilds all of them. The chain version is not touched by this: it still hashes whole files. It also includes whether `dual_want.tsv` lists the shader, so editing that table rebuilds only the shaders it adds or removes and their paired vertex shaders, with no cache to clear ([the dependency](reference/rendering.md#a-shader-added-to-dual_wanttsv-keeps-its-cached-build)).
 - `build_ipa.sh` takes the rewritten modules from `$W/build/patched_<package>` and the RomFS image from `$W/data/<package>/RomFS.img` (legacy folders are also accepted); `PATCHED` and `ROMFS` override them. In unsigned IPA mode, `pack_ipa.py` packs the shader libraries, RomFS and add-on content beside the app Xcode built, as `DmIOS.app/msl/b-<chain version>`, `romfs` and `aoc`. Prepared Xcode projects instead sync these resources into the app before signing.
 - It also bundles a standard font (macOS's Arial Unicode, `STD_FONT=` overrides it) and the generated `nintendo_ext.ttf`.
@@ -661,6 +662,34 @@ Notes on these steps:
 - `DM_SHOW_FPS=1` turns the frame-rate counter on (`DMShowFPS` in `Info.plist`, which `front_ios.m` reads; `DM_SHOW_FPS` in `Documents/env.txt` overrides it). It counts the frames put on screen each second (`mtl_present_count`), so frames the display link merges away are not counted.
 - The unsigned build pins its build product and intermediate directories inside `$W/build/ios/pkg/dd`, independently of Xcode's Locations preference.
 - hactool cannot read every update (Mario 1.2.1's patch NCA gives "Invalid BKTR layout!"), which is why `nx_extract` uses LibHac.
+
+### Building selected Mac shaders
+
+A full shader build of a large map takes hours (Pokopia: 131,426 shaders, an estimated 6.4 hours on an M4 Pro), while play reaches far fewer. `dmsh_build.py` (and `own_compilers.py`, which the NSP script runs) takes shader keys after its two folders and builds only those, each vertex shader with the pixel shaders paired with it; with no keys it builds the whole map. A key is column 4 of the profile's `shader_map.tsv`. A partial library has no stamp (`inputs.tsv`), so the host takes no `c1_full.tsv` or `cb_extent.tsv` beside it and logs a red line for that at each start; the game runs without them.
+
+The Mac app (`--platform mac-app`) and the Mac-only build (`--platform mac`) always build the whole library before the host, so a partial library runs through steps 4 and 5 of [Build by hand (Mac)](#build-by-hand-mac). Stop the NSP script once it reaches the Mac shaders step: the build folder then holds the extracted RomFS, the rewritten modules (`patched_<version>`) and the shader package (`shader/pkg`). From the repository root, for Pokopia, whose profile lists the keys of its Mac playtest (`shader_seen.tsv`, 8,157 keys):
+
+```sh
+py=python3   # the Python that runs the NSP script (make_ext_font.py needs its fonttools)
+repo="$PWD"; id=0400A3A01EE4C000; ver=v655360; build="<NSP or dump folder>/${id}_build"; out="$build/shader/partial"
+log="$build/run/host.log"   # the log of the last run (below), if there is one
+keys="$build/shader/partial-keys.txt"
+{ grep -hoE '^[0-9a-f]{16}' "dm/games/$id/shader_seen.tsv"
+  [ -f "$log" ] && sed -En -e 's/.*\[RED\] shader ([0-9a-f]{16}) \([^)]*\) failed to load:.*/\1/p' \
+    -e 's/.*\[RED\] failed to load shader ([0-9a-f]{16})_b: cannot open.*/\1/p' "$log"; } | sort -u > "$keys"
+DM_GAME=$id DMSH_TARGETS=mac DMSH_CAS="$build/shader/cache/cas" "$py" dm/gfx/tools/own_compilers.py "$build/shader/pkg" "$out" $(cat "$keys")
+make -C dm/host GAME=$id dmhost
+mkdir -p "$build/font" "$build/run/save" "$build/run/temp"
+"$py" dm/tools/make_ext_font.py "$build/font/nintendo_ext.ttf"
+(cd "$build/run" && DM_ROOT="$build" DM_ROMFS="$build/extract/$ver/RomFS.img" DM_SAVE="$build/run/save" DM_TEMP="$build/run/temp" DM_MSL_DIR="$out" \
+  DM_FONT_DIR="$build/font" DM_NVN_SHMAP="$repo/dm/games/$id/shader_map.tsv" DM_WINDOW=1 DM_AUDIO=1 "$repo/dm/host/dmhost" "$build/patched_$ver" 2>&1 | tee "$log")
+```
+
+- The keys go on the command line, not through `xargs`, which runs a command per 5,000 arguments on macOS.
+- `DMSH_CAS` shares the cache of a stopped full build, so what it compiled is not compiled again.
+- An area the list does not cover logs `[RED] shader <key> (<stage>) failed to load` (or `failed to load shader <key>_b: cannot open`) and draws without that shader; run the block again and it adds the keys from the last log. A key that still fails did not translate: the build's summary names it. Pokopia logs one at every start, vertex shader `cc679c7b4d3e703c` (untranslated, never drawn: [Pokopia's note](../dm/games/0400A3A01EE4C000/README.md#shaders)).
+- For another game, use its `shader_map.tsv` keys from a log alone (drop the `shader_seen.tsv` line); the first run then starts from an empty library.
+- `J` sets the shader workers (the NSP script uses the logical CPU count). Load average alone does not show the fastest setting: compare shaders per minute.
 
 ## Prewarm lists
 
