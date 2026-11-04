@@ -456,6 +456,19 @@ static void make_capture_folders(void) {
     }
 }
 
+#include "DmGameMenu.h"
+void *dm_game_menu(void) {
+    static NSString *const names[] = {@"2D", @"3D", @"Tap"};
+    NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
+    for (int layout = 0; layout < 3; layout++) {
+        if (!dm_pad_layout_offered(layout)) continue;
+        UIAction *action = [UIAction actionWithTitle:names[layout] image:nil identifier:nil handler:^(__kindof UIAction *item) { dm_pad_layout_set(layout); }];
+        action.state = dm_pad_layout() == layout ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [actions addObject:action];
+    }
+    UIMenu *layoutMenu = [UIMenu menuWithTitle:@"Controller layout" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:actions];
+    return (__bridge_retained void *)[UIMenu menuWithTitle:@"" children:@[layoutMenu]];
+}
 bool dm_show_launcher(void *view_controller, void (*done)(void)) {
     make_capture_folders();
     const char *off = getenv("DM_LAUNCHER");
