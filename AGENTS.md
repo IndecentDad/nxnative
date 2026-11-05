@@ -31,3 +31,9 @@
 - iOS builds are unsigned IPAs that the user sideloads and tests; diagnostics come back as the app's `Documents/log.txt`. Do not sign or install builds on the user's devices.
 - Follow `docs/branch-workflow.md` for fork branches and IndecentDad identity; commit only when asked.
 - A change a front end must act on takes a `Front-ends:` line ([Following main](docs/frontends.md#following-main)).
+
+## Windows development environment
+
+- The established Windows builder is reached with `ssh nxwindows`; its original checkout is `D:\NXNativeWindows`.
+- Use isolated worktrees under `D:\NXNativeBuilds` for reconciliation and builds. Inspect their Git state first and preserve dirty worktrees and untracked credentials or game data.
+- Validate with `win/doctor.py`; use the configured Windows SDK, translator DLL, Metal tools, and SPIRV-Cross. The upstream shader lock/checker may describe macOS binaries and must not be rewritten to claim Windows fingerprints.

@@ -25,9 +25,11 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 
 | Now → goal | Patch | Purpose | Status | Evidence | Games | Where | Why |
 |---|---|---|---|---|---|---|---|
+| `build` → `game` | Unreal's allocator on a host malloc zone (hle_uemalloc.c) | address space | gap | judgement | 7 | [DRAGON QUEST VII Reimagined](../../dm/games/0100A9D01C446000/README.md); [FINAL FANTASY RESONANCE](../../dm/games/0100606026F12000/README.md); [FINAL FANTASY RESONANCE (Asian release)](../../dm/games/0100B8A026F14000/README.md); [OCTOPATH TRAVELER 0](../../dm/games/01005270232F2000/README.md); [OCTOPATH TRAVELER II](../../dm/games/0100A3501946E000/README.md); [Pikmin 4](../../dm/games/0100B7C00933A000/README.md); [SHIN MEGAMI TENSEI V: Vengeance](../../dm/games/010069C01AB82000/README.md) | the allocator replacement depends on fixed per-build constructor and vtable addresses |
 | `build` → `game` | 60 fps intervals and dynamic-resolution constants | frame rate | gap | checked: both releases' mains, where the host's rows for them were found | 2 | [NieR:Automata The End of YoRHa Edition (010056B015FE8000)](../../dm/games/010056B015FE8000/README.md); [NieR:Automata The End of YoRHa Edition (0100B8E016F76000)](../../dm/games/0100B8E016F76000/README.md) | the game's own constants; the Asian release's function is the global one's 0x13c0 further on, so one function-matched rule could serve both releases |
 | `build` → `game` | NieR's frame interval and dynamic-resolution floor at fixed addresses | frame rate | gap | checked: both releases' mains, where these rows were found | 2 | [NieR:Automata The End of YoRHa Edition (010056B015FE8000)](../../dm/games/010056B015FE8000/README.md); [NieR:Automata The End of YoRHa Edition (0100B8E016F76000)](../../dm/games/0100B8E016F76000/README.md) | the game's own display object; the Asian release's function is the global one's 0x13c0 further on, so the rewriter's function match could give the host both releases' addresses |
 | `build` → `host` | frame limiter wait: yield → sleep | power | gap | checked: Mac runs with the cut undone, 2026-10-26 (the game note) | 1 | [Fire Emblem: Three Houses](../../dm/games/010055D009F78000/README.md) | without it the host's yield back-off (thr_yield) holds 59.7 to 59.8 fps, at 0.9 to 1.2 W of CPU against 0.14 to 0.42 W (2026-10-26): a back-off that reaches a yield-and-tick loop's deadline sooner would make the cut unnecessary for every game |
+| `build` → `host` | Unreal FMallocBinned3 constructor cut and host allocator | address space | gap | judgement | 1 | [OCTOPATH TRAVELER 0](../../dm/games/01005270232F2000/README.md) | the two verified builds use fixed constructor addresses and a host allocator vtable |
 | `game` → `host` | one vertex shader's visibility counter (VertexCounterLowering) | shaders | gap | judgement | — | [Program.cs:257](../../dm/gfx/tools/dmsh_xlate/Program.cs#L257) | a general lowering of subgroup ballots in vertex shaders would cover any shader that counts that way |
 | `build` → `engine` | Unity QualitySettings.vSyncCount held at 1 | frame rate | gap | judgement | 1 | [Fire Emblem Engage](../../dm/games/0100A6301214E000/README.md) | an IL2CPP player registers the setter by its icall name, so the place can be found in any Unity game; holding it at 1 stays this profile's choice (its logic steps by the count) |
 | `build` → `engine` | Unity's Application.targetFrameRate at a fixed address | frame rate | gap | judgement | 1 | [Pokémon Brilliant Diamond](../../dm/games/0100000011D90000/README.md) | an IL2CPP player registers the setter by its icall name, so the field can be found in any Unity game; whether to raise it stays the profile's |
@@ -64,10 +66,13 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 |---|---|---|---|---|---|---|
 | [Animal Crossing: New Horizons](#animal-crossing-new-horizons) | 0 | 0 | 14 | 0 | 0 | `build` → `game` |
 | [ASTRAL CHAIN](#astral-chain) | 0 | 0 | 112 | 0 | 0 | `build` → `game` |
-| [Batman: Arkham Knight](#batman-arkham-knight) | 8 | 0 | 0 | 0 | 1 | `build` → `game` ×2 |
+| [Batman: Arkham Knight](#batman-arkham-knight) | 8 | 0 | 0 | 0 | 0 | `build` → `game` ×2 |
 | [DARK SOULS: REMASTERED](#dark-souls-remastered) | 2 | 0 | 0 | 0 | 0 | `build` → `game` |
+| [DRAGON QUEST VII Reimagined](#dragon-quest-vii-reimagined) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [EA SPORTS FC 27](#ea-sports-fc-27) | 0 | 0 | 0 | 0 | 1 | `build` → `engine` |
 | [FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition](#final-fantasy-crystal-chronicles-remastered-edition) | 8 | 0 | 0 | 0 | 0 | `build` → `engine` |
+| [FINAL FANTASY RESONANCE](#final-fantasy-resonance) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
+| [FINAL FANTASY RESONANCE (Asian release)](#final-fantasy-resonance-asian-release) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [FINAL FANTASY TACTICS - The Ivalice Chronicles](#final-fantasy-tactics---the-ivalice-chronicles) | 2 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Fire Emblem Engage](#fire-emblem-engage) | 1 | 0 | 0 | 0 | 0 | `build` → `engine` |
 | [Fire Emblem: Three Houses](#fire-emblem-three-houses) | 12 | 0 | 0 | 0 | 0 | `build` → `game`, `build` → `host` |
@@ -78,8 +83,13 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | [Need For Speed™ Hot Pursuit Remastered](#need-for-speed-hot-pursuit-remastered) | 1 | 0 | 0 | 0 | 5 | `build` → `game`, `build` → `engine` |
 | [NieR:Automata The End of YoRHa Edition (010056B015FE8000)](#nierautomata-the-end-of-yorha-edition-010056b015fe8000) | 8 | 0 | 0 | 0 | 1 | `build` → `game` ×2 |
 | [NieR:Automata The End of YoRHa Edition (0100B8E016F76000)](#nierautomata-the-end-of-yorha-edition-0100b8e016f76000) | 8 | 0 | 0 | 0 | 1 | `build` → `game` ×2 |
+| [OCTOPATH TRAVELER 0](#octopath-traveler-0) | 2 | 0 | 0 | 0 | 2 | `build` → `host`, `build` → `game` |
+| [OCTOPATH TRAVELER II](#octopath-traveler-ii) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [Paper Mario: The Thousand-Year Door](#paper-mario-the-thousand-year-door) | 1 | 0 | 1 | 0 | 0 | `build` → `game` |
+| [Pikmin 4](#pikmin-4) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [Pokémon Brilliant Diamond](#pokémon-brilliant-diamond) | 0 | 0 | 0 | 0 | 1 | `build` → `engine` |
+| [Pokémon Legends: Arceus](#pokémon-legends-arceus) | 0 | 0 | 0 | 1 | 0 | `game` |
+| [SHIN MEGAMI TENSEI V: Vengeance](#shin-megami-tensei-v-vengeance) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [Subnautica](#subnautica) | 1 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Subnautica: Below Zero](#subnautica-below-zero) | 1 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Super Mario 3D All-Stars: Super Mario Sunshine](#super-mario-3d-all-stars-super-mario-sunshine) | 2 | 0 | 0 | 0 | 0 | `build` → `game` |
@@ -260,7 +270,6 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
   - cut `+0xc5ab8c`: queue pop: ldr x8, [x19] → dmb ishld (after the tail load; w8 = head)
   - cut `+0xc5ab94`: queue pop: ldr w9, [x19, #0x1c] (the head again) → and x9, x8, #0xffff
   - cut `+0xc5ab98`: queue pop: and x9, x9, #0xffff → ldr x8, [x19] (the ring; then ldr x8, [x8, x9, lsl #3]: the item)
-  - host [hle_uemalloc.c:41](../../dm/host/hle_uemalloc.c#L41): Unreal's allocator on a host malloc zone
 
 ### DARK SOULS: REMASTERED
 
@@ -271,6 +280,15 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 - **1.0.3 `main`** `df3766a2…` ([patches.py:10](../../dm/games/01004AB00A260000/patches.py#L10))
   - cut `+0x706fa4`: frame limiter target: mov w1,#30 → mov w1,#60 (main+0x707090 sleeps out 1000 / fps ms since the last frame)
   - cut `+0x667904`: frame update step: ldr s8,[x8,#0x6ec] (1/30) → ldr s8,[x8,#0x834] (1/60), passed to main+0x6a337c
+
+### DRAGON QUEST VII Reimagined
+
+[DRAGON QUEST VII Reimagined](../../dm/games/0100A9D01C446000/README.md), `0100A9D01C446000`.
+
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.2.0 `main`** `f7ec03e4…`
+  - host [hle_uemalloc.c:38](../../dm/host/hle_uemalloc.c#L38): Unreal's allocator on a host malloc zone
 
 ### EA SPORTS FC 27
 
@@ -296,6 +314,24 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
   - cut `+0x1e6805c`: stream reader: ldr w8,[x8] → ldar ("writer sleeping" after the store-release of the read position)
   - cut `+0x1e68154`: stream reader: ldr w8,[x8] → ldar ("writer sleeping" after the store-release of the read position)
   - cut `+0x1e681d8`: stream reader: ldr w8,[x8] → ldar ("writer sleeping" after the store-release of the read position)
+
+### FINAL FANTASY RESONANCE
+
+[FINAL FANTASY RESONANCE](../../dm/games/0100606026F12000/README.md), `0100606026F12000`.
+
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.0.1 `main`** `84e182f7…`
+  - host [hle_uemalloc.c:49](../../dm/host/hle_uemalloc.c#L49): Unreal's allocator on a host malloc zone
+
+### FINAL FANTASY RESONANCE (Asian release)
+
+[FINAL FANTASY RESONANCE (Asian release)](../../dm/games/0100B8A026F14000/README.md), `0100B8A026F14000`.
+
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.0.1 `main`** `b7f965b9…`
+  - host [hle_uemalloc.c:51](../../dm/host/hle_uemalloc.c#L51): Unreal's allocator on a host malloc zone
 
 ### FINAL FANTASY TACTICS - The Ivalice Chronicles
 
@@ -428,6 +464,29 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
   - launcher capabilities: DYNAMIC_RESOLUTION
   - host [hle_fpslock.c:69](../../dm/host/hle_fpslock.c#L69): frame interval and dynamic-resolution floor
 
+### OCTOPATH TRAVELER 0
+
+[OCTOPATH TRAVELER 0](../../dm/games/01005270232F2000/README.md), `01005270232F2000`, [patches.py](../../dm/games/01005270232F2000/patches.py).
+
+- **`build` → `host`**, address space, gap, judgement: Unreal FMallocBinned3 constructor cut and host allocator. The two verified builds use fixed constructor addresses and a host allocator vtable
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.0.5 `main`** `9fe60a21…` ([patches.py:9](../../dm/games/01005270232F2000/patches.py#L9))
+  - cut `+0x12e40`: nninitStartup: bl 0x9f480 (FMallocBinned3 constructor, 37 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)
+  - host [hle_uemalloc.c:34](../../dm/host/hle_uemalloc.c#L34): Unreal's allocator on a host malloc zone
+- **1.0.1 `main`** `5069fe90…` ([patches.py:13](../../dm/games/01005270232F2000/patches.py#L13))
+  - cut `+0x12e40`: nninitStartup: bl 0x9f480 (FMallocBinned3 constructor, 37 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)
+  - host [hle_uemalloc.c:36](../../dm/host/hle_uemalloc.c#L36): Unreal's allocator on a host malloc zone
+
+### OCTOPATH TRAVELER II
+
+[OCTOPATH TRAVELER II](../../dm/games/0100A3501946E000/README.md), `0100A3501946E000`.
+
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.1.1 `main`** `0d964901…`
+  - host [hle_uemalloc.c:44](../../dm/host/hle_uemalloc.c#L44): Unreal's allocator on a host malloc zone
+
 ### Paper Mario: The Thousand-Year Door
 
 [Paper Mario: The Thousand-Year Door](../../dm/games/0100ECD018EBE000/README.md), `0100ECD018EBE000`, [patches.py](../../dm/games/0100ECD018EBE000/patches.py).
@@ -438,6 +497,15 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
   - cut `+0x2e77a4`: frame step floor in 60 Hz vsyncs: mov w9,#2 → mov w9,#1 (the game steps by the vsyncs that passed, down to one)
   - frame step `+0x2e77f8`: frame step: the base clock steps by the host's vsyncs (state page target fps; 0 = the game's measured step)
 
+### Pikmin 4
+
+[Pikmin 4](../../dm/games/0100B7C00933A000/README.md), `0100B7C00933A000`.
+
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.1.1 `main`** `060f827b…`
+  - host [hle_uemalloc.c:41](../../dm/host/hle_uemalloc.c#L41): Unreal's allocator on a host malloc zone
+
 ### Pokémon Brilliant Diamond
 
 [Pokémon Brilliant Diamond](../../dm/games/0100000011D90000/README.md), `0100000011D90000`.
@@ -446,6 +514,23 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 
 - **1.3.0 `main`** `94ceae32…`
   - host [hle_fpslock.c:28](../../dm/host/hle_fpslock.c#L28): engine frame limit set to fps_target: Unity targetFrameRate
+
+### Pokémon Legends: Arceus
+
+[Pokémon Legends: Arceus](../../dm/games/01001F5010DFA000/README.md), `01001F5010DFA000`, [patches.py](../../dm/games/01001F5010DFA000/patches.py).
+
+- **`game`**, runtime, at goal, checked: function-matched on 1.1.1, the only build on hand: exactly one match, a boot to the field setup, and the patched function run on the module's own bytes in a small interpreter for both null paths. Issue #712's reporters ran the earlier cuts for about 7 hours with no crash; the path itself has not been reached with these cuts: capture demo: the empty result when the weak reference at +0x88 is unset or dead. The game's own function dereferences its own weak reference; no host service is on the path, so no host or engine rule can hold it. Whether another Game Freak game shares the function is unchecked
+
+- **function-matched** (`main` of builds without CUTS): capture demo: the empty result when the weak reference at +0x88 is unset or dead: 1 function, 5 cuts
+
+### SHIN MEGAMI TENSEI V: Vengeance
+
+[SHIN MEGAMI TENSEI V: Vengeance](../../dm/games/010069C01AB82000/README.md), `010069C01AB82000`.
+
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.0.3 `main`** `0a4f14a5…`
+  - host [hle_uemalloc.c:47](../../dm/host/hle_uemalloc.c#L47): Unreal's allocator on a host malloc zone
 
 ### Subnautica
 

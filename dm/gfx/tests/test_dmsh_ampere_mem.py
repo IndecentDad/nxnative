@@ -1,10 +1,29 @@
 #!/usr/bin/env python3
 """Ampere instructions through the offline translator (dmsh_xlate, arch sm86): SUATOM (0x593), the image atomic Donkey Kong Bananza's agl technique compute shaders (agl_technique_pfx) take an
 append counter with; shared memory's scaled address, IMAD.HI and ATOMS.CAS; and the instructions tested on the atomic's result below. Needs DMSH_TEST_XLATE (the translator) like the other translator tests."""
-import json, os, re, struct, subprocess, sys, tempfile, unittest
+import json, os, re, shutil, struct, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[1] / 'tools'
+def translator_command():
+    path = os.environ['DMSH_TEST_XLATE']
+    if os.name == 'nt' and Path(path).suffix.lower() == '.dll':
+        dotnet = shutil.which('dotnet') or os.environ.get('DOTNET_HOST_PATH')
+        if not dotnet: raise RuntimeError('dotnet is required to run the Windows translator DLL')
+        return [dotnet, path]
+    return [path]
+
+
+def spirv_cross_command():
+    path = os.environ.get('SPIRV_CROSS')
+    if path: return [path]
+    if os.name == 'nt':
+        path = shutil.which('spirv-cross.exe') or shutil.which('spirv-cross')
+        if path: return [path]
+        raise RuntimeError('set SPIRV_CROSS or put spirv-cross.exe on PATH')
+    return [str(TOOLS / 'spirv_cross_bin/spirv-cross')]
+
+
 EXIT = (0x000fea0003800000, 0x000000000000794d)   # hi, lo: EXIT
 # SUATOM.ADD.U32 R12, [R3], R12 on the 1D image whose handle is word 12 of c0 (AMapC0: image slot 1), as the game encodes it but unpredicated (PT)
 SUATOM = (0x002ea200001ee000, 0x00000c0c030c7593)
@@ -21,12 +40,12 @@ class Translated(unittest.TestCase):
             # c0 layout (QueryAmpereComputeC0Layout): no uniform or storage buffers, 3 texture handles from 0x10, image handles from 0x28 (word 12 = image slot 1), 0x40 bytes
             job = [dict(key='k', stage='cs', arch='sm86', code=str(work / 'k.bin'), tex={}, img={}, attr={}, fout={}, local=[32, 1, 1], debug=True, nvn2_cs=extra.pop('nvn2_cs', [0, 0, 3, 0x40, 0]), **extra)]
             (work / 'jobs.json').write_text(json.dumps(job))
-            r = subprocess.run([os.environ['DMSH_TEST_XLATE'], str(work / 'jobs.json'), d], capture_output=True, text=True)
+            r = subprocess.run(translator_command() + [str(work / 'jobs.json'), d], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertTrue((work / 'k.spv').exists(), r.stdout + r.stderr)
             sys.path.insert(0, str(TOOLS)); import dmsh_geometry
             dmsh_geometry.flatten_sets(work / 'k.spv')
-            r = subprocess.run([str(TOOLS / 'spirv_cross_bin/spirv-cross'), '--msl', '--msl-version', '20300', '--msl-argument-buffers', '--msl-texture-buffer-native',
+            r = subprocess.run(spirv_cross_command() + ['--msl', '--msl-version', '20300', '--msl-argument-buffers', '--msl-texture-buffer-native',
                                 str(work / 'k.spv')], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stderr)
             return r.stdout

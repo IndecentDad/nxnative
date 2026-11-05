@@ -207,6 +207,7 @@ static int boot_env(void) {
                                                          titleID:@DM_GAME_TITLE_ID];
     [g_folder_sync startBeforeGameplay];
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
+    setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest memory in files there
     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);
     if (getenv("DM_PROGRAM")) aoc_locate();
     else {

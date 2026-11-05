@@ -7,7 +7,12 @@
 #   tar and <folder>.gone       stopped while the pack removed the folder: the tar is complete, the rest goes
 #   <folder>.unpack, <tar>.part unfinished, they go
 # unpack takes a lock on the parent folder that pack releases: regress.py's chain builds share a game's compile cache with the NSP script, and neither may pack it under the other.
-import fcntl, os, shutil, subprocess, time
+import os, shutil, subprocess, time
+if os.name == 'nt':
+    import msvcrt
+    fcntl = None
+else:
+    import fcntl
 from pathlib import Path
 
 QUIET_DAYS, QUIET_MIN_FILES, QUIET_FREE = 14, 100, 20 * 2**30   # pack_quiet
@@ -28,23 +33,46 @@ def _remove(p):
 def _lock(folder, say=None):   # without say, it does not wait: False while another process holds the lock
     parent = str(Path(folder).parent)
     if parent in _locks or not os.path.isdir(parent): return True
-    fd = os.open(parent, os.O_RDONLY)
-    try:
-        try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            if not say:
-                os.close(fd); return False
-            say(f'waiting for another build to finish with {folder}')
-            fcntl.flock(fd, fcntl.LOCK_EX)
-    except OSError:   # a drive without flock: no lock, as before this file
-        os.close(fd); return True
+    if os.name == 'nt':
+        # Windows cannot flock a directory handle. Lock a stable sibling file instead;
+        # keep the file so concurrent processes always lock the same inode.
+        fd = os.open(Path(parent) / '.nxnative-tree-tar.lock', os.O_CREAT | os.O_RDWR, 0o666)
+        if os.fstat(fd).st_size == 0: os.write(fd, b'\\0')
+        os.lseek(fd, 0, os.SEEK_SET)
+        told = False
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if not say:
+                    os.close(fd); return False
+                if not told:
+                    say(f'waiting for another build to finish with {folder}')
+                    told = True
+                time.sleep(0.1)
+    else:
+        fd = os.open(parent, os.O_RDONLY)
+        try:
+            try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if not say:
+                    os.close(fd); return False
+                say(f'waiting for another build to finish with {folder}')
+                fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError:   # a drive without flock: no lock, as before this file
+            os.close(fd); return True
     _locks[parent] = fd
     return True
 
 
 def _unlock(folder):
     fd = _locks.pop(str(Path(folder).parent), None)
-    if fd is not None: os.close(fd)
+    if fd is not None:
+        if os.name == 'nt':
+            try: msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            except OSError: pass
+        os.close(fd)
 
 
 def unpack(folder, say=print):
