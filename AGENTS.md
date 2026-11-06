@@ -1,10 +1,10 @@
-﻿# Notes for agents
+# Notes for agents
 
 ## Current repository layout
 
 - Canonical repository: https://github.com/IndecentDad/nxnative. Customized `main` is the sole permanent development branch and contains the complete Windows-compatible implementation and customizations. GitHub's default branch is `main`.
 - `upstream/main` is an external source of improvements; integrate applicable changes into customized `main`. The old policy that `main` mirrors upstream, permanent `windows/main`, `integration`, and `nx2` strategies are retired.
-- Windows primary builder: `D:\NXNativeWindows` through `ssh nxwindows`. Clean current `main` worktree: `D:\NXNativeBuilds\main`. Inspect all worktrees and preserve local changes before editing or cleanup.
+- Windows primary builder: `D:\NXNativeWindows` through `ssh nxwindows`. Clean current `main` worktree: `D:\NXNativeBuilds\main-upstream-sync`. Inspect all worktrees and preserve local changes before editing or cleanup.
 - Original downloads stay in `D:\Downloads`. Use `F:\Temp` (SSD) for temporary extraction, build data, shader caches, and staging. The GUI selects a per-title workspace under `F:\Temp\NXNative\SMB`; CLI builds should set `--work-dir F:\Temp\<title-id>` and `-o` when the final IPA needs a fixed existing destination.
 - Read [docs/branch-workflow.md](docs/branch-workflow.md) and [docs/windows-build-worker.md](docs/windows-build-worker.md) for the authoritative branch, checkout, and build path rules.
 

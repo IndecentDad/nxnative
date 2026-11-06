@@ -1,4 +1,4 @@
-﻿# NXNative Project Status
+# NXNative Project Status
 
 ## Canonical layout
 

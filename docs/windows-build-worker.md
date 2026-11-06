@@ -4,7 +4,7 @@
 
 The canonical repository is https://github.com/IndecentDad/nxnative. Customized `main` is the complete Windows-compatible fork; it includes the Windows builder and GUI, shader translation, Metal compilation adapters, game profiles, SMB staging, split-data packaging, and existing game-specific work. There is no permanent `windows/main` branch.
 
-The physical Windows 11 PC is reached from Synology with `ssh nxwindows`. The active builder checkout is `D:\NXNativeWindows`; the clean `main` worktree is `D:\NXNativeBuilds\main`. Inspect `git status --short --branch`, remotes, and `git worktree list` before changing either checkout. Preserve dirty feature work, keys, game files, generated data, and caches.
+The physical Windows 11 PC is reached from Synology with `ssh nxwindows`. The active builder checkout is `D:\NXNativeWindows`; the clean `main` worktree is `D:\NXNativeBuilds\main-upstream-sync`. Inspect `git status --short --branch`, remotes, and `git worktree list` before changing either checkout. Preserve dirty feature work, keys, game files, generated data, and caches.
 
 ## Workspace paths
 

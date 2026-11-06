@@ -1,4 +1,4 @@
-﻿# nxnative
+# nxnative
 
 ## IndecentDad fork
 
@@ -10,7 +10,7 @@ The `upstream` remote (`seedds/nxnative`) is a source of improvements. Fetch it,
 
 The Windows PC is the primary iOS build environment. Keep original NSP/XCI archives and downloads in `D:\Downloads`. The Windows GUI places each title's extraction, build data, shader cache, and local SMB staging under `F:\Temp\NXNative\SMB\<title ID>\` when that SSD path is available. It keeps completed IPA output at the selected or established destination. For direct CLI builds, pass `--work-dir F:\Temp\<title ID>`; pass `-o <existing IPA destination>` when you want the completed IPA to remain outside the temporary workspace. See [Windows build worker](docs/windows-build-worker.md).
 
-The working Windows checkout is `D:\NXNativeWindows`. Use the clean `main` worktree at `D:\NXNativeBuilds\main` for normal changes and upstream integration. Preserve any active feature worktrees until their unique commits and local files are handled.
+The working Windows checkout is `D:\NXNativeWindows`. Use the clean `main` worktree at `D:\NXNativeBuilds\main-upstream-sync` for normal changes and upstream integration. Preserve any active feature worktrees until their unique commits and local files are handled.
 
 ## Validated custom behavior
 

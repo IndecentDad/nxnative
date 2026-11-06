@@ -11,7 +11,7 @@
 ## Windows checkouts and workspace
 
 - The primary Windows PC is reached through `ssh nxwindows`. Its existing repository/worktree is `D:\NXNativeWindows`; preserve its dirty `codex/overcooked-ayce-1.0.12` work until reviewed and merged.
-- The clean canonical `main` worktree is `D:\NXNativeBuilds\main`. Other worktrees under `D:\NXNativeBuilds` are isolated game work and must be checked before cleanup.
+- The clean canonical `main` worktree is `D:\NXNativeBuilds\main-upstream-sync`. Other worktrees under `D:\NXNativeBuilds` are isolated game work and must be checked before cleanup.
 - `D:\Downloads` remains a source location for original game archives. Use `F:\Temp` (SSD) for temporary extraction, build caches, and staging. The GUI selects a per-title work folder under `F:\Temp\NXNative\SMB`; CLI builds should pass `--work-dir F:\Temp\<title-id>`. Keep final IPA output at its established destination with `-o` when setting a work folder.
 - Use `win/doctor.py` to inspect the Windows toolchain before a build. See [Windows build worker](windows-build-worker.md) for the entry point and workspace behavior.
 
