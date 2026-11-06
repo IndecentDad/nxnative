@@ -1,25 +1,24 @@
-# NXNative Project Status
+﻿# NXNative Project Status
 
-## Branch synchronization — 2026-11-05
+## Canonical layout
 
-- Upstream `seedds/nxnative` main was fetched through `865cc35fad7034d17c2190f8ce349f61f5bcaba1`.
-- Fork `main` is maintained as an upstream mirror; the synchronization worktree is `D:\\NXNativeBuilds\\nxnative-sync-main-20261105` on `codex/sync-main-20261105`.
-- The Windows integration retains its Windows build GUI, translator and Metal pipeline, SMB staging, split-data packaging, custom game profiles, and existing Save Folder Sync components.
-- The controller layout gear fix from PR #4 (`6833993b`) is included.
-- The integration includes upstream changes through `865cc35`, including Unreal dynamic-buffer copies (`6d269f93`) and file-backed guest-memory support (`865cc35`). File-backed memory remains opt-in; no MKW-specific runtime setting was changed.
-- Windows-only compatibility fixes include matching `web_apple.m` in the host source list, Windows locking in `dm/tools/tree_tar.py`, and Windows translator/SPIRV-Cross discovery in the Ampere regression tests.
+- Repository: https://github.com/IndecentDad/nxnative; customized main is the only permanent development branch and GitHub default.
+- upstream/main is an external source. Review and merge applicable changes into main, validate on Windows, then push origin/main.
+- Windows host: ssh nxwindows. User work checkout: D:\\NXNativeWindows. Clean main worktree: D:\\NXNativeBuilds\\main-upstream-sync. Preserve active feature work.
+- Original archives stay in D:\\Downloads. Use SSD F:\\Temp for temporary extraction, build data, shader caches, and staging. Keep final IPA at the selected destination.
 
-## Validation
+## November 6 upstream integration
 
-- Windows application, SMB staging, and split-data tests: 28 passed, 1 skipped (optional texture decoder).
-- Focused mesh-stage, shader reflection, pool-array, Unreal ring, and NSO matching tests: 84 passed, 1 skipped.
-- Game-profile and documentation tests: 18 passed after regenerating the patch/symptom indexes with Python UTF-8 mode.
-- Python syntax checks and `win/doctor.py`: passed; Windows SDK, .NET, translator DLLs, Metal compilers, SPIRV-Cross, and supporting tools were found.
-- Ampere translator suite on Windows: 70 passed, 3 failed in unsupported-operation cases because the child process could not load `System.Runtime, Version=10.0.0.0`; no shader behavior changes were made. The upstream tool-lock checker remains Mac-oriented and does not describe the Windows Metal/translator binaries.
-- `win/tests/test_romfs_extract_mode.py` remains incompatible with the current `build_ipa_from_nsp.py` API; it expects extraction-mode APIs that do not exist. No game build was run.
+- Integrated upstream 0c7e88b92b5fdf0dfa0e9496df5652f350f05e20 into customized main with a normal merge; pushed origin/main as 353004bad01f4b03f690826d9451b306516b40eb.
+- Included 41 upstream commits since merge base 865cc35fad7034d17c2190f8ce349f61f5bcaba1, including SSBU copy-stride fix cac783a1 and 13.0.5 HTML extraction fix a5c7234e.
+- Resolved game index, NVN, shader split, and patch-note conflicts. Kept Windows UTF-8 behavior and custom features.
+- GUI staging now defaults to F:\\Temp\\NXNative\\SMB when present and uses per-title work directories; existing fallback/output routing remains.
+- Checks: win tests 11 pass/1 optional skip; SMB staging 17 pass; split-data 1 pass; py_compile passes. One shared NSP incremental test fails on Windows due an exe filename expectation, while the production Windows wrapper adapts it. pytest is unavailable.
+- doctor detects Python/.NET, translator, LLVM, Metal and support tools. iPhoneOS SDK 26+ is missing. No game compilation was run.
 
-## Remaining work
+## SSBU readiness
 
-- Verify the final remote refs after pushing the validated mirror and Windows integration; keep pushes fast-forward only.
-- Review the Windows branch's legacy Save Folder Sync implementation separately before any removal.
-- Controller gear behavior and Mario Kart World performance have not been device-tested as part of this synchronization.
+- Profile title ID 01006A800016E000; known supported build is update 13.0.5 (v2031616) with base game. Other versions are not confirmed.
+- Base/update NSP inputs are handled by extraction; optional DLC AOC NSPs are supported. The profile notes 99 DLC licenses.
+- Offline extraction, shader translation, Metal compile, Windows builder and IPA packaging paths are present. Upstream fixes cover Adventure opening copy stride and 13.0.5 HTML extraction.
+- Before building, configure iPhoneOS SDK 26+, confirm F:\\Temp capacity and device storage for the ~17.5 GB IPA, and verify exact base/update/DLC inputs. No full compile started.

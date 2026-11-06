@@ -1,4 +1,4 @@
-# nxnative
+﻿# nxnative
 
 ## IndecentDad fork
 
@@ -20,35 +20,9 @@ The working Windows checkout is `D:\NXNativeWindows`. Use the clean `main` workt
 
 See [build provenance](docs/build-provenance.md) and [current project status](docs/PROJECT_STATUS.md). Never use KylePyne as the NXNative GitHub identity.
 
-## Upstream project
+## Custom fork history
 
-`main` is the primary IndecentDad fork: it follows `seedds/nxnative/main` and carries only required, tested custom changes. `windows/main` inherits applicable changes from `main` and keeps the Windows-capable build pipeline, GUI, shader compilation, staging, caching, split builds and IPA packaging. Use temporary `feature/*` and `fix/*` branches, based on the stable branch they target, and merge after validation. The former permanent `integration` branch is being retired after its required changes are consolidated and both stable branches are validated. Known-working checkpoints use immutable annotated tags; never move a validated tag.
-
-Current custom functionality beyond upstream:
-
-| File | Purpose |
-|---|---|
-| `dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate` | Universal ARM64/x86_64 .NET launcher required on the Intel Tahoe build VM; exact launcher used for the successful Metroid build. Translator DLLs, runtime code, profiles and shader lock are unchanged. |
-| `README.md` | Fork overview, branch policy and build instructions. |
-| `AGENTS.md` | IndecentDad identity and our permanent development/validation rules. |
-| `docs/branch-workflow.md` | Stable branch roles, platform routing and cleanup rules. |
-| `docs/build-provenance.md` | Reproduction, isolation, provenance and upstream-update procedure. |
-| `docs/PROJECT_STATUS.md` | Current validation status and next approved step. |
-| `dm/games/game.py` | Expose the profile's title ID to the save bridge. |
-| `dm/host/hle_fs.c` | Notify the iOS bridge after a successful native transactional save commit. |
-| `dm/ios/Sources/DmSaveFolderSync.h`, `DmSaveFolderSync.m`, `DmSaveFolderSyncBridge.h` | Optional Files-provider sync with bookmarks, fingerprints, conflict resolution, staged transfers and recovery snapshots. |
-| `dm/ios/Sources/main.m` | Connect native `Documents/save`, save commits and foreground events without replacing upstream boot/preload. |
-| `dm/ios/Sources/Launcher.swift` | Save Folder Sync section in the existing settings UI. |
-| `dm/ios/project.yml` | Swift-to-Objective-C bridge header for settings. |
-| `dm/ios/tests/test_save_folder_sync.py`, `test_save_folder_sync_filesystem.py` | Focused contract and filesystem regression checks. |
-| `docs/save-folder-sync.md`, `docs/branch-archive.md` | Save format, validation gate and recovery locations for retired work. |
-| `docs/branch-archive.md` | Verified history backups and legacy-work recovery references. |
-
-Metroid Dread and Celeste Save Folder Sync builds from `a51aad6` are confirmed working on iPhone. The optional Eden-compatible Save Folder Sync remains alongside upstream iCloud Cloud Saves. Its source commit is `a51aad6e0ae2fef570a94c05e5291fc0f3b5105e`; native `Documents/save` contents map directly to `<selected folder>/<title ID>/`. The historical runtime remains an immutable reference; no audio, graphics, scheduler, or game-rewriter changes were included.
-
-Build on the existing Intel Tahoe VM through `ssh tahoe` and `zsh -lc`, targeting ARM64 iOS with Xcode 26.6. Use the official `scripts/build_ipa_from_nsp.py` and a fresh input/output directory. The universal launcher enables build tooling on Intel; it does not make the ARM64 Mac game host executable there. Existing .NET 10, xcodegen, spirv-cross, zstd and Python dependencies are required. Upstream's `own_compilers.py` handles local Metal/spirv-cross differences without editing `dmsh_chain.lock`.
-
-See [reproduction and provenance](docs/build-provenance.md) and [current status](docs/PROJECT_STATUS.md). When upstream advances, merge it into `main`, validate, then merge the updated `main` into a temporary branch from `windows/main` and validate on Windows before advancing that stable branch. Configure repository-local identity as `IndecentDad <338341614+IndecentDad@users.noreply.github.com>`; never use KylePyne for this project.
+This fork retains Windows build and staging support, game profiles, shader and Metal toolchain adapters, split-data packaging, and Eden-compatible Save Folder Sync. Current branch, workspace, and upstream instructions are in docs/branch-workflow.md, docs/windows-build-worker.md, and docs/PROJECT_STATUS.md. The build records below are historical provenance.
 
 ## Upstream project
 
@@ -56,7 +30,7 @@ Play your own Nintendo Switch games natively on iPhone and iPad. Bring your game
 
 It is not an emulator: the game's own code runs directly on the Apple chip, with Switch graphics rebuilt on Metal. Nothing from any game is in this repository, and the project is not affiliated with Nintendo or any game publisher.
 
-Switch 2 games have started too: [Donkey Kong Bananza](dm/games/040074A01BF12000/README.md), [Splatoon Raiders](dm/games/0400380020056000/README.md), [Fire Emblem Fortune's Weave](dm/games/04007EF01F8AE000/README.md), [Pokémon Pokopia](dm/games/0400A3A01EE4C000/README.md), [Hyrule Warriors: Age of Imprisonment](dm/games/04003F40232DE000/README.md), [Mario Kart World](dm/games/0400C3F00006E000/README.md) and [Mario Tennis Fever](dm/games/0400D4201C6EA000/README.md) play on the Mac, packed from one [`.nup` file](#switch-2-games) or a dump of the game; iPhone and iPad are untested.
+Switch 2 games have started too: [Donkey Kong Bananza](dm/games/040074A01BF12000/README.md), [Splatoon Raiders](dm/games/0400380020056000/README.md), [Fire Emblem Fortune's Weave](dm/games/04007EF01F8AE000/README.md), [PokÃ©mon Pokopia](dm/games/0400A3A01EE4C000/README.md), [Hyrule Warriors: Age of Imprisonment](dm/games/04003F40232DE000/README.md), [Mario Kart World](dm/games/0400C3F00006E000/README.md) and [Mario Tennis Fever](dm/games/0400D4201C6EA000/README.md) play on the Mac, packed from one [`.nup` file](#switch-2-games) or a dump of the game; iPhone and iPad are untested.
 
 ## Acknowledgements
 
@@ -64,7 +38,7 @@ This project is built on other people's work ([licenses](dm/third_party/README.m
 
 - **[d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)** (MIT) developed this native-execution approach, for Diablo II: Resurrected. nxnative started as a copy of its generic parts: the NSO rewriter, the host that stands in for Horizon, the NVN-on-Metal layer and the iOS app shell. Fixes go both ways.
 - **Ryujinx** (MIT): its shader translator (`Ryujinx.Graphics.Shader`, `Ryujinx.Common` and `Spv.Generator` 1.3.2, in `dm/third_party/ryujinx` with a few fixes listed in [its README](dm/third_party/ryujinx/README.md)) turns the games' shaders into SPIR-V. Its emulation of the kernel and system services is also a reference when the host's behaviour is in doubt.
-- **[Atmosphère](https://github.com/Atmosphere-NX/Atmosphere)**: its kernel, mesosphère, is the reference for Horizon's synchronization semantics (address arbiter, condition variables).
+- **[AtmosphÃ¨re](https://github.com/Atmosphere-NX/Atmosphere)**: its kernel, mesosphÃ¨re, is the reference for Horizon's synchronization semantics (address arbiter, condition variables).
 - **[LibHac](https://github.com/Thealexbarney/LibHac)**: reads NSPs and layers updates over the base game in `dm/tools/nx_extract`.
 - **[SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross)**: SPIR-V to Metal Shading Language.
 - **[glslang](https://github.com/KhronosGroup/glslang)** compiles the GLSL of OpenGL games to SPIR-V for it.
@@ -85,7 +59,7 @@ Community projects build on nxnative with Mac apps that turn your games into app
 
 ### Build from the command line
 
-You need a Mac with macOS 26.6 or later, [Xcode](https://developer.apple.com/download/all/?q=Xcode%2027.2) 27.2, [Homebrew](https://brew.sh) and Python 3.12 or newer (an arm64 one, not an Intel Homebrew's). An iPhone build also needs Xcode's iOS platform (Xcode → Settings → Components).
+You need a Mac with macOS 26.6 or later, [Xcode](https://developer.apple.com/download/all/?q=Xcode%2027.2) 27.2, [Homebrew](https://brew.sh) and Python 3.12 or newer (an arm64 one, not an Intel Homebrew's). An iPhone build also needs Xcode's iOS platform (Xcode â†’ Settings â†’ Components).
 
 The shaders are built with Xcode 27.2's Metal compiler. Select it before step 1: `sudo xcode-select -s /Applications/Xcode.app`. With several Xcode versions installed, name this one `Xcode-27.2.app` and select it with `sudo xcode-select -s /Applications/Xcode-27.2.app`.
 
@@ -113,7 +87,7 @@ python3 -m pip install lz4 "capstone>=5,<6" fonttools nsz zbic "backports.zstd; 
 python3 scripts/build_ipa_from_nsp.py ~/Games/MarioWonder -k ~/keys/prod.keys
 ```
 
-The IPA appears in the game's folder. The first build takes 30–60 minutes and needs free disk space of about twice the game's size plus 10 GB; building again is much faster.
+The IPA appears in the game's folder. The first build takes 30â€“60 minutes and needs free disk space of about twice the game's size plus 10 GB; building again is much faster.
 
 To play on the Mac instead, add `--platform mac-app`: you get a Mac app of the game to open from Finder. All options: [The packing script in detail](docs/development.md#the-packing-script-in-detail).
 
@@ -172,7 +146,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 <td align="center" valign="top" width="33%"><img src="docs/images/fire-emblem-fortunes-weave.jpg" width="256" alt="Fire Emblem Fortune's Weave"><br><small><b><a href="dm/games/04007EF01F8AE000/README.md">Fire Emblem Fortune's Weave</a></b><br>Switch 2, Mac only, from a dump, up to 120 fps</small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-pokopia.jpg" width="256" alt="Pokémon Pokopia"><br><small><b><a href="dm/games/0400A3A01EE4C000/README.md">Pokémon Pokopia</a></b><br>Switch 2, Mac only, from a dump</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-pokopia.jpg" width="256" alt="PokÃ©mon Pokopia"><br><small><b><a href="dm/games/0400A3A01EE4C000/README.md">PokÃ©mon Pokopia</a></b><br>Switch 2, Mac only, from a dump</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/hyrule-warriors-age-of-imprisonment.jpg" width="256" alt="Hyrule Warriors: Age of Imprisonment"><br><small><b><a href="dm/games/04003F40232DE000/README.md">Hyrule Warriors: Age of Imprisonment</a></b><br>Switch 2, Mac only, from a NUP</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/mario-kart-world.jpg" width="256" alt="Mario Kart World"><br><small><b><a href="dm/games/0400C3F00006E000/README.md">Mario Kart World</a></b><br>Switch 2, Mac only, from a dump</small></td>
 </tr>
@@ -242,7 +216,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 <td align="center" valign="top" width="33%"><img src="docs/images/dragon-quest-vii-reimagined.jpg" width="256" alt="DRAGON QUEST VII Reimagined"><br><small><b><a href="dm/games/0100A9D01C446000/README.md">DRAGON QUEST VII Reimagined</a></b><br>60 fps with 1.2.0</small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/dragon-quest-xi-s.jpg" width="256" alt="DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition"><br><small><b><a href="dm/games/01006C300E9F0000/README.md">DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition</a></b><br>60 fps with 1.0.4</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/dragon-quest-xi-s.jpg" width="256" alt="DRAGON QUEST XI S: Echoes of an Elusive Age â€“ Definitive Edition"><br><small><b><a href="dm/games/01006C300E9F0000/README.md">DRAGON QUEST XI S: Echoes of an Elusive Age â€“ Definitive Edition</a></b><br>60 fps with 1.0.4</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/final-fantasy-resonance.jpg" width="256" alt="FINAL FANTASY RESONANCE"><br><small><b><a href="dm/games/0100606026F12000/README.md">FINAL FANTASY RESONANCE</a></b><br>60 fps with 1.0.1</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/final-fantasy-tactics.jpg" width="256" alt="FINAL FANTASY TACTICS - The Ivalice Chronicles"><br><small><b><a href="dm/games/010038B015560000/README.md">FINAL FANTASY TACTICS - The Ivalice Chronicles</a></b></small></td>
 </tr>
@@ -278,16 +252,16 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/pikmin-4.jpg" width="256" alt="Pikmin 4"><br><small><b><a href="dm/games/0100B7C00933A000/README.md">Pikmin 4</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-brilliant-diamond.jpg" width="256" alt="Pokémon Brilliant Diamond"><br><small><b><a href="dm/games/0100000011D90000/README.md">Pokémon Brilliant Diamond</a></b><br>60 fps with 1.3.0</small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-z-a.jpg" width="256" alt="Pokémon Legends: Z-A"><br><small><b><a href="dm/games/0100F43008C44000/README.md">Pokémon Legends: Z-A</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-brilliant-diamond.jpg" width="256" alt="PokÃ©mon Brilliant Diamond"><br><small><b><a href="dm/games/0100000011D90000/README.md">PokÃ©mon Brilliant Diamond</a></b><br>60 fps with 1.3.0</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-z-a.jpg" width="256" alt="PokÃ©mon Legends: Z-A"><br><small><b><a href="dm/games/0100F43008C44000/README.md">PokÃ©mon Legends: Z-A</a></b></small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-scarlet.png" width="256" alt="Pokémon Scarlet"><br><small><b><a href="dm/games/0100A3D008C5C000/README.md">Pokémon Scarlet</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-violet.jpg" width="256" alt="Pokémon Violet"><br><small><b><a href="dm/games/01008F6008C5E000/README.md">Pokémon Violet</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-sword.jpg" width="256" alt="Pokémon Sword"><br><small><b><a href="dm/games/0100ABF008968000/README.md">Pokémon Sword</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-scarlet.png" width="256" alt="PokÃ©mon Scarlet"><br><small><b><a href="dm/games/0100A3D008C5C000/README.md">PokÃ©mon Scarlet</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-violet.jpg" width="256" alt="PokÃ©mon Violet"><br><small><b><a href="dm/games/01008F6008C5E000/README.md">PokÃ©mon Violet</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-sword.jpg" width="256" alt="PokÃ©mon Sword"><br><small><b><a href="dm/games/0100ABF008968000/README.md">PokÃ©mon Sword</a></b></small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-shield.jpg" width="256" alt="Pokémon Shield"><br><small><b><a href="dm/games/01008DB008C2C000/README.md">Pokémon Shield</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-shield.jpg" width="256" alt="PokÃ©mon Shield"><br><small><b><a href="dm/games/01008DB008C2C000/README.md">PokÃ©mon Shield</a></b></small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/portal.jpg" width="256" alt="Portal"><br><small><b><a href="dm/games/01007BB017812000/README.md">Portal</a></b></small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/raging-loop.jpg" width="256" alt="Raging Loop"><br><small><b><a href="dm/games/010020400E1C2000/README.md">Raging Loop</a></b></small></td>
 </tr>
@@ -303,7 +277,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/super-smash-bros-ultimate.jpg" width="256" alt="Super Smash Bros. Ultimate"><br><small><b><a href="dm/games/01006A800016E000/README.md">Super Smash Bros. Ultimate</a></b><br>offline</small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/taiko-risshiden-v-dx.jpg" width="256" alt="Taiko Risshiden V DX"><br><small><b><a href="dm/games/0100346017304000/README.md">Taiko Risshiden V DX</a></b><br>Japanese · played by touch</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/taiko-risshiden-v-dx.jpg" width="256" alt="Taiko Risshiden V DX"><br><small><b><a href="dm/games/0100346017304000/README.md">Taiko Risshiden V DX</a></b><br>Japanese Â· played by touch</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/unicorn-overlord.jpg" width="256" alt="Unicorn Overlord"><br><small><b><a href="dm/games/010069401ADB8000/README.md">Unicorn Overlord</a></b></small></td>
 </tr>
 <tr>
@@ -333,7 +307,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/xenoblade-chronicles-definitive-edition.jpg" width="256" alt="Xenoblade Chronicles: Definitive Edition"><br><small><b><a href="dm/games/0100FF500E34A000/README.md">Xenoblade Chronicles: Definitive Edition</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-arceus.jpg" width="256" alt="Pokémon Legends: Arceus"><br><small><b><a href="dm/games/01001F5010DFA000/README.md">Pokémon Legends: Arceus</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-arceus.jpg" width="256" alt="PokÃ©mon Legends: Arceus"><br><small><b><a href="dm/games/01001F5010DFA000/README.md">PokÃ©mon Legends: Arceus</a></b></small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/super-mario-party-jamboree.jpg" width="256" alt="Super Mario Party Jamboree"><br><small><b><a href="dm/games/0100965017338000/README.md">Super Mario Party Jamboree</a></b></small></td>
 </tr>
 <tr>
@@ -399,7 +373,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/star-fox.jpg" width="256" alt="Star Fox"><br><small><b><a href="dm/games/0400E88025B1A000/README.md">Star Fox</a></b><br>Switch 2, Mac only, from a NUP</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/kirby-air-riders.jpg" width="256" alt="Kirby Air Riders"><br><small><b><a href="dm/games/040077201BE50000/README.md">Kirby Air Riders</a></b><br>Switch 2, Mac only, from a NUP</small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/okami-hd.jpg" width="256" alt="ŌKAMI HD"><br><small><b><a href="dm/games/0100276009872000/README.md">ŌKAMI HD</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/okami-hd.jpg" width="256" alt="ÅŒKAMI HD"><br><small><b><a href="dm/games/0100276009872000/README.md">ÅŒKAMI HD</a></b></small></td>
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/minecraft-dungeons-ii.jpg" width="256" alt="Minecraft Dungeons II"><br><small><b><a href="dm/games/0100A7C01B792000/README.md">Minecraft Dungeons II</a></b></small></td>
@@ -411,7 +385,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 
 ### For developers
 
-[How it works](docs/development.md) · [Game notes](dm/games/README.md#games) · [Bring-up and debugging](docs/agents/README.md) · [Front ends](docs/frontends.md) · [Contributing](CONTRIBUTING.md)
+[How it works](docs/development.md) Â· [Game notes](dm/games/README.md#games) Â· [Bring-up and debugging](docs/agents/README.md) Â· [Front ends](docs/frontends.md) Â· [Contributing](CONTRIBUTING.md)
 
 ### License
 
