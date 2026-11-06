@@ -74,7 +74,13 @@ python win/build_ipa_windows.py D:\Games\MarioWonder -k D:\keys\prod.keys
 
 The options are the upstream script's (`-h`). Only `--platform ios` exists here. The IPA is unsigned, as upstream: sign it with your sideloading tool (Sideloadly on Windows, AltStore, …), with the Increased Memory Limit capability where the tool offers it.
 
-### Notes on the tools
+### Workspace and output paths
+
+Keep original game archives in `D:\Downloads`. The GUI now selects a per-title build folder under `F:\Temp\NXNative\SMB\<title ID>\build` when the SSD is available. It uses that workspace for extraction, intermediate data, shader caches, and SMB staging, while leaving source files untouched and keeping the completed IPA at the selected or established destination.
+
+The direct command-line entry point retains the pipeline's source-folder default. Pass `--work-dir F:\Temp\<title ID>` for temporary build data and `-o <existing final IPA path>` to keep the finished artifact out of the temporary workspace. An explicit `NXNATIVE_WORKSPACE` still controls source-mode staging; if `F:\Temp` is unavailable, the GUI keeps its existing local fallback.
+
+## Notes on the tools
 
 - **Metal Developer Tools for Windows 5.x and 6.x** ship one toolchain in `bin/` for every target, and the `-target` triple picks the OS. 4.x had separate `ios/` and `macos/` folders. `win/toolchain.py` finds either layout.
 - **Xcode 27's `.xip`** is a sorted, deduplicated cpio (Metadata `xbs_sortcpio`). Only one entry of each hard-linked inode carries the bytes; the others hold a `NULLcanary` placeholder of the same size. `extract_xip.py` reads the archive twice: the first pass finds the entry that carries each inode's bytes, the second writes them to every SDK path. The extractor also resolves symlinks that point through other symlinks (`Headers → Versions/Current/Headers`).

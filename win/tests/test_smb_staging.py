@@ -21,12 +21,21 @@ class SmbStagingTests(unittest.TestCase):
 
     def network(self, path): return Path(path) == self.source
 
-    def test_packaged_workspace_root_is_the_executable_directory(self):
+    def test_packaged_workspace_root_uses_executable_when_ssd_is_absent(self):
         exe = Path(r'D:\\NXNativeBuilds\\NXNative.exe')
-        self.assertEqual(staging.application_root(executable=exe, frozen=True), exe.parent)
+        with patch.object(staging.Path, 'is_dir', return_value=False):
+            self.assertEqual(staging.application_root(executable=exe, frozen=True), exe.parent)
         with patch.object(staging, 'local_workspace_root', return_value=exe.parent):
             work = staging.local_split_data_folder([self.source], r'\\nas\out\Celeste.ipa')
         self.assertEqual(work, exe.parent / '0100000000000000' / 'outputs' / 'Celeste-data')
+
+    def test_application_root_prefers_f_temp_when_present(self):
+        with patch.dict(staging.os.environ, {'NXNATIVE_WORKSPACE': ''}), patch.object(staging.Path, 'is_dir', return_value=True):
+            self.assertEqual(staging.application_root(frozen=False), Path(r'F:\Temp\NXNative\SMB'))
+
+    def test_local_build_folder_is_per_title(self):
+        with patch.object(staging, 'local_workspace_root', return_value=self.workspace):
+            self.assertEqual(staging.local_build_folder([self.source]), self.workspace / '0100000000000000' / 'build')
 
     def test_local_ipa_output_is_under_the_per_game_workspace(self):
         with patch.object(staging, 'local_workspace_root', return_value=self.workspace):
@@ -89,7 +98,7 @@ class SmbStagingTests(unittest.TestCase):
         self.assertFalse(list(destination.parent.glob('*.nxw-partial-*')))
 
     def test_application_root_in_script_mode_uses_local_per_user_fallback(self):
-        with patch.dict(staging.os.environ, {'LOCALAPPDATA': str(self.workspace)}):
+        with patch.dict(staging.os.environ, {'LOCALAPPDATA': str(self.workspace), 'NXNATIVE_WORKSPACE': ''}), patch.object(staging.Path, 'is_dir', return_value=False):
             self.assertEqual(staging.application_root(frozen=False), self.workspace / 'NXNative' / 'SMB')
 
     def test_unc_path_is_classified_as_network(self):

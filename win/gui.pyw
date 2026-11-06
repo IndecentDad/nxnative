@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # NXNative Windows Builder: a window for win/build_ipa_windows.py. Pick the game's NSP / XCI files (base, update, DLC) and prod.keys, press Build IPA.
-# It runs the same pipeline as the command line (python win/build_ipa_windows.py <folder> -k <keys> --progress json) with the pipeline's defaults
+# It runs the same pipeline as the command line, using an SSD work folder and the pipeline's other defaults
 # (app name, bundle ID org.nxnativewindows.<title ID>, language, frame-rate counter) and shows its JSON progress events.
 # The pipeline packs every game file in one folder; when the picked files share their folder with other games' files, they are hard-linked (copied on another drive)
 # into a folder of their own first. Start: double-click Build-IPA-GUI.bat in the repository root, or this file (pythonw).
@@ -11,7 +11,7 @@ from tkinter import ttk, filedialog, messagebox
 WIN = Path(__file__).resolve().parent
 REPO = WIN.parent
 sys.path.insert(0, str(WIN))
-from staging import stage_folder, is_network_path, default_network_output, local_split_data_folder, local_ipa_output, prepare_output_destination, safe_staged_copy, zip_split_data
+from staging import stage_folder, is_network_path, default_network_output, local_build_folder, local_split_data_folder, local_ipa_output, prepare_output_destination, safe_staged_copy, zip_split_data
 SETTINGS = WIN / 'gui_settings.json'   # the last picked files and keys (this PC only; git ignores it)
 GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
 
@@ -476,7 +476,9 @@ class App(tk.Tk):
                 return
         try: folder, copied = stage_folder(self.files)
         except (OSError, ValueError) as e: messagebox.showerror('Game files', str(e)); return
-        cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', self.keys, '--progress', 'json']
+        work_dir = local_build_folder(self.files)
+        cmd = [console_python(), '-u', str(WIN / 'build_ipa_windows.py'), str(folder), '-k', self.keys, '--progress', 'json',
+               '--work-dir', str(work_dir)]
         if build_output: cmd += ['-o', build_output]
         self.split_data_work = self.split_data_archive = self.final_data_artifact = None
         self.archive_complete = self.archive_running = self.archive_started = False
@@ -493,6 +495,7 @@ class App(tk.Tk):
         self.s.update(files=self.files, keys=self.keys); save_settings(self.s)
         self._clear_log()
         self._write(f'Game folder  {folder}' + ('  (local workspace for SMB inputs)' if network_sources else '  (hard links to your files)' if folder != Path(self.files[0]).parent else '') + '\n', 'dim')
+        self._write(f'Build workspace  {work_dir}\n', 'dim')
         if network_sources: self._write(f'Output  {output}\n', 'dim')
         if self.split_data_archive: self._write(f'Split data will be zipped locally, then transferred as one file: {self.split_data_archive}\n', 'dim')
         if copied: self._write(f'Copied (another drive, no hard link possible): {", ".join(copied)}\n', 'dim')

@@ -2,6 +2,10 @@
 
 The README covers packing and playing. This page is for working on nxnative itself: how it is built, the script's options, running games on the Mac, and adding a game (per-game notes are in [dm/games](../dm/games/README.md#games)). Agent-oriented details (bring-up failure catalogue, graphics specifics, debugging recipes) are in [docs/agents](agents/README.md).
 
+## Windows builder and workspace
+
+Windows builds use `win/build_ipa_windows.py` or the Windows GUI. Keep source archives in `D:\Downloads`; the GUI uses `F:\Temp\NXNative\SMB\<title ID>\build` for extraction, shader caches, and intermediate data when the SSD is available. Direct CLI builds should pass `--work-dir F:\Temp\<title ID>` and `-o <existing final IPA path>` so the completed artifact stays at its established destination. See [Windows build worker](windows-build-worker.md) for toolchain checks, staging, and exact paths.
+
 ## How it works
 
 | Part | State |
@@ -433,7 +437,7 @@ A repeat build skips work whose inputs have not changed. The extraction is kept 
 
 The shader split follows only its extractor's repository imports and the profile values/tables extraction consumes or checks. It verifies cached package contents and uses executable-bound decoder provenance that ignores only the shader-chain label. Translation-only changes can therefore reuse the split on both Mac and iOS; other decoder/host changes still invalidate conservatively. See [shader extraction reuse](reference/shaders.md#shader-extraction-reruns-after-translation-only-updates).
 
-The shader libraries are one file, `shader/cache/b-<chain>.img` for the Mac and `shader/ios/b-<chain>.img` for the iPhone, which the host and the tools read in place and which is never unpacked (`dm/tools/shader_lib.py`, [Shader libraries take a file per shader variant](reference/packing.md#shader-libraries-take-a-file-per-shader-variant)). A build writes the folder `b-<chain>/` and packs it at the end. To look inside: `shader_lib.py cat <lib> <name>`, or `romfs.Path` in Python.
+The shader libraries are one file, `shader/cache/b-<chain>.img` for the Mac and `shader/ios/b-<chain>.img` for the iPhone, which the host and the tools read in place and which is never unpacked (`dm/tools/shader_lib.py`, [Shader libraries take a file per shader variant](reference/packing.md#shader-libraries-take-a-file-per-shader-variant)). `dmsh_build.py` writes the image itself: the folder `b-<chain>/` beside it holds only the shaders in flight, a finished shader's files wait in `cas.db`, and the translator's working files go when their shader is done, so a build holds a few hundred files at most and a stopped one leaves a few dozen, which the next run clears ([A shader build leaves a file per shader output](reference/packing.md#a-shader-build-leaves-a-file-per-shader-output-while-it-runs-or-after-a-stop)). A folder from an older chain is packed at the end of the step. To look inside: `shader_lib.py cat <lib> <name>`, or `romfs.Path` in Python.
 
 The compile cache is one file too, `shader/cache/cas.db` (`dm/tools/shader_cache.py`), which a build reads and writes in place, and into which a `cas/` or `cas.tar` from before it moves by itself ([The compile cache was unpacked for each build](reference/packing.md#the-compile-cache-was-unpacked-for-each-build)). Xcode's derived data, which Xcode wants as a folder, is one uncompressed file between builds, `ipa/build/ios/pkg/dd.tar` (`dm/tools/tree_tar.py`): the step that runs unpacks it first and packs it at the end, and a reused step does not touch it ([Build folders of many small files](reference/packing.md#a-build-folder-holds-hundreds-of-thousands-of-small-files)).
 
@@ -469,7 +473,7 @@ Haptic engines are created on demand, after the game has activated its audio ses
 
 The Mac is the development host. To test or debug a game on the Mac, `--platform mac` (`PLATFORM = 'mac'` in Spyder) builds only what running it in the Mac host needs, from the same NSP folder:
 - the same steps up to the shaders: extraction, rewrite, run-time shader captures and decodes, a provisional profile's heap check and the shader split;
-- the Mac shader libraries only: `dmsh_build.py` without `IOSOUT` into `<id>_build/shader/cache/b-<chain>/` (one file, `b-<chain>.img`, at the end of the step), which a full build stamps with the profile's inputs (`inputs.tsv`) and from which it makes the profile's `c1_full.tsv` and `cb_extent.tsv`, or a Vulkan or GL game's library without `--ios` into `<id>_build/shader/vk/` or `gl/`;
+- the Mac shader libraries only: `dmsh_build.py` without `IOSOUT` into `<id>_build/shader/cache/b-<chain>.img` (one file), which a full build stamps with the profile's inputs (`inputs.tsv`) and from which it makes the profile's `c1_full.tsv` and `cb_extent.tsv`, or a Vulkan or GL game's library without `--ios` into `<id>_build/shader/vk/` or `gl/`;
 - the Mac host for the profile into `<id>_build/tools/dmhost`: the compile line of `make -C dm/host GAME=<id> dmhost`, with a provisional or derived profile through `DM_GAMES_DIR` / `DM_GAMES_FIRST` as for the script's other host builds. It is reused while its sources (the chain header `dm/gfx/nvn/dmsh_chain.h` among them), the generated profile header, libvpx and the compiler are unchanged;
 - the button-icon font (`make_ext_font.py`) into `<id>_build/font/`.
 

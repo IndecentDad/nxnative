@@ -17,12 +17,16 @@ def is_network_path(path):
 
 
 def application_root(executable=None, frozen=None):
-    """Root workspace at the packaged GUI executable; use a local per-user fallback in source mode."""
+    """Use the SSD workspace when available, with the existing override and platform fallbacks."""
     frozen = getattr(sys, 'frozen', False) if frozen is None else frozen
+    if not frozen and os.environ.get('NXNATIVE_WORKSPACE'):
+        return Path(os.environ['NXNATIVE_WORKSPACE']).resolve()
+    ssd = Path(r'F:\Temp')
+    if ssd.is_dir(): return ssd / 'NXNative' / 'SMB'
     if frozen:
         return Path(executable or sys.executable).resolve().parent
     fallback = Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir()) / 'NXNative' / 'SMB'
-    return Path(os.environ.get('NXNATIVE_WORKSPACE') or fallback).resolve()
+    return fallback
 
 
 def local_workspace_root():
@@ -41,6 +45,15 @@ def base_title_id(files):
         m = re.search(r'\[([0-9A-Fa-f]{16})\]', name)
         if m: ids.append(m.group(1).upper())
     return next((x for x in ids if x.endswith('000')), ids[0] if ids else None)
+
+
+def local_build_folder(files):
+    """A per-title build/cache folder on the local workspace SSD when available."""
+    files = [Path(f) for f in files]
+    if not files: raise ValueError('select at least one game file')
+    tid = base_title_id(files)
+    key = tid or hashlib.sha256(str(files[0].parent).casefold().encode()).hexdigest()[:16]
+    return local_workspace_root() / key / 'build'
 
 
 def local_split_data_folder(files, ipa_output):

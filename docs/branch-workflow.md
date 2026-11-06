@@ -1,26 +1,29 @@
-# Fork branch workflow
+# Repository and branch workflow
 
-## Stable branches
+## Canonical structure
 
-- `main` is the primary IndecentDad fork. Keep it based on `upstream/main`, update it regularly, and retain only necessary, tested custom behavior.
-- `windows/main` inherits applicable `main` changes. It also keeps the Windows build tools, shader compilation, GUI, SMB staging, output verification, cache handling, split builds and IPA packaging.
-- Shared fixes belong in `main` first. Merge them into `windows/main` through a temporary branch and preserve Windows-only behavior there.
-- Retire `integration` only after its required changes are on both stable branches, refs are backed up and source plus platform validation is complete.
+- Canonical repository: https://github.com/IndecentDad/nxnative.
+- `main` is the complete customized, Windows-compatible implementation and the only permanent development branch. It contains the Windows builder, GUI, shader and Metal toolchain adapters, game profiles, SMB staging, split-data packaging, and accumulated project customizations.
+- `upstream/main` (remote `upstream`, seedds/nxnative) is an external source of improvements. Fetch it and integrate selected changes into customized `main`; never replace `main` with an upstream mirror.
+- GitHub's default branch is `main`. Do not recreate permanent `windows/main`, `integration`, or `nx2` branches.
+- Ordinary development and integration work target `main`. Use a temporary feature or fix branch only when it isolates substantial or risky work; merge validated work to `main` and remove the temporary branch after checking for unique commits and local data.
 
-## Development and validation
+## Windows checkouts and workspace
 
-- Create temporary `feature/*` or `fix/*` branches from the stable branch that will receive the change. Merge after focused validation; do not keep permanent per-game or platform experiment branches.
-- Keep validated game profiles, immutable device-tested tags, IPA provenance and working artifacts. A compile is not gameplay validation.
-- For upstream updates, back up current refs, update `main`, review the custom delta, and run relevant source checks. Then merge `main` into a temporary branch from `windows/main`; validate the Windows pipeline on the physical Windows PC before advancing `windows/main`.
-- Preserve all uncommitted work and generated artifacts in each worktree. Inspect `git status`, remotes, branches and worktrees before changing a branch. Never initialize or replace an inaccessible platform checkout.
+- The primary Windows PC is reached through `ssh nxwindows`. Its existing repository/worktree is `D:\NXNativeWindows`; preserve its dirty `codex/overcooked-ayce-1.0.12` work until reviewed and merged.
+- The clean canonical `main` worktree is `D:\NXNativeBuilds\main`. Other worktrees under `D:\NXNativeBuilds` are isolated game work and must be checked before cleanup.
+- `D:\Downloads` remains a source location for original game archives. Use `F:\Temp` (SSD) for temporary extraction, build caches, and staging. The GUI selects a per-title work folder under `F:\Temp\NXNative\SMB`; CLI builds should pass `--work-dir F:\Temp\<title-id>`. Keep final IPA output at its established destination with `-o` when setting a work folder.
+- Use `win/doctor.py` to inspect the Windows toolchain before a build. See [Windows build worker](windows-build-worker.md) for the entry point and workspace behavior.
 
-## Platform and repository identity
+## Upstream synchronization and validation
 
-- Windows work belongs in `D:\NXNativeWindows` on the physical Windows 11 PC. Tahoe is for macOS/iOS builds through `ssh tahoe`; Synology clones do not substitute for either platform checkout. If Windows access is unavailable, report it and provide read-only PowerShell audit commands.
-- The documented Windows SSH alias, toolchain checks, staging rules and build entry point are in [Windows build worker](windows-build-worker.md).
-- NXNative commits use `IndecentDad <338341614+IndecentDad@users.noreply.github.com>`. Verify the repository-local identity before committing and the active GitHub account before remote writes. Never use KylePyne for NXNative or push to upstream.
+1. Inspect `git status`, remotes, current refs, and all linked worktrees. Preserve dirty files, keys, game inputs, generated artifacts, and reusable caches.
+2. Fetch `origin` and `upstream`. Review the upstream commits and conflicts against the customized `main`; retain both upstream improvements and existing Windows behavior.
+3. Integrate applicable commits into `main` with normal merge history. Do not force-push or rewrite published history.
+4. Run focused tests for changed areas and the Windows builder checks. Validate any Windows-specific changes on the physical Windows PC. A successful compile is not game-play validation.
+5. Commit to and push `origin/main` after validation. Do not push to upstream.
 
-## Branch cleanup
+## Identity and artifacts
 
-- Do not force-push, rewrite published history, push, or delete remote branches as part of local consolidation. Report proposed deletions and any non-fast-forward requirement for review first.
-- Keep local backup refs for prior stable tips until new stable branches are validated. Retain legacy references and user data; remove a temporary branch only after its useful work is merged or backed up.
+- NXNative commits use `IndecentDad <338341614+IndecentDad@users.noreply.github.com>`. Verify repository-local identity before committing and the GitHub identity before remote writes.
+- Keep immutable tags and the documented working IPA for every device-validated game. Record source SHAs, profile/version, toolchain fingerprints, outputs, and device-test status. Never overwrite original ROMs, save data, or signing credentials.

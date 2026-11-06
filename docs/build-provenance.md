@@ -1,4 +1,6 @@
-# Integration builds and provenance
+# Historical integration builds and provenance
+
+This page preserves older Intel and Save Folder Sync build records. Its former two-branch integration instructions are retired; current operating guidance appears at the end of the page.
 
 ## Source baseline
 
@@ -31,13 +33,8 @@ Keep alongside every IPA: exact upstream/integration SHA and custom commits; cle
 
 Before delivery verify embedded ARM64 code sections and packaged rewriter tables against that build's fresh outputs, and shader stamps/tables against the compiled host's chain. Verify no bundled `env.txt`, provisioning profile or signature, and that custom functionality matches the declared source (Intel-only controls exclude Save Sync; sync candidates include its compiled bridge). Verify the copied NAS IPA checksum. Preserve the manifest and log; do not claim gameplay from successful packaging. Device `Documents/env.txt` and launcher preferences persist independently of the IPA and should be checked before device validation without deleting saves.
 
-## Updating upstream
+## Current upstream workflow
 
-1. Fetch `upstream` and `origin`; inspect every relevant worktree and back up stable refs before moving them. Verify remotes and IndecentDad identity.
-2. Update `main` from `upstream/main`, retaining only required, reviewed custom functionality. Validate the source changes and preserve the last known-working artifacts.
-3. Create a temporary `feature/*` or `fix/*` branch from `windows/main`, merge the updated `main`, and resolve shared-code conflicts without dropping Windows build tools, GUI, shader compilation, staging, caching, split builds or packaging. Validate on the physical Windows checkout before advancing `windows/main`.
-4. Record exact source and artifact provenance. Create immutable annotated tags for device-validated checkpoints. Retire temporary branches after merge; retire `integration` only once its required changes are safely present in both stable branches and the Windows validation is complete.
+The historical integration procedure above is retained only to explain the recorded 2025-2026 Intel and Save Folder Sync builds. The current architecture is documented in [branch workflow](branch-workflow.md) and [Windows build worker](windows-build-worker.md): customized `main` is the only permanent development branch; `upstream/main` is an external source; applicable upstream commits are merged into `main`, validated on Windows, and pushed to `origin/main`. Do not create or update a permanent `integration` or `windows/main` branch.
 
-Do not force-push, delete remote branches or rewrite published history without a separate review and explicit authorization. Local consolidation does not authorize remote writes.
-
-Eden Save Folder Sync passed the device-validation gate for both Metroid Dread and Celeste. The candidate manifests identify source commit `a51aad6e0ae2fef570a94c05e5291fc0f3b5105e`; their recorded IPA SHA-256 values match the preserved files. The immutable integration checkpoint is `validated/save-folder-sync-v1`. Continue follow-up work on `fix/save-sync-polish` without rebuilding or replacing those confirmed IPAs unless requested.
+Keep the historical IPA records and immutable `validated/save-folder-sync-v1` checkpoint unchanged. New artifacts must record the customized `main` SHA, upstream SHA, game/version, toolchain fingerprints, output path, and device-test status.

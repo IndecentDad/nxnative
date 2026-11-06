@@ -1,4 +1,13 @@
-# Notes for agents
+﻿# Notes for agents
+
+## Current repository layout
+
+- Canonical repository: https://github.com/IndecentDad/nxnative. Customized `main` is the sole permanent development branch and contains the complete Windows-compatible implementation and customizations. GitHub's default branch is `main`.
+- `upstream/main` is an external source of improvements; integrate applicable changes into customized `main`. The old policy that `main` mirrors upstream, permanent `windows/main`, `integration`, and `nx2` strategies are retired.
+- Windows primary builder: `D:\NXNativeWindows` through `ssh nxwindows`. Clean current `main` worktree: `D:\NXNativeBuilds\main`. Inspect all worktrees and preserve local changes before editing or cleanup.
+- Original downloads stay in `D:\Downloads`. Use `F:\Temp` (SSD) for temporary extraction, build data, shader caches, and staging. The GUI selects a per-title workspace under `F:\Temp\NXNative\SMB`; CLI builds should set `--work-dir F:\Temp\<title-id>` and `-o` when the final IPA needs a fixed existing destination.
+- Read [docs/branch-workflow.md](docs/branch-workflow.md) and [docs/windows-build-worker.md](docs/windows-build-worker.md) for the authoritative branch, checkout, and build path rules.
+
 
 - This repository runs Nintendo Switch games natively on Apple platforms: the game's own code runs, rewritten only where Apple's kernel requires it (`dm/tools/patch_nso.py`), on a host that answers Horizon's SVCs and the SDK's services (`dm/host`) and implements NVN, Vulkan and NVIDIA's desktop OpenGL on Metal (`dm/gfx/nvn`, `dm/gfx/vk`, `dm/gfx/gl`). Every game in the [games table](dm/games/README.md#games) is playable, tested on the Mac or the iPhone (a Mac gameplay test is enough to count); the table lists each with its build, SDK, engine and graphics API, and links its note, `dm/games/<id>/README.md`: what its profile needs and why, what was found on it, how to drive it on the Mac, what is open. [README.md](README.md) is the player-facing page (games, packing, playing); [docs/development.md](docs/development.md) has the internals, the script's options, building by hand, prewarm lists and power.
 - Where to start:

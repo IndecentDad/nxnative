@@ -1,31 +1,30 @@
 # Windows build worker
 
-## Checkout and access
+## Repository and checkout
 
-The Windows repository is on the physical Windows 11 PC at `D:\NXNativeWindows`. From the Synology Codex host, the documented SSH alias is `nxwindows`; the stable `windows/main` branch may also be checked out in a separate worktree under `D:\NXNativeBuilds`. Run `git worktree list` before selecting a checkout. Inspect `git status` before any work and preserve uncommitted files, build outputs, game inputs and caches.
+The canonical repository is https://github.com/IndecentDad/nxnative. Customized `main` is the complete Windows-compatible fork; it includes the Windows builder and GUI, shader translation, Metal compilation adapters, game profiles, SMB staging, split-data packaging, and existing game-specific work. There is no permanent `windows/main` branch.
 
-Read-only connection check:
+The physical Windows 11 PC is reached from Synology with `ssh nxwindows`. The active builder checkout is `D:\NXNativeWindows`; the clean `main` worktree is `D:\NXNativeBuilds\main`. Inspect `git status --short --branch`, remotes, and `git worktree list` before changing either checkout. Preserve dirty feature work, keys, game files, generated data, and caches.
 
-```sh
-ssh -o BatchMode=yes nxwindows "whoami"
-```
+## Workspace paths
 
-PowerShell inspection through SSH:
-
-```sh
-ssh nxwindows "powershell -NoProfile -Command \"Set-Location 'D:\\NXNativeWindows'; git status --short --branch; git remote -v; git branch -avv; git worktree list --porcelain\""
-```
+- Keep original NSP/XCI/NSZ/XCZ files and downloads in `D:\Downloads`.
+- Use the SSD `F:\Temp` for temporary extraction, shader caches, intermediate build data, and staging.
+- The GUI uses a per-title work directory under `F:\Temp\NXNative\SMB\<title ID>\build` when the drive is available. Its SMB inputs, local output staging, and split-data staging use the same SSD workspace.
+- Direct CLI builds retain the upstream source-folder default. Specify `--work-dir F:\Temp\<title ID>` for a new build and use `-o <existing final IPA path>` to keep the IPA at its established destination. The original inputs are not moved.
 
 ## Toolchain and build
 
-The iPhoneOS SDK is under `win\sdk\out\iPhoneOS.sdk`; `win\toolchain.py` discovers SDKs under `win\sdk\out`. Check existing tools with `python win\doctor.py` before installing anything. It checks Python packages, .NET 10, LLVM/clang and `ld64.lld`, the SDK, Metal compilers, spirv-cross, zstd, glslang and fonts.
+Run `python win/doctor.py` before building. It checks Python packages, .NET 10, LLVM/clang and `ld64.lld`, the iPhoneOS SDK, Metal compilers, spirv-cross, zstd, glslang, and fonts. Set the local SDK path with `win/toolchain.json` or `NXW_IOS_SDK`; do not copy or install tools until the doctor output identifies the missing item.
 
 The Windows entry point is:
 
 ```powershell
-python win\build_ipa_windows.py <NSP-folder> -k <prod.keys>
+python win/build_ipa_windows.py <NSP-folder> -k <prod.keys> --work-dir F:\Temp\<title-id> -o <final-IPA-path>
 ```
 
-Use `--split-data` for an app plus a sibling data folder. Inspect the IPA and generated data folder before transfer. Build outputs and reusable shader artifacts stay beside the NSP under `<title ID>_build`; preserve them and let the pipeline validate cache reuse. Windows split-data builds extract RomFS as a directory; conventional IPA extraction retains `RomFS.img`. The builder stages the requested representation and replaces only the old RomFS representation when switching modes.
+The GUI is started with `Build-IPA-GUI.bat` from the repository root or `pythonw win/gui.pyw`. It selects the per-title SSD work folder automatically, preserves the selected/default final IPA destination, and verifies SMB transfers. Use `--split-data` for an app plus a sibling data folder; inspect both outputs before transfer.
 
-Do not print key values, overwrite original game inputs, delete output/cache folders, or clean unrelated worktrees. Keep SMB output transfers staged locally and verify transferred output hashes before considering a packaging run complete.
+## Validation
+
+The Windows builder's pure-Python tests run with `python win/tests/test_win.py`. SMB staging and split-data tests are in `win/tests`. Shader and archive tests that use standard `unittest` can run with `python -m unittest <module>`; the full macOS C/Metal runtime tests require the Mac toolchain. A Windows IPA compile does not establish gameplay compatibility.
