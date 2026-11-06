@@ -15,7 +15,7 @@ The physical Windows 11 PC is reached from Synology with `ssh nxwindows`. The ac
 
 ## Toolchain and build
 
-Run `python win/doctor.py` before building. It checks Python packages, .NET 10, LLVM/clang and `ld64.lld`, the iPhoneOS SDK, Metal compilers, spirv-cross, zstd, glslang, and fonts. Set the local SDK path with `win/toolchain.json` or `NXW_IOS_SDK`; do not copy or install tools until the doctor output identifies the missing item.
+Run `python win/doctor.py` before building. It checks Python packages, .NET 10, LLVM/clang and `ld64.lld`, the iPhoneOS SDK, Metal compilers, spirv-cross, zstd, glslang, and fonts. The locator scans this worktree `win/sdk/out`. For a shared SDK stored in another checkout, set the Windows user variable `NXW_IOS_SDK`; this host reuses `D:\\NXNativeWindows\\win\\sdk\\out\\iPhoneOS.sdk`. Do not copy or install tools when the existing SDK is available.
 
 The Windows entry point is:
 
