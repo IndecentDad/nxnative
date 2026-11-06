@@ -21,6 +21,7 @@ IOS = DM / 'ios'
 HOST = DM / 'host'
 sys.path.insert(0, str(DM / 'tools'))
 import romfs as rfs   # the RomFS as a folder or as one DMROMFS1 image (nx_extract --romfs-image), read alike
+import shader_lib     # NVN shader libraries as a folder or a packed .img (current upstream output)
 
 
 def t(msg): print(f'[{time.strftime("%H:%M:%S")}] {msg}', flush=True)
@@ -303,11 +304,12 @@ def main():
         msldir = 'gl'
     else:
         msldir = f'b-{v}'
-        if not list((msl_ios / msldir).glob('*_b.metallib')): die(f'no iOS shader libraries {msl_ios}/{msldir}')
+        msl_lib = msl_ios / msldir
+        msl_src = msl_lib if msl_lib.is_dir() else Path(shader_lib.image_of(msl_lib))
+        if not shader_lib.has_library(msl_lib): die(f'no iOS shader libraries {msl_ios}/{msldir}')
         inputs = py(DM / 'gfx/tools/dmsh_chain.py', '--inputs', env=dict(env, DM_GAME=game))
-        stamp = (msl_ios / msldir / 'inputs.tsv')
-        lines = stamp.read_text(encoding='utf-8').splitlines() if stamp.exists() else []
-        if f'game\t{game}' not in lines or f'inputs\t{inputs}' not in lines: die(f'the iOS shader libraries {msl_ios}/{msldir} are not a full build from this profile\'s current tables (inputs {inputs})')
+        stamp = shader_lib.read_stamp(msl_lib)
+        if stamp.get('game') != game or stamp.get('inputs') != inputs: die(f'the iOS shader libraries {msl_ios}/{msldir} are not a full build from this profile\'s current tables (inputs {inputs})')
         c1 = gd / 'c1_full.tsv'
         if not (c1.exists() and c1.read_text(encoding='utf-8').splitlines()[:1] and c1.read_text(encoding='utf-8').splitlines()[0].startswith(f'# chain b-{v} inputs {inputs} ')):
             die(f'{c1} is missing or not made from these libraries (chain {v}, inputs {inputs})')
@@ -391,7 +393,7 @@ def main():
         sp = env.get('NXW_SPLIT_DATA', '')
         if sp and sp != '0':   # a split build: the app's "game data needed" screen (win/ios/DataHelp.m) names the data folder and its size
             dname = Path(sp).name if sp not in ('1', 'YES') else out_ipa.stem + '-data'
-            dsize = sum(n for d in (romfs, msl_ios / msldir, aoc if aoc and aoc.is_dir() else None) if d for _, _, n in list_files(d))   # listed once, reused by split_data
+            dsize = sum(n for d in (romfs, msl_src, aoc if aoc and aoc.is_dir() else None) if d for _, _, n in list_files(d))   # listed once, reused by split_data
             pl['NXWDataFolder'] = dname; pl['NXWDataSize'] = f'{dsize / 2**30:.1f} GB' if dsize >= 2**30 else f'{dsize / 2**20:.0f} MB'
         plistlib.dump(pl, f, fmt=plistlib.FMT_BINARY)
     (app / 'PkgInfo').write_bytes(b'APPL????')
@@ -410,10 +412,11 @@ def main():
         # into the app's Documents (dm/ios/Sources/main.m looks for <Documents>/romfs and <Documents>/<folder>/romfs, and takes msl/ and aoc/ beside it)
         data = Path(split) if split not in ('1', 'YES') else out_ipa.with_name(out_ipa.stem + '-data')
         romfs_path = 'romfs.img' if image else 'romfs'   # main.m accepts Documents/romfs.img as well as a RomFS folder
-        split_data(data, {romfs_path: romfs, f'msl/{msldir}': msl_ios / msldir, **({'aoc': aoc} if has_aoc else {})},
+        msl_arc = f'msl/{msldir}.img' if msl_src.is_file() else f'msl/{msldir}'
+        split_data(data, {romfs_path: romfs, msl_arc: msl_src, **({'aoc': aoc} if has_aoc else {})},
                    f'game\t{game}\nbundle_id\t{bundle_id}\nversion\t{version}\nchain\t{v}\ngfx\t{gfx}\n', name, skip_suffix=('_bp.metallib',) if skip_bp else ())
     else:
-        maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}')
+        maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_src}')
         if has_aoc: maps.append(f'Payload/DmIOS.app/aoc={aoc}')
         maps.append(f'Payload/DmIOS.app/romfs.img={romfs}' if image else f'Payload/DmIOS.app/romfs={romfs}')   # main.m romfs_locate opens <App>/romfs.img (build_ipa.sh)
     t('pack IPA (already-compressed game files stored, everything else deflated)')

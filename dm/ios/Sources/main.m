@@ -120,6 +120,20 @@ static NSString *data_dir(NSString *name) {
     return [res stringByAppendingPathComponent:name];
 }
 
+// A multi-program application's DLC can be deployed in Documents or bundled with the app. Keep an explicit DM_AOC_DIR override.
+static void aoc_locate(void) {
+    if (getenv("DM_AOC_DIR")) return;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+    for (NSString *d in @[[doc stringByAppendingPathComponent:@"aoc"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"aoc"]]) {
+        BOOL dir = NO;
+        if (![fm fileExistsAtPath:d isDirectory:&dir] || !dir) continue;
+        setenv("DM_AOC_DIR", d.fileSystemRepresentation, 0);
+        fprintf(stderr, "boot: DLC from %s\n", d.fileSystemRepresentation);
+        return;
+    }
+}
+
 // Boot prerequisites (done before UIApplicationMain): directories / environment variables / log -- the host's early load reads these
 // Why a slim build found no usable game files: the verdict on Documents/romfs.img, in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
 static char g_boot_message[640];
