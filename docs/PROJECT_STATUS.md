@@ -22,5 +22,5 @@
 ## SSBU readiness
 
 - Profile 01006A800016E000; known build is base plus update 13.0.5 (v2031616). Other versions are not confirmed. Optional DLC AOC NSPs are supported; profile notes 99 DLC licenses.
-- Windows SDK, builder, shader translation, Metal compilation, extraction, and IPA packaging prerequisites are ready. No full compile started.
-- Next: confirm the base/update/DLC inputs, then build from main with F:\\Temp as work directory and final IPA at its established destination.
+- The full builder accepted the base XCI and update as profile v2031616; its extracted module build IDs matched the profile. All 99 DLC files were included in package/key validation. The game extraction produced 16.4 GB across 20 files; DLC extraction and shader translation had not started when the Metal preflight stopped the build.
+- Build attempt paused before shader translation: shader-chain lock requires Metal 32023.922.4, while the only installed Windows compiler is 32023.850. Do not use --allow-other-metal without explicit approval. Retained extraction/cache is under F:\\Temp\\NXNative\\SMB\\01006A800016E000\\build; no IPA was produced. Resume only after a matching compiler is available or the compiler override is approved. The SSH CLI build requires PYTHONUTF8=1 and PYTHONIOENCODING=utf-8, matching the GUI environment.
