@@ -1,6 +1,6 @@
 # The Legend of Zelda: Ocarina of Time (`0400486024DEC000`)
 
-A Switch 2 game: update v131072, SDK 22.2.8 (`Ounce`). Nintendo EPD's engine (sead, agl, gsys, Havok, CRIWARE; project `Owl`, with Tears of the Kingdom's file layout) on NVN2. Modules `main`, `subsdk0` (NintendoSDK_movie) and `sdk`, no rewriter patches. Status: plays on the Mac through the title, the opening, a new file's first scene, Link's house and Kokiri Forest, with saves, at about 59 fps with the picture close to console video. Mac only so far.
+A Switch 2 game: update v131072, SDK 22.2.8 (`Ounce`). Nintendo EPD's engine (sead, agl, gsys, Havok, CRIWARE; project `Owl`, with Tears of the Kingdom's file layout) on NVN2. Modules `main`, `subsdk0` (NintendoSDK_movie) and `sdk`, no rewriter patches. Status: plays on the Mac through the title, the opening, a new file's first scene, Link's house and Kokiri Forest, with saves, at about 59 fps with the picture close to console video. Windows-built iOS v1.2.0 is ready for iPad M5 validation; sustained movie playback and gameplay remain unverified.
 
 ## What it needs
 
