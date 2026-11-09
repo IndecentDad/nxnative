@@ -3128,3 +3128,5 @@ int nvn_host_signal_sync(void *nvnsync) {
     o->fence = 0; o->fenced = 1; return 0;
 }
 NVN(nvnTextureFlushTexels, void, const NVNtexture *t, const NVNtextureView *v, const NVNcopyRegion *r) { (void)t; (void)v; (void)r; }   // unified memory + dirty page tracking: nothing to flush
+
+#include "nvn_queue.inc"   // queue scheduler shares the NVN timing and graphics-gate state in this translation unit
