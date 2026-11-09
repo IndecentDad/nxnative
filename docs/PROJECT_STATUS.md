@@ -19,6 +19,15 @@
 - SSBU has 17.6 GB RomFS data and a known 17.5 GB IPA. Allow about 60 GB peak for extracted data, the build's 6 GB image/shader/slack reserve, possible staged input packages, and local IPA transfer; retain 70 GB free.
 - F: is a 1 TB NTFS SSD with 141,403,774,976 bytes (131.7 GiB) free at last check. This is sufficient. No ROMs or final artifacts were moved.
 
+## Upstream sync and build review — 2026-11-09
+
+- Fetched refs: origin/main `8700b867`, upstream/main `04811a63`; verified 142 fork-only and 96 upstream-only commits. Customized `main` now contains the upstream merge and retains the Windows builder, profiles, shader pipeline, split-data packaging, and fork documentation.
+- Windows compatibility updates: include upstream's `pad_switch2_apple.m` in the Windows source collector; make IPA reuse reads work without `os.pread`, avoid Darwin APFS cloning on Windows, and close the old IPA before replacing it. Shader chain header regenerated to `466e38874059`.
+- Validation on the Windows PC: `win/doctor.py` passed; builder/staging/split-data suite 30 passed, 1 optional skip; iOS compile check built 267/267 files for Mario Kart World on SDK 26.5; repeated pack-and-replace smoke check passed with executable mode 755. The generic IPA reuse suite is macOS/APFS-specific and is not a Windows pass criterion.
+- OoT's last recorded canonical IPA is the 2026-11-07 build from customized `main` `03776c36`, upstream baseline `24fe1e5a`; provenance records the IPA and 42,848 shader libraries under `F:\Temp\0400486024DEC000`. The current Windows session has no `F:\Temp` directory. Upstream movie compute (`c66a36ab`), full-resolution/GPU work (`04419bc2`), depth correctness (`81906931`), pool retirement (`1d377206`), heap reuse (`7f502220`), and pipeline archive fixes (`eed7c429`, `4c3a03af`) justify a rebuild when staging is available.
+- Mario Kart World has a 2026-11-03 v1.8.0 playable IPA build record from workspace `3ca7bc88` (upstream base `df7fa667`). The newer 2026-11-04 diagnostic package on source `57306e0b`, chain `ca3de5a06b0b`, translated 11,603/11,604 shaders; record `078997bf631992c5` failed on instruction `0x481` and its gameplay effect is unknown. Upstream sparse-memory and shader changes (`1110473c`, `75e5ddd8`, `e07cba1c`, `84dea698`) justify a fresh shader validation/rebuild; slow-motion fix `7d8dcdf8` is not an FPS gain.
+- No game rebuild was started. The preferred `F:\Temp` staging path is currently absent on the Windows host; existing D-drive workspaces and user files were left untouched.
+
 ## SSBU build: 2026-11-06
 
 - Built Super Smash Bros. Ultimate base XCI plus update 13.0.5 (v2031616), profile 01006A800016E000, and all 99 supplied DLC packages. No other game versions were validated.

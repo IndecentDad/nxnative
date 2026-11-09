@@ -7,13 +7,15 @@
 # Usage: pack_ipa.py <out.ipa> [--store .a:.b] [--skip <archive path>]... <archive path>=<source file or folder>...
 #   Mappings are packed in command-line order; put the files that change least first, and the app last
 #   --skip: an archive path left out of the walk of the folder that holds it (folders a stale app build still has, the signature); a mapping of its own still adds it
-#   --skip-suffix: files whose names end so are left out of every walk (build_ipa.sh: the pulling vertex libraries _bp.metallib when the profile's pso_mtl4 is off, unless IOS_PULL overrides it)
+#   --skip-suffix: files whose names end so are left out of every walk (build_ipa.sh: the pulling vertex libraries _bp.metallib only with an explicit IOS_PULL=0 and no offline archive)
+#   --shader-files: an NVN game's shader library goes in as its separate files, msl/b-<chain>/, not as the one file b-<chain>.img, for install tools that cannot copy a large file (AltServer: 2 GiB,
+#     docs/reference/packing.md). Off by default: one file installs faster than tens of thousands, and other install tools take it whatever its size
 #   Writes <out.ipa>.partial and renames it at the end; prints "pack: N entries, X bytes" first (the NSP script's progress total, X = the files' bytes) and a summary line last
 #   Repeat packs reuse a file when its size, mtime_ns, ctime_ns and inode are unchanged (true on APFS). A tool that rewrites in place and restores mtime defeats this if ctime also stays
 #   unchanged; --no-reuse forces a full pack. The index holds only source metadata and compression settings; ZIP metadata comes from the old IPA.
 #   Only mappings whose source folder is on APFS reuse files; other mappings pack their files again. The kept run needs an APFS clone of the old IPA; if cloning fails, eligible files are copied compressed.
 #   Reused bytes are not checked against their CRC: damage inside the old IPA carries over. Use --no-reuse or delete <out.ipa>.idx to rebuild
-import argparse, atexit, collections, concurrent.futures as cf, ctypes, json, os, re, shutil, stat, struct, sys, tempfile, time, zipfile, zlib
+import argparse, atexit, collections, concurrent.futures as cf, ctypes, json, os, re, shutil, stat, struct, sys, tempfile, threading, time, zipfile, zlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..', 'tools'))
 import shader_lib
@@ -83,6 +85,7 @@ def header(e, method, crc, csize, usize, z64=False):   # a local header: (its by
 
 
 def clone(old, dst):   # clone the checked inode, even if its path was replaced; AT_FDCWD is -2 on Darwin
+    if sys.platform != 'darwin': return False
     try: return ctypes.CDLL(None, use_errno=True).fclonefileat(old.fileno(), -2, os.fsencode(dst), 0) == 0
     except (AttributeError, OSError): return False
 
@@ -168,7 +171,7 @@ class Zip:
         left, at = csize, info.header_offset + 30 + nl + el
         h = self.local(e, method, crc, csize, usize, usize >= L32 or csize >= L32)
         while left:
-            b = os.pread(old.fileno(), min(CHUNK, left), at)
+            b = pread(old, min(CHUNK, left), at)
             if not b: sys.exit(f'[RED] pack_ipa: the old IPA ended while {e.name} was copied from it')
             self.w(b); left -= len(b); at += len(b)
         self.central(e, h, method, crc, csize, usize)
@@ -198,6 +201,16 @@ def load_index(out):   # (the old IPA opened, its index) when <out>.idx describe
     return None
 
 
+_PREAD_LOCK = threading.Lock()
+
+def pread(file, size, offset):
+    # Windows has no os.pread. Preserve the shared stream position while reading from the requested offset.
+    if hasattr(os, 'pread'): return os.pread(file.fileno(), size, offset)
+    with _PREAD_LOCK:
+        pos = file.tell(); file.seek(offset); data = file.read(size); file.seek(pos)
+        return data
+
+
 def fingerprint(e, deflate):
     st = e.st
     return [st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, deflate]
@@ -216,7 +229,7 @@ def match(e, row, info, old, idx, apfs):   # one header comparison for both the 
         if (info.compress_type, info.CRC, info.compress_size, info.file_size) != (method, crc, csize, usize): return None
     h = header(e, method, crc, csize, usize, usize >= L32 or csize >= L32)
     if info.header_offset < 0 or info.header_offset + len(h[0]) + csize > idx['ipa'][0]: return None
-    if os.pread(old.fileno(), len(h[0]) + len(data), info.header_offset) != h[0] + data: return None
+    if pread(old, len(h[0]) + len(data), info.header_offset) != h[0] + data: return None
     return h
 
 
@@ -231,21 +244,31 @@ def prefix(es, files, infos, old, idx, apfs):
     return keep, pos
 
 
-def library_map(arc, src, skip_suffix, out):
+def library_map(arc, src, skip_suffix, out, shader_files=False):
     """An NVN game's libraries, mapped as <app>/msl/[p<N>/]b-<chain>, when they are the one file b-<chain>.img (dm/tools/shader_lib.py): that file at <archive path>.img. The NSP script's image already leaves
     out what its app does not read. A build by hand that wants less than the image holds gets a copy, beside the IPA until the end of the pack (deflated again each time: a new file is never reused),
-    and one that wants the pulling libraries from an image without them stops here, as they would only fail on the device. Anything else goes as mapped"""
+    and one that wants the pulling libraries from an image without them stops here, as they would only fail on the device. With shader_files, what the app carries of the image goes in as a folder
+    of its separate files instead, written beside the IPA for the length of the pack as well (the host reads a library folder first, nvn_mtl.m msl_data). Anything else goes as mapped"""
     if not re.fullmatch(r'.*/msl/(p\d+/)?b-[^/]+', arc) or not str(shader_lib.view(src)).endswith('.img'): return arc, src
     if shader_lib.PULLING not in skip_suffix and shader_lib.left_out_pulling(src):
         sys.exit(f'[RED] pack_ipa: {shader_lib.image_of(src)} has no pulling vertex libraries, and this app needs them: run the NSP script again, which builds them')
     image = shader_lib.image_of(src)
-    if any(p.name.endswith(skip_suffix) for p in shader_lib.view(src).iterdir()) if skip_suffix else False:
-        work = tempfile.mkdtemp(prefix=os.path.basename(out) + '.msl-', dir=os.path.dirname(os.path.abspath(out)))
-        atexit.register(shutil.rmtree, work, True)
+    subset = bool(skip_suffix) and any(p.name.endswith(skip_suffix) for p in shader_lib.view(src).iterdir())
+    if not subset and not shader_files: return arc + '.img', image
+    work = tempfile.mkdtemp(prefix=os.path.basename(out) + '.msl-', dir=os.path.dirname(os.path.abspath(out)))
+    atexit.register(shutil.rmtree, work, True)
+    if not shader_files:
         image = os.path.join(work, os.path.basename(image))
         shader_lib.subset(src, image, skip_suffix)
-    return arc + '.img', image
-
+        return arc + '.img', image
+    folder, keep = os.path.join(work, shader_lib.name_of(src)), shader_lib.app_files(src, skip_suffix)
+    os.mkdir(folder)
+    for member in shader_lib.view(src).iterdir():
+        if member.name not in keep: continue
+        with member.open('rb') as source, open(os.path.join(folder, member.name), 'wb') as target:
+            shutil.copyfileobj(source, target, CHUNK)
+    print(f'pack: {arc} goes in as its {len(keep)} separate files (--shader-files)', flush=True)
+    return arc, folder
 
 def main():
     ap = argparse.ArgumentParser(description='Pack an IPA (zip) from files and folders mapped to archive paths, in parallel')
@@ -254,13 +277,14 @@ def main():
     ap.add_argument('--skip', action='append', default=[], help='an archive path left out of the folder walk that would add it')
     ap.add_argument('--skip-suffix', action='append', default=[], help='files whose names end so are left out of every folder walk')
     ap.add_argument('--no-reuse', action='store_true', help='pack every file again, without copying from the old IPA')
+    ap.add_argument('--shader-files', action='store_true', help='an NVN game\'s shader library goes in as its separate files, not as one image, for install tools that cannot copy a large file (AltServer)')
     ap.add_argument('--exec', action='append', default=[], help='an archive path packed with mode 755 on Windows, which has no x bit (the app executable)')
     a = ap.parse_args()
     EXEC.update(p.strip('/') for p in a.exec)
     maps = []
     for m in a.maps:
         arc, sep, src = m.partition('=')
-        if sep: arc, src = library_map(arc, src, tuple(a.skip_suffix), a.out)
+        if sep: arc, src = library_map(arc, src, tuple(a.skip_suffix), a.out, a.shader_files)
         if not sep or not arc.strip('/') or not (os.path.isdir(src) or os.path.isfile(src)): sys.exit(f'[RED] pack_ipa: not <archive path>=<file or folder>: {m}')
         maps.append((arc.strip('/'), src))
     store = tuple(s.lower() for s in a.store.split(':') if s)
@@ -311,6 +335,8 @@ def main():
             while pend: inflight -= one()
         z.close()
         st = os.stat(part)   # bind the index to this file before publishing; rename preserves its mtime
+        if old:
+            old.close(); old = None   # Windows cannot replace a file while its old read handle is open
         os.replace(part, a.out)
     except BaseException:
         if z: z.f.close()

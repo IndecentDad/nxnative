@@ -1,6 +1,14 @@
 # Donkey Kong Bananza (`040074A01BF12000`)
 
-A Switch 2 game: update v458752 over the base game, SDK 20.5.19 built for the Switch 2 (`sdk` names its spec `Ounce`), NVN2. Nintendo EPD's engine (sead / agl / gsys, Phive), modules `main` + `sdk`. **Plays on the Mac** (M4 Pro): three play sessions of about 5 minutes each and scripted runs of up to 15,900 frames, through the opening, the mining tunnel and the areas after it, with the guide movies in their panel, at 60 fps; in busy scenes the game drops itself to 30 fps for a few seconds ([Open](#open)). The first start with no pipeline archive builds the pipelines for about 4 minutes, once. The Mac test did not cover the full game; the user-confirmed iPadOS build runs at 60 fps, but long-session stability, battery efficiency, and full-game compatibility remain untested.
+A Switch 2 game: update v458752 over the base game, SDK 20.5.19 built for the Switch 2 (`sdk` names its spec `Ounce`), NVN2. Nintendo EPD's engine (sead / agl / gsys, Phive), modules `main` + `sdk`. **Plays on the Mac** (M4 Pro): three play sessions of about 5 minutes each and scripted runs of up to 15,900 frames, through the opening, the mining tunnel and the areas after it, with the guide movies in their panel, at 60 fps; in busy scenes the game drops itself to 30 fps for a few seconds ([Open](#open)). The first start with no pipeline archive builds the pipelines for about 4 minutes, once. The Mac tests cover only the first level's opening areas. An initial [community iOS report](#ios-community-report) is recorded below.
+
+## iOS community report
+
+[Issue #1183](https://github.com/seedds/nxnative/issues/1183) reports a successful nine-minute session (33,600 frames) on an iPhone 18 Pro (`iPhone19,2`), iOS 27.2 (`24B119`), with update v458752 and one DLC. This is a community report on commit `d145b9563063`, shader chain `09e6fcbd87b8`, not a test of current main. The app was built from a dump folder with `--platform ios --prepare-xcode` and signed through Xcode with Increased Memory Limit; settings were defaults plus `DM_METAL_HUD=1`, with Low Power Mode off.
+
+- No crash or `[RED]` line was reported. The opening minutes ran at about 60 fps; after thermal state reached 2, most windows ran at 45–60 fps, with a session average of 50.5 fps. One stretch ran at 30 fps; its cause was not checked.
+- Peak reported footprint was 5,575 MiB. Loads and area changes had frame-time p99 spikes of 50–166 ms.
+- Coverage is limited to this device, build and short session. Longer play, current main and other iOS devices remain unvalidated.
 
 ## What it needs
 
@@ -52,17 +60,6 @@ Each step below stopped the boot before its fix:
 5. Switch 2 SDK calls through services the host does not serve: `hid::InitializeJcms` and the Joy-Con mouse sensor (`hle_hid.c`), `oe::GetCurrentGraphicsScale` (`hle_oe.c`), `audio::IsDeviceOutputVolumeAutoTuneModeEnabled` (`hle_audren.c`), `streamplay` (GameShare, `hle_misc.c`), `vi` HDR / VRR / extended swap interval (`dm/gfx/hle_vi.c`).
 6. `nv::InitCheck` (from `main+0xe19d04`, the start of a video decoder, after the first punch) tested the SDK's own flag, which `nv::InitializeGraphics` sets and the host's version of it does not: `hle_nv.c` answers it from the host's record. The same function then starts a video decoder: the Switch 2's `nn::codec` video API and sync point events, served on the host ([`nn::codec` video decoders taken over](../../../docs/reference/movies.md#nncodec-video-decoders-taken-over)).
 
-
-## Windows / iPadOS release record (2026-11-02)
-
-- **Source:** `e9d66e9a953f6f014c9e2cdbf8dbe66e23159222`, the exact source used for the working IPA. Upstream baseline `cd859c38a8f8890ddbb57a23d6f45e23ba9e6651`, integrated by merge `692b53dc05482119f7febab1246889c6eb354a29`. Annotated tag: `bananza-ios-working-20261101`.
-- **Game:** update `458752`; 23,638 shaders translated and compiled.
-- **Windows shader identity:** `DMSH_CHAIN=b7cd656abd7c`; `dmsh_chain.windows.lock` SHA-256 `f8b7006a216af00bb53fe5fe9e26677c6780fb1bc7786c072d8356f1c979dcb7`; Metal `32023.850 (metalfe-custom-windows)`. Translator fingerprint `e93d5a625e74656f`, embedded source hash `bff706efc1b71e0e`. This is isolated from the upstream Mac Metal `32023.922.4` identity.
-- **Preserved cache:** `D:\NXNativeBuilds\Bananza-040074A01BF12000-win\040074A01BF12000_build\shader\ios\b-b7cd656abd7c`; receipt records 23,638/23,638 ready. The initial full compile reused zero pre-existing shader artifacts.
-- **IPA:** `Donkey Kong Bananza-romfs-lookup-fix.ipa`, 25,955,310 bytes, SHA-256 `29f441c6e908fc0d365ff1c0bbe4aa0acd818ef1d2b1d793a6bb6821a71e5236`.
-- **Game-data ZIP:** `Donkey Kong Bananza-data.zip`, 10,877,593,877 bytes, SHA-256 `0bec5bfbd197fdc1ad9e29e7a2e37e63fdccb763fc680e8221b972cc8a3c301c`.
-- **Gameplay:** user confirmed successful iPadOS gameplay at 60 fps. This does not establish long-session stability, battery efficiency, or full-game compatibility.
-
 ## Open
 
 - **Shader tables:** split them again with this game's files and compare: `shader_map.tsv` may hold agl rows that are no shaders ([A control section's words read as a BAHS entry](../../../docs/reference/shaders.md#a-control-sections-words-read-as-a-bahs-entry); `bahs_variations` already met one stray entry in `agl_common`), and if so the NSP script stops at the table check until the split's tables replace them.
@@ -74,7 +71,7 @@ Each step below stopped the boot before its fix:
 - The terrain's stores through loaded pointers keep reaching memory pools the host learns only afterwards (12 in a 17,700-frame session); each such miss is checked against the uniform shadows that relied on it, and none so far covered a written page ([Global memory at an address loaded from memory](../../../docs/reference/shaders.md#global-memory-at-an-address-loaded-from-memory), Open).
 - **Frame rate in busy scenes:** the game picks its own present interval: 3 (20 fps) in its cutscenes, and 1 ↔ 2 (60 ↔ 30 fps) by its frame-rate controller (`main+0x204a18`; settings at `0x703f72b200`: interval 1 to 3, margin -0.2, 2 late frames to go up, 6 to come back). It measures each frame from its start (`+0xf0`) to the later of its submission and the GPU's end (`+0x128`, ticks) and wants interval 2 from 1.2 vsyncs (20 ms). On the Mac (M4 Pro) that measure sits at 17 ms a frame (p90 24): the host's translation (CPU, 5-9 ms) before the GPU's 10-13 ms. The upscaler's HMMA through `simdgroup_matrix` ([Ampere HMMA through simdgroup_matrix](../../../docs/reference/shaders.md#ampere-hmma-through-simdgroup_matrix)) cut the switches by about a fifth; the geometry runs' dependency check, quadratic in the run's length ([Geometry dependency checks skip read-only pairs](../../../docs/reference/shaders.md#geometry-dependency-checks-skip-read-only-pairs)), was about 8 % of the submitting thread, and making it linear cut them from 30 to 12 on the same scripted route. Entering a level stalled for 1.3 s on GPU drains, one or two per geometry draw ([CPU reads after a drain wait only for later writes](../../../docs/reference/rendering.md#cpu-reads-after-a-drain-wait-only-for-later-writes)); one CPU-bound build frame of 195-280 ms remains. Measured without `sample` attached: it suspends the process and makes the submitting thread look stalled. Its geometry draws are mesh draws ([Mesh geometry groups sized to the vertex output](../../../docs/reference/shaders.md#mesh-geometry-groups-sized-to-the-vertex-output)): translation 9.9 → 7.2 ms a frame, GPU p50 11.8 → 9.0 ms on the scripted route. Open: the rest of the translation time in the busiest views (argument encoding, render pass setup), where translation and the GPU together still miss a vsync now and then.
 - The NVN2 device values the driver reads from the GPU at run time (17 items: scratch scale factors, L2 size, texture layers and sizes, linear stride alignment, pool page size, …) are still the Switch 1 ones; the constant ones are NVN2's ([The Switch 2's device values](../../../docs/reference/nvn-objects.md#the-switch-2s-device-values)).
-- The user confirmed the Windows-built v458752 IPA runs at 60 fps on iPadOS (2026-11-02). Long-session stability, battery efficiency, and full-game compatibility remain untested.
+- iOS: longer sessions, current main and other devices remain unvalidated; see the initial [community report](#ios-community-report).
 
 ## Found on this game
 
