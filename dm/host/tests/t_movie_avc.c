@@ -162,25 +162,80 @@ static void sequence_boundaries(void) {
 // End of stream with three pictures held for reordering (POC type 0): an end-of-stream packet without data, nout output slots of which the client
 // returns each one it takes. Every picture comes out without the end-of-stream flag, then one output without a picture carries it with the packet's time
 static void drain(int nout) {
-    static mdec_t d; d = (mdec_t){ .type = MD_TYPE_AVC, .fmt = MD_FMT_NV12, .nout = nout, .started = 1, .w = 16, .h = 16 };
+    static mdec_t d; d = (mdec_t){ .type = MD_TYPE_AVC, .fmt = MD_FMT_NV12, .nout = nout, .started = 1, .fmt_sent = 1, .w = 16, .h = 16 };
     pthread_mutex_init(&d.mu, NULL); pthread_mutex_init(&d.dmu, NULL); pthread_mutex_init(&d.wmu, NULL); pthread_cond_init(&d.wcv, NULL);
     assert(!pthread_create(&d.wk, NULL, md_worker, &d));
     md_avc_open(&d); writer w; size_t n = sps(&w, 100, 0, 1, 0); keep_ps(d.avc, w.p, n);
     for (int i = 0; i < 3; i++) queue_picture(d.avc);
-    d.pend[0].in = 0; d.pend[0].pts = 777; d.pend[0].flags = 4; d.npend = 1; d.ninfree = MD_NIN - 1;
+    void *self[2] = { NULL, &d }; int got = 0, idx, left, inputs[MD_NIN]; int64_t pts; uint32_t flags;
+    d.ninfree = MD_NIN; for (int i = 0; i < MD_NIN; i++) d.infree[i] = i;
+    for (int i = 0; i < MD_NIN; i++) assert(!h_movie_AcqIn(self, &inputs[i], &left));
+    // Hold every output so the actual Send entry point queues the first EOS without decoding it. The other three inputs were already held by the client.
+    for (int i = 0; i < nout; i++) d.out[i].used = 1;
+    for (int i = 0; i < MD_NIN; i++) assert(!h_movie_SendIn(self, inputs[i], 0, 0, 777 + i, 4));
+    assert(d.in_eos && d.npend == 1 && d.pend[0].pts == 777 && d.ninfree == MD_NIN - 1 && !g_ndfq);
+    assert(h_movie_AcqIn(self, &idx, &left) == MD_NO_INPUT);
+    assert(h_movie_SendIn(self, inputs[0], 0, 0, 888, 4) == 0x100b);   // the first EOS is still queued, not a client-owned buffer
+    assert(h_movie_SendIn(self, inputs[1], 0, 0, 888, 4) == 0x100b);   // an already returned late input is not returned twice
+    assert(d.npend == 1 && d.ninfree == MD_NIN - 1);
+    for (int i = 0; i < nout; i++) d.out[i].used = 0;
     md_pump(&d);
     // a video decoder's results are queued for the deferred thread, due at once, not signalled on the decoding thread (md_pump_ev: it is not a guest thread)
     int queued_out = 0; for (int i = 0; i < g_ndfq; i++) if (g_dfq[i].d == &d && g_dfq[i].ev == 1) { assert(g_dfq[i].due == now_ns()); queued_out = 1; }
     assert(queued_out); md_defer_drop(&d); assert(!g_ndfq);
-    void *self[2] = { NULL, &d }; int got = 0, idx, left; int64_t pts; uint32_t flags;
     for (;;) {   // the client returns each output it takes, so the next one is always ready
         assert(!h_movie_AcqOut(self, &idx, &pts, &flags, &left));
         if (++got < 4) assert(d.out[idx].pic && pts == 0 && !(flags & 4));
         else { assert(!d.out[idx].pic && pts == 777 && flags == 4 && !d.avc_drain && !mavc_queued(d.avc) && !left); break; }
         assert(md_rel(&d, idx));
     }
+    assert(md_rel(&d, idx));
+    assert(h_movie_AcqOut(self, &idx, &pts, &flags, &left) == MD_NO_OUTPUT && d.ninfree == MD_NIN);
+    assert(h_movie_SendIn(self, inputs[0], 0, 0, 999, 4) == 0x100b && d.ninfree == MD_NIN);   // the consumed first EOS is no longer client-owned
+    assert(!h_movie_Flush(self) && !d.in_eos);
+    assert(!h_movie_AcqIn(self, &idx, &left));
+    assert(!h_movie_SendIn(self, idx, 0, 0, 999, 4));
+    assert(!h_movie_AcqOut(self, &idx, &pts, &flags, &left) && pts == 999 && flags == 4 && !left);
+    assert(md_rel(&d, idx));
+    assert(h_movie_AcqOut(self, &idx, &pts, &flags, &left) == MD_NO_OUTPUT);
+    md_defer_drop(&d);
     md_job(&d, MDJ_QUIT); pthread_join(d.wk, NULL);
     for (int i = 0; i < MD_NOUT; i++) free(d.out[i].frm);
+}
+// No output slots: submissions remain queued, so input ownership and the EOS commit can be checked independently of decode scheduling.
+static void terminal_inputs(void) {
+    mdec_t d = { .type = MD_TYPE_AVC, .fmt_sent = 1, .started = 1, .ninfree = MD_NIN };
+    pthread_mutex_init(&d.mu, NULL); pthread_mutex_init(&d.dmu, NULL);
+    void *self[2] = { NULL, &d }; int inputs[MD_NIN], idx, left;
+    for (int i = 0; i < MD_NIN; i++) d.infree[i] = i;
+    for (int i = 0; i < MD_NIN; i++) assert(!h_movie_AcqIn(self, &inputs[i], &left));
+    assert(h_movie_SendIn(self, -1, 0, 0, 0, 4) == 0x100b);
+    assert(h_movie_SendIn(self, inputs[0], -1, 0, 0, 4) == 0x100b);
+    assert(h_movie_SendIn(self, inputs[0], 0, MD_INCAP + 1, 0, 4) == 0x100b);
+    assert(!d.in_eos && !d.npend && d.inown[inputs[0]]);
+    assert(!h_movie_SendIn(self, inputs[0], 0, 1, 111, 0));
+    assert(h_movie_SendIn(self, inputs[0], 0, 0, 222, 4) == 0x100b);
+    assert(!d.in_eos && d.npend == 1 && d.pend[0].size == 1 && d.pend[0].pts == 111);
+    assert(!h_movie_SendIn(self, inputs[1], 0, 1, 222, 4));   // the accepted EOS can carry payload
+    assert(!h_movie_SendIn(self, inputs[2], 0, 1, 333, 0));   // ordinary data after EOS is returned too
+    assert(!h_movie_SendIn(self, inputs[3], 0, 0, 444, 4));
+    assert(d.in_eos && d.npend == 2 && d.pend[0].pts == 111 && d.pend[1].pts == 222 && d.pend[1].size == 1 && d.ninfree == 2);
+    // The pump removes a packet before decoding it: it is neither pending nor free nor client-owned. A repeat must not return its index while the worker still uses it.
+    d.npend = 0;
+    assert(h_movie_SendIn(self, inputs[1], 0, 0, 555, 4) == 0x100b && d.ninfree == 2);
+    assert(!h_movie_Flush(self) && !d.in_eos && d.ninfree == MD_NIN);
+    for (int i = 0; i < MD_NIN; i++) assert(!h_movie_AcqIn(self, &inputs[i], &left));
+    for (int i = 0; i < MD_NIN; i++) assert(!h_movie_SendIn(self, inputs[i], 0, 1, i, 0));
+    assert(d.npend == MD_NIN && !d.in_eos);
+    assert(h_movie_SendIn(self, inputs[3], 0, 0, 0, 4) == 0x100b && !d.in_eos && d.npend == MD_NIN);
+    // Flush returns still-held inputs before their late sends. They already occur in the free list and must not be added a second time after the next EOS.
+    assert(!h_movie_Flush(self));
+    for (int i = 0; i < MD_NIN; i++) assert(!h_movie_AcqIn(self, &inputs[i], &left));
+    assert(!h_movie_Flush(self));
+    assert(!h_movie_SendIn(self, inputs[0], 0, 0, 666, 4));
+    for (int i = 1; i < MD_NIN; i++) assert(!h_movie_SendIn(self, inputs[i], 0, 0, 666, 4));
+    assert(d.npend == 1 && d.ninfree == MD_NIN - 1);
+    pthread_mutex_destroy(&d.mu); pthread_mutex_destroy(&d.dmu);
 }
 // Native-texture slots (md_rendered): one written into the client's texture stays taken, so no packet is decoded into it before the client's own release can come (GitHub
 // issue #700). A client that releases what it rendered keeps every slot until its release; one that has not yet gets the earlier slot back at its next GetOutputBuffer
@@ -198,6 +253,36 @@ static void tex_slots(void) {
     assert(md_rel(&d, 2) && md_rel(&d, 3) && !md_rel(&d, 3));   // a second release changes nothing
     take(&d, 1); md_reset(&d, 0); assert(!d.out[1].used && !d.out[1].rnd && d.tex_rel);
 }
+// Native output buffers describe an opaque NVN object, not a byte allocation.
+static int native_texture, native_copies;
+typedef struct { void *object; size_t capacity; } native_buffer;
+static void *native_data(const void *b) { return ((const native_buffer *)b)->object; }
+static size_t native_capacity(const void *b) { return ((const native_buffer *)b)->capacity; }
+void *guest_sym(const char *name) { (void)name; return NULL; }
+int nvn_host_signal_sync(void *sync) { (void)sync; return 0; }
+int nvn_host_write_texture(const void *tex, const void *src, int w, int h, size_t row, int *tw, int *th) {
+    if (tex != &native_texture) return -1;
+    if (tw) *tw = 2;
+    if (th) *th = 2;
+    if (src) { assert(w == 2 && h == 2 && row == 8); native_copies++; }
+    return 0x25;
+}
+static void native_buffers(void) {
+    mdec_t d = { .type = MD_TYPE_AVC, .mode = MD_MODE_TEX, .nout = 1, .w = 2, .h = 2 };
+    uint8_t pixels[16] = {0};
+    pthread_mutex_init(&d.mu, NULL);
+    d.out[0].pic = 1; d.out[0].frm = pixels;
+    G.data = native_data; G.cap = native_capacity;
+    native_buffer b = { &native_texture, 0 };
+    assert(!md_out_tex(&d, 0, &b) && native_copies == 1); // MK11
+    b.capacity = 8;
+    assert(!md_out_tex(&d, 0, &b) && native_copies == 2); // Dread
+    b.object = NULL;
+    assert(md_out_tex(&d, 0, &b) == 0x100b && native_copies == 2);
+    b.object = pixels;
+    assert(md_out_tex(&d, 0, &b) == 0x100b && native_copies == 2);
+    pthread_mutex_destroy(&d.mu);
+}
 int main(void) {
     loop_order(1); loop_order(0);
     puts("AVC loops: all 36 pictures ordered through packet parsing and callback refcons, with 3- and 4-byte start codes");
@@ -205,6 +290,8 @@ int main(void) {
     puts("AVC framing: leading zeros before the first start code are skipped; packets and parameter sets without a start code are refused, not read as NAL lengths");
     sequence_boundaries();
     puts("AVC boundaries: short sequences drain, non-IDR timestamps and SEI retain lookahead, Flush discards, zero-depth output stays immediate");
+    native_buffers();
+    puts("native texture buffers: zero and eight capacity accepted; null and invalid objects rejected");
     tex_slots();
     puts("native texture: a rendered slot waits for the client's release, or for its next GetOutputBuffer while it has never released one");
     writer w;
@@ -235,4 +322,6 @@ int main(void) {
     puts("AVC: POC type 2 returns the final picture without EOS; other POC modes retain reordering and EOS drain");
     drain(MD_NOUT_VIDEO); drain(2);
     puts("AVC end of stream: every queued picture leaves without the flag, then an output without a picture carries it, also when the client holds the slots");
+    terminal_inputs();
+    puts("movie inputs: already-held inputs after EOS are returned once without another output; rejected sends keep the stream open, Flush accepts a new stream");
 }

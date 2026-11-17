@@ -1,4 +1,4 @@
-// Compute shared memory in a device buffer (dmsh_build.py tg_spill, docs/reference/shaders.md "Compute shared memory past 32 KB"): dispatch binds a slice of DMSH_TG_SLOT for every
+// Compute shared memory in a device buffer (dmsh_rewrite.py tg_spill, docs/reference/shaders.md "Compute shared memory past 32 KB"): dispatch binds a slice of DMSH_TG_SLOT for every
 // workgroup of the grid. 1,024 workgroups of 48 KB each fill their slice with their own index and, after the barrier, check a neighbour thread's part; with slices shared modulo 512 some
 // saw another workgroup's values. The indirect case takes its counts from a GPU fill earlier in the submission while the CPU's copy still names one workgroup: the slices must follow the
 // GPU's counts (the shape of pull request #1242's test)
@@ -13,7 +13,8 @@ static int checks, failed;
 
 enum { GROUPS = 1024, THREADS = 64, WORDS = 12288, SLICE = WORDS * 4 };
 
-int main(void) { @autoreleasepool {
+int main(int argc, char **argv) { @autoreleasepool {
+    if (argc > 1 && !strcmp(argv[1], "--own")) g_dispatch_own = 1;   // each dispatch in an encoder of its own, as DM_NVN_PASSGPU makes it
     mtl_init();
     NSError *error = nil;
     NSString *src = [NSString stringWithFormat:@"#include <metal_stdlib>\nusing namespace metal;\n"

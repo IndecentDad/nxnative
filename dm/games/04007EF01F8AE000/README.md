@@ -14,7 +14,6 @@ A Switch 2 game: v131072, SDK 22.2.0 built for the Switch 2 (`Ounce`), NVN2 API 
 | `fps_max 120` | `game.tsv` | **Frame rate** offers 120 on the Mac: speed measured below; see [Frame rate](#frame-rate) |
 | `depth_mode zero` | `game.tsv` | the game selects near-zero NVN depth; offline pipeline bases must use the matching vertex entry. Without it the app's bundled archive (661.6 MB on an M1 Pro) was refused at every start and the Mac built 872 MB of bases of its own in the background |
 
-No `render_cond`: not tried, and nothing has called for it so far.
 
 ## Files
 
@@ -55,7 +54,7 @@ Keyboard in a window: J K U I are A B X Y, WASD the left stick, Shift + arrows t
 
 - Nothing past the first map has been played on this build.
 - `stage 1 cb4 has no uniform buffer bound`, once a run, with no effect seen.
-- MetalFX's jitter sign and DLSS's bias mask are unchecked; the bias mask is only logged. No ghosting has been seen so far.
+- MetalFX's jitter sign is unchecked, and what this game's DLSS bias mask holds has not been looked at (it reaches MetalFX as its reactive mask: [NVN2's DLSS on MetalFX](../../../docs/reference/rendering.md#nvn2s-dlss-on-metalfx)). No ghosting has been seen so far.
 - An IPA: the 16 GB alias region is over iOS's limit, as for [Splatoon Raiders](../0400380020056000/README.md).
 - `dm/games/profile_guess.py` does not recognise the SDK's `Generic` version name.
 

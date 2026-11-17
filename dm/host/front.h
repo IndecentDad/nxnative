@@ -13,7 +13,7 @@ static inline void front_hud_env(void) {
 void front_run(void (*guest)(void));
 // The CAMetalLayer the graphics backend presents frames to (NULL when there is no window)
 void *front_metal_layer(void);
-// The highest refresh rate of the window's screen in Hz, 0 = not known (Mac front_mac.m; none on iOS, whose screens run at multiples of 60 Hz). Any thread
+// The highest refresh rate of the screen the game is shown on in Hz, 0 = not known (front_mac.m: the window's screen; front_ios.m: the game view's screen, 60 in Low Power Mode). Any thread
 int front_screen_max_fps(void);
 // The pixel size of the display the game is shown on: on the Mac the window's screen in its current mode (the main display before the window is up) (a scaled Retina mode's pixels), an iPhone's or iPad's screen (nativeBounds).
 // Returns 0 and leaves w, h alone when not known (no front end: graphics unit tests). Any thread
@@ -87,7 +87,8 @@ void dm_web_message(const char *msg, size_t n);
 void dm_web_ended(uint32_t reason, const char *url);
 void dm_web_failed(const char *why);
 
-// The program an oe::ExecuteProgram recorded starts at the app's next start (the iOS app, DM_EXEC_OUT, hle_oe.c): called on the guest thread after the record is written and before the graceful exit. index = the
-// program, name = its profile's name. The iOS front end names it on screen for about 1.5 s and schedules a local notification that opens the app again, when the player allowed notifications; it returns when the
-// notification is scheduled. The default (hle_oe.c, weak) returns at once
+// The program an oe::ExecuteProgram or oe::RequestToRelaunchApplication recorded starts at the app's next start (the iOS app, DM_EXEC_OUT, hle_oe.c): called on the guest thread after the record is
+// written and before the graceful exit. index = the program, name = its profile's name. The iOS front end names it on screen for about 1.5 s and schedules a local notification that opens the app
+// again, when the player allowed notifications (else it asks on screen to open the app again); it returns when the notification is scheduled. With no DM_EXEC_OUT (an app of one program, which asks to start itself again) it asks the player on
+// screen to open the app again. The default (hle_oe.c, weak) returns at once
 void front_program_handoff(int index, const char *name);

@@ -86,7 +86,7 @@ static void scaled_copy_case(void) {
     h_nvnCommandBufferAddCommandMemory(&cmd, (const NVNmemoryPool *)&pool, 0, 65536); h_nvnCommandBufferBeginRecording(&cmd);
     NVNcopyRegion sr={0,0,0,320,180,1}, dr={0,0,0,160,90,1};
     h_nvnCommandBufferCopyTextureToTexture(&cmd, (const NVNtexture *)&src, NULL, &sr, &dst, NULL, &dr, NVN_COPY_FLAGS_LINEAR_FILTER_BIT);
-    NVNcommandHandle h=h_nvnCommandBufferEndRecording(&cmd); state_reset(); memset(&R,0,sizeof R); mtl_sub_begin(); mtl_exec((const uint8_t *)h);
+    NVNcommandHandle h=h_nvnCommandBufferEndRecording(&cmd); state_reset(); memset(&R,0,sizeof R); mtl_sub_begin(); mtl_exec(nvn_rec_linear(h, NULL));
     EXPECT("scaled copy committed", 1, mtl_wait(mtl_sub_commit(),5000000000ull)); EXPECT("scaled copy GPU error",0,mtl_last_commit_error());
     h_nvnMemoryPoolInvalidateMappedRange((const NVNmemoryPool *)&pool,65536,640*90); uint8_t *map=(uint8_t *)h_nvnMemoryPoolMap((const NVNmemoryPool *)&pool)+65536;
     static const uint8_t want[]={255,0,0,255}; int bad=0; for(int i=0;i<160*90;i++)bad+=memcmp(map+i*4,want,4)!=0;
@@ -165,7 +165,7 @@ static void unaligned_upload_case(void) {   // a pool made through NVN, so that 
     NVNcommandBuffer cmd; EXPECT("unaligned case: command buffer init", 1, h_nvnCommandBufferInitialize(&cmd, NULL));
     h_nvnCommandBufferAddCommandMemory(&cmd, (const NVNmemoryPool *)&pool, 0, 65536); h_nvnCommandBufferBeginRecording(&cmd);
     NVNcopyRegion cr = {0, 0, 0, 6, 6, 1}; h_nvnCommandBufferCopyTextureToTexture(&cmd, &tex[1], NULL, &cr, &tex[0], NULL, &cr, 0);
-    NVNcommandHandle h = h_nvnCommandBufferEndRecording(&cmd); state_reset(); memset(&R, 0, sizeof R); mtl_sub_begin(); mtl_exec((const uint8_t *)h);
+    NVNcommandHandle h = h_nvnCommandBufferEndRecording(&cmd); state_reset(); memset(&R, 0, sizeof R); mtl_sub_begin(); mtl_exec(nvn_rec_linear(h, NULL));
     EXPECT("0: the copy from 1 committed", 1, mtl_wait(mtl_sub_commit(), 5000000000ull));
     uint8_t want[24 * 6]; for (int y = 0; y < 6; y++) memcpy(want + y * 24, stored[1] + y * 64, 24);
     read_job after_copy = {&tex[0], want, -1}; read_job_tight(&after_copy);
@@ -192,10 +192,34 @@ static void unaligned_upload_case(void) {   // a pool made through NVN, so that 
     for (int i = 0; i < N; i++) h_nvnTextureFinalize(&tex[i]);
     h_nvnMemoryPoolFinalize((NVNmemoryPool *)&pool); defer_drain(); munmap(mem, len);
 }
+// IMAGE is a usage permission, not a linear layout. WriteTexels stores a
+// distinct pattern block-linearly; ReadTexels must undo that layout, even when
+// the serial is explicitly CPU-written and no Metal view has been created yet.
+static void nonlinear_image_readback_case(void) {
+    const size_t len = 262144;
+    uint8_t *mem = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    if (mem == MAP_FAILED) abort();
+    memset(mem, 0, len);
+    NVNmemoryPool pool; pool_builder_t pb = {.mem = mem, .size = len, .flags = NVN_MEMORY_POOL_FLAGS_CPU_CACHED | NVN_MEMORY_POOL_FLAGS_GPU_CACHED};
+    EXPECT("nonlinear image pool init", 1, h_nvnMemoryPoolInitialize(&pool, (const NVNmemoryPoolBuilder *)&pb));
+    NVNtextureBuilder tb; NVNtexture tex;
+    h_nvnTextureBuilderSetDefaults(&tb); h_nvnTextureBuilderSetWidth(&tb, 6); h_nvnTextureBuilderSetHeight(&tb, 6);
+    h_nvnTextureBuilderSetFormat(&tb, NVN_FORMAT_RGBA8); h_nvnTextureBuilderSetFlags(&tb, NVN_TEXTURE_FLAGS_IMAGE);
+    h_nvnTextureBuilderSetStorage(&tb, &pool, 65536);
+    EXPECT("nonlinear image init", 1, h_nvnTextureInitialize(&tex, &tb));
+    uint8_t pattern[24 * 6];
+    for (unsigned i = 0; i < sizeof pattern; i++) pattern[i] = (uint8_t)(i * 17 + 3);
+    NVNcopyRegion region = {0, 0, 0, 6, 6, 1};
+    h_nvnTextureWriteTexels(&tex, NULL, &region, pattern);
+    EXPECT("nonlinear image serial is CPU-written", 1, tex_cpu_written(((const tex_t *)&tex)->serial));
+    EXPECT("nonlinear IMAGE readback preserves block-linear rows", 0, read_bad(&tex, pattern, 24));
+    h_nvnTextureFinalize(&tex); h_nvnMemoryPoolFinalize(&pool); defer_drain(); munmap(mem, len);
+}
 int main(void) { @autoreleasepool { setenv("DM_TBUF_ALIGN", "64", 1);   // before the first lookup (tbuf_align reads it once); the other cases' rows and offsets are 64-byte aligned
     mtl_init(); run_case(NVN_FORMAT_RGBA8); run_case(NVN_FORMAT_RGBA8_SRGB);
     render_target_stride_case();
     scaled_copy_case();
     unaligned_upload_case();
+    nonlinear_image_readback_case();
     printf("LINEAR_READBACK cases=%d failed=%d\n",cases,failed); return failed != 0;
 } }
