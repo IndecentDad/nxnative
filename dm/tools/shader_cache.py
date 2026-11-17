@@ -11,8 +11,36 @@
 # It only saves work: a damaged file costs the work it held and is made anew, and a full drive is one [RED] line. An entry is written and read whole, so its file is never seen half written.
 # Names, as in the folder this replaces: metallib/<target>/<digest>[_x].metallib (dmsh_mtlcache.py), shader/<digest>/<mac|ios>/<output>, index/<key>.json, variant/<digest>/<file> (dmsh_build.py).
 # Not part of the translation chain: it decides no output (dmsh_chain.py), like dmsh_mtlcache.py.
-import contextlib, fcntl, hashlib, json, multiprocessing, os, re, shutil, sqlite3, tarfile, threading, time
+import contextlib, errno, hashlib, json, multiprocessing, os, re, shutil, sqlite3, tarfile, threading, time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:   # Windows: the cache lease is one byte, shared reads can safely serialize as exclusive locks
+    import msvcrt
+
+    class _Fcntl:
+        LOCK_SH, LOCK_EX, LOCK_NB, LOCK_UN = 1, 2, 4, 8
+
+        @staticmethod
+        def flock(file, operation):
+            file.seek(0, os.SEEK_END)
+            if file.tell() == 0:
+                file.write('\0'); file.flush()
+            file.seek(0)
+            if operation & _Fcntl.LOCK_UN:
+                msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                while True:
+                    try:
+                        msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK if operation & _Fcntl.LOCK_NB else msvcrt.LK_LOCK, 1)
+                        break
+                    except OSError as e:
+                        if operation & _Fcntl.LOCK_NB: raise BlockingIOError(*e.args) from e
+                        if e.errno not in (errno.EACCES, errno.EDEADLK): raise
+                        time.sleep(.05)
+
+    fcntl = _Fcntl()
 
 SCHEMA = ('CREATE TABLE IF NOT EXISTS blob(id INTEGER PRIMARY KEY, hash BLOB UNIQUE NOT NULL, data BLOB NOT NULL)',
           'CREATE TABLE IF NOT EXISTS entry(name TEXT PRIMARY KEY, blob INTEGER NOT NULL, mtime REAL NOT NULL) WITHOUT ROWID')
