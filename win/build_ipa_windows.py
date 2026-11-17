@@ -17,6 +17,9 @@ SHIM = WIN / 'pyshim'
 
 
 def main():
+    if os.name == 'nt':
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, 'reconfigure'): stream.reconfigure(errors='replace')
     if sys.platform == 'darwin': sys.exit('win/build_ipa_windows.py is the Windows and Linux driver: on a Mac run scripts/build_ipa_from_nsp.py')
     if os.name != 'nt': os.environ['NXW_LINUX'] = '1'   # Linux: the shim's mappings with native tools, and the Metal Developer Tools for Windows under Wine (win/toolchain.py cmd)
     for bad in ('--prepare-xcode',):
@@ -77,7 +80,65 @@ def main():
             if not (Path(t) / 'nx_extract.exe').exists(): raise BuildError(f'nx_extract built without an executable (see {logs / "nx_extract_build.log"})')
             up.rmtree(nx.parent); shutil.copytree(t, nx.parent)
         return nx   # Windows starts nx_extract.exe for this path
-    if tc.WINDOWS: up.build_nx_extract = build_nx_extract   # on Linux dotnet writes nx_extract, as upstream expects
+    if tc.WINDOWS:
+        # Upstream's proc_group uses POSIX killpg; on Windows its cleanup can spin
+        # after a child exits. Keep the same logging and error contract here.
+        import collections
+        def run_windows(cmd, log, env=None, cwd=None, on_line=None, ok=(), fatal=True):
+            cmd = [str(c) for c in cmd]
+            log.parent.mkdir(parents=True, exist_ok=True)
+            tail = collections.deque(maxlen=40)
+            proc = None
+            try:
+                with open(log, 'w', encoding='utf-8') as f:
+                    proc = subprocess.Popen(cmd, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                            text=True, encoding='utf-8', errors='replace', bufsize=1)
+                    for line in proc.stdout:
+                        f.write(line); tail.append(line)
+                        if on_line:
+                            try: on_line(line.rstrip('\n'))
+                            except Exception: pass
+                    rc = proc.wait()
+            except BaseException:
+                if proc is not None and proc.poll() is None:
+                    proc.terminate()
+                    try: proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired: proc.kill(); proc.wait()
+                raise
+            bad = rc and rc not in ok
+            if bad:
+                tool = Path(cmd[1] if cmd[0] in (sys.executable, 'bash') else cmd[0]).name
+                why = f'{tool} exit code {rc}'
+                if fatal: up.PROG.end(ok=False)
+                up.PROG.say(f'---- last lines of {log} ----\n' + ''.join(tail).rstrip('\n'))
+                if not fatal: return rc
+                raise BuildError(f'{why} (full output: {log})')
+            return 0
+        up.run = run_windows
+        # Upstream now expects a committed native nx_extract. Windows has no such
+        # binary: build the same source as a Windows apphost and keep it only for
+        # this build process, then verify its embedded source fingerprint.
+        import atexit, tempfile
+        _nx_extract = []
+        def find_nx_extract_windows(repo, env):
+            if not _nx_extract:
+                root = Path(tempfile.mkdtemp(prefix='nx_extract_'))
+                try:
+                    up.run(['dotnet', 'build', repo / 'dm/tools/nx_extract', '-c', 'Release', '-o', root, '-v', 'quiet', '-nologo'], root / 'build.log', env=env)
+                    exe = root / 'nx_extract.exe'
+                    if not exe.is_file():
+                        raise BuildError('nx_extract Windows apphost was not built (see ' + str(root / 'build.log') + ')')
+                    r = subprocess.run([str(exe), '--source-sha'], capture_output=True, text=True, env=env, timeout=60, errors='replace')
+                    got, want = r.stdout.strip(), up.nx_extract_source_sha(repo)
+                    if r.returncode or got != want:
+                        raise BuildError(f'nx_extract Windows apphost failed source validation (embedded {got or r.returncode} / in repo {want})')
+                    _nx_extract.append(exe)
+                    atexit.register(shutil.rmtree, root, ignore_errors=True)
+                except BaseException:
+                    shutil.rmtree(root, ignore_errors=True)
+                    raise
+            return _nx_extract[0]
+        up.find_nx_extract = find_nx_extract_windows
 
     # address-region cuts for an sdk build sdk_patches.py does not register (win/sdk_auto_cuts.py), for a game with virtual address memory: written beside the rewrite, read by the
     # shim when patch_nso.py imports sdk_patches, and part of the rewrite's cache key (patch_files)

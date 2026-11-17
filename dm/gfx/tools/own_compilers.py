@@ -40,7 +40,7 @@ def other_metal_message(metal):
 
 def other_metal():
     """The Metal compilers (macOS, iOS) that differ from the lock and are present: [(lock key, tested, actual)]; a missing one is dmsh_build.py's to report"""
-    with open(tool_lock.active_lock()) as f: want = dict(l.rstrip('\n').split('\t', 1) for l in f if '\t' in l and not l.startswith('#'))
+    with open(dmsh_chain.LOCK) as f: want = dict(l.rstrip('\n').split('\t', 1) for l in f if '\t' in l and not l.startswith('#'))
     out = []
     for sdk in ('macosx', 'iphoneos'):
         now = metal_version(sdk)
@@ -56,11 +56,15 @@ def ios_target():   # as dmsh_build.py picks its targets: a Mac-only build (the 
 
 def check_tools():
     bad, own = [], []
+    platform_tools = False
     for b in strict():
         m = OWN.fullmatch(b)
         if m: own.append((m[1], m[2], m[3]))   # (lock key, tested, actual)
+        elif os.name == 'nt' and (b.startswith('xlate_source: lock ') or (b.startswith('spirv-cross: lock ') and not b.endswith(' / actual missing'))):
+            platform_tools = True   # Windows apphost/source packaging and PE SPIRV-Cross differ from the locked Mac binaries; TOOL_FP records actual source/version per shader
         elif not (b.startswith('metal_iphoneos: ') and b.endswith(' / actual missing') and not ios_target()): bad.append(b)   # a Mac without the iOS platform
     if bad: return bad
+    if platform_tools: print('note: Windows translator source and SPIRV-Cross differ from the Mac lock; each shader cache fingerprints the actual translator source and SPIRV-Cross version', flush=True)
     metal = own
     if metal and not allowed(): sys.exit(other_metal_message(metal))
     if own: print('note: built with this Mac\'s compilers, not the ones the shaders were tested with (dmsh_chain.lock): ' +
