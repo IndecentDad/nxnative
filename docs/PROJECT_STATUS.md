@@ -92,7 +92,15 @@
 - Reused the 9,779-file extraction, module rewrites, shader split, and all 1,010 translated/compiled Metal shader libraries for chain 1e3e632f2540. The new IPA compiled and linked 271/271 ARM64 app objects.
 - IPA: F:\Temp\010093801237C000\Metroid Dread v2.1.0-sdk27.2.ipa, 20,836,030 bytes, SHA-256 `f4d5bb69a19aadad9315b3cb4cd39a6d5b0995d2c03800d3e6d519434ab80f1b`. Mach-O and Info.plist record iOS SDK 27.2; all four orientations are enabled.
 - Reused split-data ZIP (5,119,641,517 bytes, SHA-256 `c54c7cae7bac0b84aacf7070e055de8b01554847bfdc052678ced3332748f87c`); CRC passed and it contains RomFS plus shader image.
-- Delivered to `/volume1/Media/iOS/Metroid Dread`; previous IPA is preserved as `Metroid Dread v2.1.0.rollback-before-27.2-20261118.ipa`. Physical Duo gameplay validation remains pending.
+- Delivered to `/volume1/Media/iOS/Metroid Dread`; previous IPA is preserved as `Metroid Dread v2.1.0.rollback-before-27.2-20261118.ipa`. Owner confirms the SDK 27.2 build works on the iPhone Duo and looks correct.
+
+
+## iPhone Duo game updates - 2026-11-18
+
+- Mario + Rabbids Kingdom Battle v1.9.0 (v589824), title 010067300059A000: built from customized main 5c3d2b39 with SDK 27.2/build 24B8118. Reused 4,009 extracted base/update files, four DLCs, rewrites; generated 11,625 current-chain shader libraries. Compiled/linked 271 ARM64 app objects. IPA 29,879,140 bytes, SHA-256 `af7042a46045c15bb5fc6c10d7253502bbb43dd9f012da7b5dd9e8ce5b32f5d0`; data ZIP 5,410,310,297 bytes, SHA-256 `723bcf41e9d7217cb541e5c3fbc2070cf5e4d3fbbdf2f7f96f573c944885b7bc`.
+- Super Mario Odyssey v1.4.1 (v393216), title 0100000000010000: built from customized main 82cc93ef with SDK 27.2/build 24B8118. Reused 4,977 extracted files and rewrites; compiled 27,984 current-chain shader libraries and 271 ARM64 app objects. IPA 19,406,850 bytes, SHA-256 `d6c2fef13006de714fe301939e8f696d0b5c7d031fe1cc768c58d85d51410100`; data ZIP 6,919,851,025 bytes, SHA-256 `2982753c1e98d6fa9330e22268a5e0ccb750a1374fdc7a90f16c62d933ee8ead`.
+- The Legend of Zelda: Echoes of Wisdom v1.1.0 (v196608), title 01008CF01BAAC000: built from customized main 4ae839f0 with SDK 27.2/build 24B8118. Reused 10,971 extracted files and rewrites; verified the 36 regenerated BNSH map rows preserve the same shader hashes/source offsets; compiled 9,858 current-chain shader libraries and 271 ARM64 app objects. IPA 36,412,303 bytes, SHA-256 `1476c0652e2da8b6b97ff2c61cc69be8ef9898fee3ff942c2b0a2e4e8fbf0fac`; data ZIP 6,492,575,869 bytes, SHA-256 `b9986d13b7d49371b030f9eb6d5d000b54b9aefa9fd4de3a02dd50329548d96b`.
+- Delivered to the existing `/volume1/Media/iOS` folders. Previous Rabbids and Echoes IPA/data pairs remain under `rollback-before-27.2-20261118` names. The prior Odyssey rollback files were present after checksum verification but are absent from the final folder; no copy was found in the checked Synology recycle/library paths. Recovery from D: workspaces remains unverified. Physical Duo gameplay tests for these three builds are pending.
 
 
 ## Celeste Increased Memory Limit IPA refresh (prior SDK 26.5 build, superseded)
