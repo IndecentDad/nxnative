@@ -81,3 +81,10 @@
 - Delivery target is the existing `/volume1/Media/iOS/Celeste`. Preserve `Celeste.rollback-20261031.ipa` and `Celeste-data.rollback-20261031.zip` until the new build is confirmed on the iPhone Duo. Physical install/gameplay, hinge/tabletop, controls, save and sustained performance tests remain pending.
 
 - Delivered and SHA-256 verified at `/volume1/Media/iOS/Celeste/Celeste.ipa` and `/volume1/Media/iOS/Celeste/Celeste-data.zip`; the 2026-10-31 rollback IPA and data ZIP remain alongside them.
+
+
+## Celeste Increased Memory Limit IPA refresh ºw^~)Þt 2026-11-18
+
+- Repacked only the Celeste app from existing extraction, rewrite, shader split, and 26/26 Metal caches using customized source `81e7c580e86df2aea56890b9750a37e542549d5e`, `--entitlements`, and the established `org.nxnativewindows.01002b30028f6000` bundle ID. The Windows builder already defaults to requesting this entitlement; the 2026-11-17 deliverable had explicitly used `--no-entitlements`.
+- Confirmed the IPA's ARM64 executable contains a code-signature XML entitlement blob with `com.apple.developer.kernel.increased-memory-limit = true`; ZIP CRC and bundle identity pass. New IPA: `/volume1/Media/iOS/Celeste/Celeste.ipa`, 31,077,631 bytes, SHA-256 `18cac8495d0e79d4197c5141315de5383b8dc8d0b79c36ea787d0725204c96e0`.
+- Data ZIP is unchanged. The no-entitlement IPA was preserved as `Celeste.pre-entitlement-20261118.ipa`; the original 2026-10-31 rollback remains. SideStore reinstall and on-device status/runtime validation are still needed to confirm what the installed signature retains.
