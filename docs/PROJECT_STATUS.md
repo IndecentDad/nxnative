@@ -86,6 +86,15 @@
 
 
 
+## Metroid Dread update - 2026-11-18
+
+- Updated title 010093801237C000, base plus v2.1.0 update (v327680), using customized main 951e6ba0851d9c4e3aa852acf7b905f57e08e8ca and SDK 27.2/build 24B8118.
+- Reused the 9,779-file extraction, module rewrites, shader split, and all 1,010 translated/compiled Metal shader libraries for chain 1e3e632f2540. The new IPA compiled and linked 271/271 ARM64 app objects.
+- IPA: F:\Temp\010093801237C000\Metroid Dread v2.1.0-sdk27.2.ipa, 20,836,030 bytes, SHA-256 `f4d5bb69a19aadad9315b3cb4cd39a6d5b0995d2c03800d3e6d519434ab80f1b`. Mach-O and Info.plist record iOS SDK 27.2; all four orientations are enabled.
+- Reused split-data ZIP (5,119,641,517 bytes, SHA-256 `c54c7cae7bac0b84aacf7070e055de8b01554847bfdc052678ced3332748f87c`); CRC passed and it contains RomFS plus shader image.
+- Delivered to `/volume1/Media/iOS/Metroid Dread`; previous IPA is preserved as `Metroid Dread v2.1.0.rollback-before-27.2-20261118.ipa`. Physical Duo gameplay validation remains pending.
+
+
 ## Celeste Increased Memory Limit IPA refresh (prior SDK 26.5 build, superseded)
 
 - Repacked only the Celeste app from existing extraction, rewrite, shader split, and 26/26 Metal caches using customized source `81e7c580e86df2aea56890b9750a37e542549d5e`, `--entitlements`, and the established `org.nxnativewindows.01002b30028f6000` bundle ID. The Windows builder already defaults to requesting this entitlement; the 2026-11-17 deliverable had explicitly used `--no-entitlements`.
