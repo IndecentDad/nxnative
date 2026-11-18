@@ -3,8 +3,10 @@
 ## Current architecture
 
 - Canonical repository: https://github.com/IndecentDad/nxnative. Customized main is the only permanent branch and GitHub default. Integrate reviewed upstream/main changes into main.
-- Windows host: ssh nxwindows. User work checkout: D:\\NXNativeWindows. Clean main worktree: D:\\NXNativeBuilds\\main-upstream-sync.
-- Keep originals in D:\\Downloads; use F:\\Temp for extraction, build data, shaders, and staging. Final IPA stays at its established destination.
+- Windows host: ssh nxwindows. The dirty primary checkout remains at D:\NXNativeWindows as the common Git repository; do not move it without migrating all linked worktrees.
+- Active Celeste source worktree: F:\NXNative\1_Development\Worktrees\celeste-upstream-sync (branch codex/celeste-upstream-sync, customized origin/main 3817179d). Other dirty/game worktrees remain under D:\NXNativeBuilds.
+- Permanent NXNative development root and extracted SDKs: F:\NXNative\1_Development. Celeste ROMs, build data, shader caches, logs, and outputs remain under F:\NXNative\Celeste.
+- Original game archives remain on D:. The Celeste build and all game-specific artifacts stay in F:\NXNative\Celeste; other per-title workspaces retain their established paths.
 
 ## Upstream and cleanup â€” 2026-11-06
 
@@ -14,10 +16,10 @@
 
 ## Toolchain and SSD
 
-- SDK 26.5 remains at D:\\NXNativeWindows\\win\\sdk\\out\\iPhoneOS.sdk. The clean main worktree does not contain that ignored output, so the Windows user variable NXW_IOS_SDK now points to it.
-- win/doctor.py passes all checks: Python packages, .NET 10.0.403, translator, LLVM 23.1.4/linker, iOS/macOS Metal, spirv-cross, zstd, glslang, and fonts.
+- iOS SDK 27.2 (build 24B8118) is at F:\NXNative\1_Development\SDKs\Xcode_27.2\iPhoneOS.sdk and NXW_IOS_SDK defaults to it. SDK 26.5 is preserved as a fallback at F:\NXNative\1_Development\SDKs\Xcode_26.5\iPhoneOS.sdk; its old ignored D: copy was verified and retired.
+- win/doctor.py passes from the F: Celeste worktree with SDK 27.2. Shared Python 3.14.5, .NET 10.0.403, LLVM 23.1.4/ld64.lld, Metal 32023.850, Vulkan tools, and other system-wide dependencies remain in their existing C: installations.
 - SSBU has 17.6 GB RomFS data and a known 17.5 GB IPA. Allow about 60 GB peak for extracted data, the build's 6 GB image/shader/slack reserve, possible staged input packages, and local IPA transfer; retain 70 GB free.
-- F: is a 1 TB NTFS SSD with 141,403,774,976 bytes (131.7 GiB) free at last check. This is sufficient. No ROMs or final artifacts were moved.
+- F: is a 1 TB NTFS SSD with 151,029,960,704 bytes (140.6 GiB) free after migration and Celeste build. The move recovered 922,161,152 bytes (0.86 GiB) on D:. SDK 27.2 is 243,632,297 bytes; SDK 26.5 is 201,815,781 bytes; Celeste source worktree is 695,013,240 bytes.
 
 ## Upstream sync and build review â€” 2026-11-09
 
@@ -75,15 +77,16 @@
 - Upstream tip `fb18e83acd443aa2e7d94652538c021129696632` merged as `4ad360e58b81c3b69cc5eb859dd01c8c069c8dff`; Windows compatibility follow-up `7c83c1703c1295a1fcc39ee2f127e66ceed9a800` is pushed to customized `origin/main`. The primary Windows checkout stayed untouched.
 - Follow-up restores Windows operation with upstream native-only `nx_extract` packaging by building and source-verifying a temporary .NET Windows apphost; replaces POSIX process-group cleanup on Windows; aligns game/profile and translator APIs; normalizes shader virtual paths before grouping and regenerates the documented chain header to `1e3e632f2540`. Removed the obsolete `dm_mem_guard` call removed upstream.
 - Validation: `win/doctor.py` passes; Windows suite 31 passed, 1 optional skip; focused committed shader-chain regression passed; modified Python files compile and `git diff --check` passes. SDK 26.5 compile check passed earlier, and the Celeste build compiled/linked 271 ARM64 objects after the final linker fix.
-- Windows translator DLL compatibility blocker is resolved with the existing Windows translator toolchain; no other SDK was installed. Tahoe Xcode 26.6 and Windows both provide only iOS SDK 26.5. Native iOS 27.1 hinge/reserved-region APIs are not compiled; this fallback lacks native hinge/tabletop detection. Full Duo physical behavior remains unverified.
-- Celeste source: `F:\\NXNative\\Celeste`; base + registered update v1.4.1.1 (v589824), title ID `01002B30028F6000`. Reused validated extraction/rewrite and shader split; compiled 26 Metal libraries for chain `1e3e632f2540`. Windows Metal 32023.850 used with explicit `--allow-other-metal`; `DMSH_PROCS=0` selected for Windows.
-- Outputs: `F:\\NXNative\\Celeste\\output\\Celeste.ipa` (30,302,949 bytes, SHA-256 `291868d3de61c483fce0fcfa7fac2ca81365d743cc1b31908477ac65fd75ffb0`) and `Celeste-data.zip` (865,760,554 bytes, SHA-256 `e1389e8ea667967b73f604bc2c6036b78d0bb5a68f37a156c4f55f598b887eac`). ZIP integrity, bundle/title identity, ARM64 executable, unsigned state, RomFS image and shader data validated.
-- Delivery target is the existing `/volume1/Media/iOS/Celeste`. Preserve `Celeste.rollback-20261031.ipa` and `Celeste-data.rollback-20261031.zip` until the new build is confirmed on the iPhone Duo. Physical install/gameplay, hinge/tabletop, controls, save and sustained performance tests remain pending.
+- The Windows XIP extractor successfully extracted the official Xcode 27.2 iPhoneOS SDK. Production code now compiles against the iOS 27.1 UIViewReservedRegion APIs; physical Duo behavior remains unverified.
+- The earlier Celeste iOS 26.5 build reused the registered v1.4.1.1 (v589824) extraction and 26 Metal libraries for chain 1e3e632f2540; it is superseded by the SDK 27.2 build below.
+- 2026-11-18 Celeste build: source origin/main 3817179d90e857950496551c7910f6f83952307b plus the existing four local orientation/metadata edits. SDK 27.2/24B8118, deployment target 26.0, LLVM 23.1.4, .NET 10.0.403, Metal 32023.850. Reused the 1,218-file extraction, rewrite, shader split, and all 26/26 translated Metal libraries; compiled and linked 271/271 ARM64 objects.
+- Current IPA: F:\NXNative\Celeste\output\Celeste.ipa, 31,079,329 bytes, SHA-256 830d0c7a27fed0942da350cea31d9b10344892d5506de9c27c0c1506a036dc4c. Info.plist records iphoneos27.2/24B8118; ARM64 Mach-O LC_BUILD_VERSION records SDK 27.2, minOS 26.0. Bundle ID is unchanged, the increased-memory entitlement is embedded in an ad-hoc executable signature, and no provisioning profile is embedded.
+- Split-data ZIP: 865,760,554 bytes, SHA-256 e1389e8ea667967b73f604bc2c6036b78d0bb5a68f37a156c4f55f598b887eac; full CRC passed. It contains romfs.img and msl/b-1e3e632f2540.img and is byte-identical to the existing Synology ZIP, so that compatible data package was reused.
+- Delivered and SHA-256 verified at the existing /volume1/Media/iOS/Celeste/Celeste.ipa; prior IPA preserved as /volume1/Media/iOS/Celeste/Celeste.rollback-before-27.2-20261118.ipa. Physical iPhone Duo validation: owner confirms edge-to-edge layout, controller input, and touch controls work as intended. Fit/Fill choice, save behavior, and sustained performance remain unreported.
 
-- Delivered and SHA-256 verified at `/volume1/Media/iOS/Celeste/Celeste.ipa` and `/volume1/Media/iOS/Celeste/Celeste-data.zip`; the 2026-10-31 rollback IPA and data ZIP remain alongside them.
 
 
-## Celeste Increased Memory Limit IPA refresh ºw^~)Þt 2026-11-18
+## Celeste Increased Memory Limit IPA refresh (prior SDK 26.5 build, superseded)
 
 - Repacked only the Celeste app from existing extraction, rewrite, shader split, and 26/26 Metal caches using customized source `81e7c580e86df2aea56890b9750a37e542549d5e`, `--entitlements`, and the established `org.nxnativewindows.01002b30028f6000` bundle ID. The Windows builder already defaults to requesting this entitlement; the 2026-11-17 deliverable had explicitly used `--no-entitlements`.
 - Confirmed the IPA's ARM64 executable contains a code-signature XML entitlement blob with `com.apple.developer.kernel.increased-memory-limit = true`; ZIP CRC and bundle identity pass. New IPA: `/volume1/Media/iOS/Celeste/Celeste.ipa`, 31,077,631 bytes, SHA-256 `18cac8495d0e79d4197c5141315de5383b8dc8d0b79c36ea787d0725204c96e0`.

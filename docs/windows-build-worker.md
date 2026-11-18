@@ -1,30 +1,37 @@
 # Windows build worker
 
-## Repository and checkout
+## Repository and worktrees
 
-The canonical repository is https://github.com/IndecentDad/nxnative. Customized `main` is the complete Windows-compatible fork; it includes the Windows builder and GUI, shader translation, Metal compilation adapters, game profiles, SMB staging, split-data packaging, and existing game-specific work. There is no permanent `windows/main` branch.
+The canonical repository is https://github.com/IndecentDad/nxnative. Customized main is the permanent development branch. Fetch and review upstream/main before integrating upstream changes.
 
-The physical Windows 11 PC is reached from Synology with `ssh nxwindows`. The active builder checkout is `D:\NXNativeWindows`; the clean `main` worktree is `D:\NXNativeBuilds\main-upstream-sync`. Inspect `git status --short --branch`, remotes, and `git worktree list` before changing either checkout. Preserve dirty feature work, keys, game files, generated data, and caches.
+The Windows host is reached with ssh nxwindows. The dirty primary checkout remains at D:\NXNativeWindows; it is the common Git repository for linked worktrees and contains user-owned changes. Keep it in place. The Celeste source worktree is now at F:\NXNative\1_Development\Worktrees\celeste-upstream-sync, linked to that repository. Other existing worktrees and game caches remain under D:\NXNativeBuilds; inspect each before any relocation. Do not copy or move the whole directory.
 
-## Workspace paths
+## Permanent development locations
 
-- Keep original NSP/XCI/NSZ/XCZ files and downloads in `D:\Downloads`.
-- Use the SSD `F:\Temp` for temporary extraction, shader caches, intermediate build data, and staging.
-- The GUI uses a per-title work directory under `F:\Temp\NXNative\SMB\<title ID>\build` when the drive is available. Its SMB inputs, local output staging, and split-data staging use the same SSD workspace.
-- Direct CLI builds retain the upstream source-folder default. Specify `--work-dir F:\Temp\<title ID>` for a new build and use `-o <existing final IPA path>` to keep the IPA at its established destination. The original inputs are not moved.
+- Development root: F:\NXNative\1_Development
+- iOS SDK 27.2: F:\NXNative\1_Development\SDKs\Xcode_27.2\iPhoneOS.sdk (SDK build 24B8118)
+- iOS SDK 26.5 fallback: F:\NXNative\1_Development\SDKs\Xcode_26.5\iPhoneOS.sdk
+- Celeste ROMs, builds, caches, logs, and outputs: F:\NXNative\Celeste
+- Original Switch archives remain in D:\Downloads. General per-title build staging for other games may use F:\Temp as documented by their workspace.
 
-## Toolchain and build
+The Windows user variable NXW_IOS_SDK selects SDK 27.2 by default. Set it to the 26.5 path above when a fallback build is specifically required.
 
-Run `python win/doctor.py` before building. It checks Python packages, .NET 10, LLVM/clang and `ld64.lld`, the iPhoneOS SDK, Metal compilers, spirv-cross, zstd, glslang, and fonts. The locator scans this worktree `win/sdk/out`. For a shared SDK stored in another checkout, set the Windows user variable `NXW_IOS_SDK`; this host reuses `D:\\NXNativeWindows\\win\\sdk\\out\\iPhoneOS.sdk`. Do not copy or install tools when the existing SDK is available.
+## Toolchain
 
-The Windows entry point is:
+NXNative-specific extracted SDKs and source worktrees live on F:. Shared system installations remain in their existing locations: Python 3.14.5 under the user profile, .NET SDK 10.0.403 under C:\Program Files\dotnet, LLVM 23.1.4 under C:\Program Files\LLVM, Metal Developer Tools under Program Files, and Vulkan utilities under C:\VulkanSDK. The repository-local .NET shader translator stays with each source worktree. These shared tools are discovered by win/toolchain.py; do not duplicate or relocate them.
 
-```powershell
-python win/build_ipa_windows.py <NSP-folder> -k <prod.keys> --work-dir F:\Temp\<title-id> -o <final-IPA-path>
-```
+D:\NXNativeBuilds\.venvs\factorio-native-arm-ipad belongs to the Factorio project and remains on D:. Other D: build worktrees contain active or uncommitted game work and remain untouched. The primary repository's Git administration is still on D:, so F: linked worktrees depend on D:\NXNativeWindows\.git.
 
-The GUI is started with `Build-IPA-GUI.bat` from the repository root or `pythonw win/gui.pyw`. It selects the per-title SSD work folder automatically, preserves the selected/default final IPA destination, and verifies SMB transfers. Use `--split-data` for an app plus a sibling data folder; inspect both outputs before transfer.
+## Build workflow
+
+Run python win/doctor.py before building. The Windows entry point is win/build_ipa_windows.py. For a new direct build, specify --work-dir and -o so intermediates and the final IPA go to the established locations. For Celeste use --work-dir F:\NXNative\Celeste\build and keep all game-specific work under F:\NXNative\Celeste.
+
+The GUI starts with Build-IPA-GUI.bat or pythonw win/gui.pyw. It stages per-title builds under F:\Temp\NXNative\SMB when available, preserves the chosen output destination, and verifies SMB transfers. Other game workspaces retain their established paths.
+
+For Celeste, use --split-data=F:\NXNative\Celeste\output\Celeste-data. Zip the split-data folder with the existing win/staging.py helper. The package contains the RomFS image and shader image and is copied to the app's Documents folder by the established install flow.
 
 ## Validation
 
-The Windows builder's pure-Python tests run with `python win/tests/test_win.py`. SMB staging and split-data tests are in `win/tests`. Shader and archive tests that use standard `unittest` can run with `python -m unittest <module>`; the full macOS C/Metal runtime tests require the Mac toolchain. A Windows IPA compile does not establish gameplay compatibility.
+win/doctor.py checks Python packages, .NET, LLVM/ld64.lld, the selected iPhoneOS SDK, Metal compilers, SPIRV-Cross, zstd, glslang, and fonts. Run python win/tests/test_win.py for the Windows builder suite. SMB staging and split-data tests are in win/tests; standard archive/shader unit tests use unittest.
+
+SDK selection is part of the app compiler's object-cache key through its -isysroot argument. Confirm the detailed build log reports the selected SDK and actual compiled-object count. IPA metadata and the executable's Mach-O build version must both record the intended SDK. Compilation is not physical-device validation.
