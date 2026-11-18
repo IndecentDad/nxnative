@@ -2213,6 +2213,13 @@ def data_rows(b):   # a table's data rows (without # comment lines: the header c
     return [l for l in b.splitlines() if not l.startswith(b'#')]
 
 
+def data_rows_match(name, profile, split):
+    # shader_map.tsv is a keyed map; the splitter's directory traversal can
+    # change its row order without changing any game shader records.
+    a, b = data_rows(profile), data_rows(split)
+    return collections.Counter(a) == collections.Counter(b) if name == 'shader_map.tsv' else a == b
+
+
 def table_difference(name, profile, split):
     """How a split table differs from the profile's, for the build error: the row counts on each side and the first such row of each. Rows are compared as sets of lines, so one row added early does not read as every later row changed."""
     a, b = collections.Counter(data_rows(profile)), collections.Counter(data_rows(split))
@@ -2373,7 +2380,7 @@ def split_shaders(py, repo, roms, mains, pkg, env, logs, g, provisional=False, o
         for n in names: shutil.copyfile(tmp / 'tables' / n, g.table(n))
     else:
         # Data rows byte-identical to the profile's = the same game files the tables were built from; if not, stop (the profile's tables are left alone). Only data rows are compared: the header of Engage's profile tables was written by an older shader_split
-        diff = [n for n in names if data_rows((tmp / 'tables' / n).read_bytes()) != data_rows(g.table(n).read_bytes())]
+        diff = [n for n in names if not data_rows_match(n, g.table(n).read_bytes(), (tmp / 'tables' / n).read_bytes())]
         if diff:
             rows = '\n'.join(table_difference(n, g.table(n).read_bytes(), (tmp / 'tables' / n).read_bytes()) for n in diff)
             raise BuildError(f'the split shader tables differ from game profile {g.id}\'s:\n{rows}\nEither these game files are not the versions the profile registers, or shader_split.py now reads them differently and the profile\'s tables were not split again (the split\'s tables: {tmp / "tables"})')
