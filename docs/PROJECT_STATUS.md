@@ -154,3 +154,9 @@
 - Rebuilt both apps from the existing extraction, rewrite, and shader artifacts; SDK 27.2/build 24B8118. No shader translation or split-data regeneration was needed. IPA CRC, title/bundle identity, ARM64 executable, Mach-O SDK version 27.2, entitlement request, and embedded allocator gate were verified. Physical-device retest is required before calling the crash resolved.
 - Updated Octopath IPA: /volume1/Media/iOS/Octopath Traveler II/Octopath Traveler II v1.1.1.ipa, 46,907,861 bytes, SHA-256 e14a0775e6aa4804cdc55ca066e4600aa430f0ada4cb0056352c1ae892675cce. Triangle IPA: /volume1/Media/iOS/Triangle Strategy/Triangle Strategy v1.1.1.ipa, 47,228,600 bytes, SHA-256 1d57a9483af5ac4222e785e562def23102328f60f6f6d0d7f562e41d5122707d. Both are delivered in their existing folders; data ZIPs are unchanged.
 - Previous crashing IPAs are retained beside the new builds with the suffix pre-allocator-fix-20261119.
+
+
+## Synology iOS library path - 2026-11-19
+
+- The current destination is /volume1/Media/iOS/<Game>/. /volume1/Media/Roms/iOS/ is the retired path; do not use it for new game builds.
+- Octopath Traveler II and Triangle Strategy v1.1.1 IPAs and data ZIPs are in their existing /volume1/Media/iOS/ game folders. Temporary duplicates under the retired path were removed.
