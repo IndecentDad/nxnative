@@ -125,3 +125,13 @@
 - IPA: 20,833,749 bytes, SHA-256 `c3b066cb00957e392d63aeb04ef484140409289702eaaa3c6e4b197f375d30f4`; ARM64, title/bundle identity, XML entitlement request, ZIP integrity, and Apple `codesign --verify --strict` passed.
 - Split data ZIP: 5,119,641,517 bytes, SHA-256 `c54c7cae7bac0b84aacf7070e055de8b01554847bfdc052678ced3332748f87c`; full ZIP CRC and RomFS image parse passed (11,338 entries), current-chain MSL image included. Delivered with matching hashes to `/volume1/Media/iOS/Metroid Dread`; October 31 IPA/data are preserved as rollback.
 - Relevant shared upstream changes include command-memory grants (`bf93977b`), buffer-copy/texture-upload ordering (`23427a7b`), submission-tail and idle-block retirement (`3fe574df`), viewport recording origin (`8f51289d`), and shader SHFL lane masking (`fb18e83a`). These may improve rendering correctness, memory/submit behavior, and shader correctness; no Dread-specific FPS gain or physical-device result is claimed. Gameplay testing remains pending.
+
+## Super Smash Bros. Ultimate SDK 27.2 update - 2026-11-18
+
+- Profile refresh 87b3501f updates 36 regenerated shader variant labels. All 35,015 map rows match by package, stage, hash, and source offset when #var labels are ignored.
+- Built title 01006A800016E000, update 13.0.5/v2031616, from customized main 87b3501f with all 99 supplied DLC packages. The original XCI/NSP/DLC files remain untouched.
+- SDK 27.2/build 24B8118, min iOS 26.0; ARM64 IPA, bundle org.nxnativewindows.01006a800016e000; 271/271 app objects compiled. Build log confirms the increased-memory entitlement was requested.
+- Compiled 35,012/35,012 current-chain shader libraries for 1e3e632f2540 with Metal 32023.850 and --allow-other-metal; no shader failures. No pipeline archive was generated; first launch may build Metal 4 bases.
+- Split data contains RomFS, the current shader image, and all 99 AOC images. The Windows builder's first output omitted nested DLC inputs; restored the CRC-verified same-version AOC images from the preserved build, updated the manifest, and regenerated the ZIP. Final manifest records 101 payload files and 21,293,333,599 bytes.
+- IPA: F:\Temp\01006A800016E000\outputs\SuperSmashBrosUltimate-v13.0.5-sdk27.2.ipa, 117,552,600 bytes, SHA-256 10ce77ffb6ad68ded4873f483b4287fc11ee10cfdcbfdc874f8a75cf18c1fea2. Data ZIP: F:\Temp\01006A800016E000\outputs\SuperSmashBrosUltimate-v13.0.5-data.zip, 20,341,619,988 bytes, SHA-256 3b38b531b2f7e833305c0bd310fdade9cf7bfc906108b6006aa226d92e21cc55.
+- Delivered as SuperSmashBrosUltimate.ipa and SuperSmashBrosUltimate-data.zip in /volume1/Media/iOS/Smash Bros Ultimate; transfer hashes match. The previous IPA/data ZIP remain as rollback-before-27.2-20261118. Physical iPhone Duo gameplay testing remains pending.
