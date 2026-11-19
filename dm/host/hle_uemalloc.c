@@ -42,6 +42,8 @@ static const struct { const char *build, *what; int layout; uint64_t obj, vtable
     // OCTOPATH TRAVELER II 1.1.1 (Unreal Engine 4.27): made by GCreateMalloc, its vtable (main+0x64710b0: slots 0-19 as the 4.27 layout, TryMalloc / TryRealloc call +0x18 / +0x28,
     // slots 17 and 18 return 1, 19 the name; there is no OnMallocInitialized, so the 21st word copied is the next vtable's offset to top, which nothing calls), the cut constructor call (main+0xbecc08)
     { "0d9649011312f62e93f6a5673a09d7e9", "OCTOPATH TRAVELER II 1.1.1", UE4_27, 0, 0x64710b0, 0xbecc08 },
+    // TRIANGLE STRATEGY 1.1.1 (Unreal Engine 4.27): GCreateMalloc makes the object, whose vtable is at main+0x625c508; the cut constructor call is at main+0xd197d8
+    { "9cb4490e8a718bae392c59b0368d7c4e", "TRIANGLE STRATEGY 1.1.1", UE4_27, 0, 0x625c508, 0xd197d8 },
     // SHIN MEGAMI TENSEI V: Vengeance 1.0.3: GCreateMalloc makes the object in x19; the constructor reserves 37 GB at main+0x15790b0. Its vtable has the UE4 layout:
     // TryMalloc / TryRealloc call +0x18 / +0x28, slots 17 and 18 return 1, 19 returns "Binned3"; the following word is 0 (no OnMallocInitialized).
     { "0a4f14a5c12f470a4d3168a8f2ae6005", "SHIN MEGAMI TENSEI V: Vengeance 1.0.3", UE4_27, 0, 0x5a7f0a8, 0x1f2f63c },
@@ -133,7 +135,11 @@ void dm_ue_malloc_install(void) {
     for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main"))
         for (int k = 0; k < (int)(sizeof k_ue / sizeof k_ue[0]); k++) if (!strcmp(g_mod[i].build_id, k_ue[k].build)) {
             uint8_t *b = g_mod[i].base; int L = k_ue[k].layout;
-            if (*(uint32_t *)(b + k_ue[k].cut) != 0xd503201f) { LOG("[RED] %s: main is rewritten without the allocator cut (its patches.py): Unreal's own FMallocBinned3 runs", k_ue[k].what); return; }
+            uint32_t cut = *(uint32_t *)(b + k_ue[k].cut);
+            // The rewriter puts an OBS_UE_MALLOC branch at the cut site; it replaces the NOP before invoking obj_made.
+            if (cut != 0xd503201f && (!gate_obs_present(OBS_UE_MALLOC) || (cut & 0xfc000000u) != 0x14000000u)) {
+                LOG("[RED] %s: main is missing the allocator cut or its observation gate; Unreal's own FMallocBinned3 runs", k_ue[k].what); return;
+            }
             if (!k_ue[k].obj && !gate_obs_present(OBS_UE_MALLOC)) { LOG("[RED] %s: main is rewritten without the allocator gate (OBS of its patches.py): the allocator would have no vtable", k_ue[k].what); return; }
             memcpy(g_vt, b + k_ue[k].vtable, sizeof g_vt[0] * k_lay[L].nslot);   // the relocated vtable: the trivial slots stay the guest's
             g_vt[k_lay[L].malloc_] = (void *)m_Malloc; g_vt[k_lay[L].try_malloc] = (void *)m_TryMalloc; g_vt[k_lay[L].realloc_] = (void *)m_Realloc;
