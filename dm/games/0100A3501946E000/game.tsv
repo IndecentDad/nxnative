@@ -52,5 +52,5 @@ pad_layout	full
 # Unreal Engine 4.27 with no shader code archives: each material's shaders inline in its cooked package (.uexp) and the engine's global shaders in Engine/GlobalShaderCache-SF_GLSL_SWITCH.bin,
 # every one an LZ4 block (shader_split.py ue_inline_shaders, uepak.py inline_shaders). Unreal combines vertex and pixel shaders per draw from its pipeline state, so every vertex shader is
 # made to link with any pixel shader (shader_split.py separable_pairs)
-shader_groups	GlobalShaderCache=global #Engine/=engine #Majesty/=game
+shader_groups	GlobalShaderCache=global Engine/=engine Majesty/=game
 shader_note	OCTOPATH TRAVELER II shaders
