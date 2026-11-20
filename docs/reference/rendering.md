@@ -1901,7 +1901,7 @@ The Vulkan layer (`dm/gfx/vk/hle_vk.m`) was written for Hades. Super Mario Galax
 
 - **Symptom:** Metal rejects a pipeline with `Vertex attribute a_indices(1) of type int cannot be read using MTLAttributeFormatUShort`. The title can continue drawing while an actor's pipeline is missing.
 - **Cause:** RenderDragon's skinning shaders declare a scalar `int` input which the game supplies as `R16_UINT`. The Switch driver accepts that pairing. Reading the bytes as `Short` would sign-extend values with bit 15 set.
-- **Fix:** material vertex shaders that use `a_indices` also get a variant with an unsigned stage input and an explicit conversion to `int` at its uses. The Vulkan layer chooses it only when that location is bound as `R16_UINT`. `t_vk_renderdragon` reads back 32-bit values for inputs `0x8000` and `0xffff` under Metal validation.
+- **Fix:** `vk_shaders.py` repairs the material's scalar `a_indices` input to unsigned in SPIR-V before translation. Each unsigned load feeds an `OpBitcast` under the original signed result ID, preserving the shader's signed arithmetic. The key still hashes the original game bytes. This follows the [traced engine layout contract](../../dm/games/0100D71004694000/README.md#bone-index-layout), rather than changing Vulkan vertex-format semantics. One ordinary Metal function is built per vertex shader. `t_vk_renderdragon` reads back 32-bit values for inputs `0x8000` and `0xffff` under Metal validation.
 - **Found on:** [Minecraft for Nintendo Switch](../../dm/games/0100D71004694000/README.md) 1.26.62.
 
 ### Vulkan triangle fans
@@ -2156,6 +2156,14 @@ The Vulkan layer (`dm/gfx/vk/hle_vk.m`) was written for Hades. Super Mario Galax
 - **Check:** `test_vk_shaders.py` checks the workgroup size and texel-buffer type. `t_vk_compute` reads back dispatches, stage-specific push constants, producer-consumer work, and storage images.
 - **Found on:** [Re:ZERO](../../dm/games/0100D800117F4000/README.md), [PR #1539](https://github.com/seedds/nxnative/pull/1539).
 
+### Vulkan shader resource tables truncated
+
+- **Symptom:** the shader-table loader reports resource entries it cannot parse, and affected draws use missing or stale sampler state. Shadows, reflections or other texture samples can be wrong even though the shader compiled.
+- **Cause:** the host kept only the first 24 resource entries of each shader and continued with that partial list. Buffers, textures and samplers have separate Metal argument tables; their combined metadata count is not a device limit. The draw loop therefore never bound the omitted entries.
+- **Fix:** size each shader's resource list to its complete table row and keep it for the table's lifetime. Read complete lines with `getline`. Validate the resource syntax and the host's per-kind slot, set, binding and array ranges; reject an invalid row completely so shader lookup cannot build a pipeline with partial bindings. The generated table format and shaders stay unchanged.
+- **Check:** `t_vk_argbuf` covers 24–29 entries, a 96-entry row over 4 KB, old and explicit argument-buffer IDs, arrays and dynamic offsets, and rejection without retaining a valid prefix. Its 25-resource GPU draw reads back the final sampler's linear filtering after seeding stale nearest-filter state.
+- **Found on:** [Minecraft](../../dm/games/0100D71004694000/README.md#resource-bindings) 1.26.62; a synthetic GPU A/B reproduced incorrect pixels under Metal validation on Apple M6.
+
 ### Vulkan descriptor arrays over Metal's direct limits
 
 - **Symptom:** shaders with large descriptor arrays exceed Metal's direct slots. An argument buffer with a texture array at Vulkan binding 0 and a sampler at binding 1 can fail Metal compilation with overlapping IDs.
@@ -2407,7 +2415,8 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
 ### GL shaders put together at run time and captured
 
 - **Symptom:** in a capture run every program links with no uniforms; the game's first `Shader:send` raises a Lua error and, on the Switch, its error handler quits ([Any Lua error quits a LÖVE game](game-state.md#any-lua-error-quits-a-löve-game)).
-- LÖVE builds each source in Lua from its header, its built-in code and the game's `.fs` file. The NSP script captures them on the Mac (`gl_capture.tsv`). A capture run has no library.
+- **Cause:** LÖVE builds each source in Lua from its header, its built-in code and the game's `.fs` file. None of those programs can link at the start of a fresh capture, which begins without the packaged library.
+- **Fix:** [Compile missing shaders during capture](#gl-capture-compiles-missing-shaders) so LÖVE can link the program and write its uniforms.
 - **Found on:** [Balatro](../../dm/games/0100CD801CE5E000/README.md): the 35 shaders are all made before the first frame.
 
 ### GLSL an id Tech 4 renderer makes on first use
@@ -2417,6 +2426,30 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
 - **Fix:** the NSP script's capture run has the game convert every render program itself. `dm/gfx/tools/idtech4_programs.py` finds the renderer's `FindVertexShader` / `FindFragmentShader` in `main` from its code, not from addresses: the loader is the one function that takes the address of its GLSL cache path `renderprogs\glsl\%s`, its two callers are the per-stage loaders (by the stage they pass, `0x8b31` or `0x8b30`), the finders are the callers of one of them alone, and the manager is what the material parser loads into `x0` from `main`'s data before calling a finder. It lists every render program in the containers' tables. The host (`DM_GL_RENDERPROGS`, `renderprogs_job` in `hle_gl.m`) calls each finder once per program on the rendering thread at the first swap after the game has compiled shaders of its own (the manager compiles its built-in programs while the renderer starts, before the first frame), and the game converts and compiles them as on first use, so the capture holds the game's own text.
 - **Check:** `test_idtech4_programs.py` (a synthetic module laid out as the renderer's code, a synthetic container).
 - **Found on:** [DOOM 3](../../dm/games/010029D00E740000/README.md): 82 programs (42 vertex, 40 fragment) give 66 distinct GLSL texts, since some share their source; the capture has them all at the first frame, about 1 s into a headless boot. A run that played into the first level had 62 of them (all but `motionBlur` and `stereoInterlace`), byte for byte the same.
+
+### Desktop GLSL 1.10 and 1.20 from runtime generators
+
+- **Symptom:** captured desktop GLSL fails with `Desktop shaders for Vulkan SPIR-V require version 140 or higher` or with an undeclared `gl_TexCoord` or `gl_Color`.
+- **Cause:** MojoShader emits desktop compatibility GLSL 1.20 and names its built-in varyings through macros.
+- **Fix:** promote explicit desktop versions 110 and 120 through the existing GLSL ES 1.00 compatibility rewrite. After preprocessing, make the front colors, fog coordinate and constant-index texture coordinates explicit, with matching names across stages. Constant-index fragment outputs keep their locations.
+- **Limits:** this covers the programmable varyings used by MojoShader. Fixed-function vertex inputs, back-face color selection and dynamically indexed legacy arrays are outside this path.
+- **Found on:** Timespinner 1.0.0 ([PR #1864](https://github.com/seedds/nxnative/pull/1864)).
+
+### GL capture compiles missing shaders
+
+- **Symptom:** a GL capture stops with `vs_flip_loc != -1` in `MOJOSHADER_glProgramViewportFlip`.
+- **Cause:** a fresh capture starts without a Metal shader library. The loader needs a uniform location from the linked program before it creates the remaining shaders.
+- **Fix:** the packer starts the Mac host with `DM_GL_CAPTURE_COMPILER`. On the first use of a missing source hash and stage, the host runs the same GLSL translator and Mac Metal compiler used by the packer, then loads the function and its reflection. Linking, uniform writes and draws use the regular GL path. The host publishes each captured source after the compile attempt; the packer still builds the final libraries in a batch.
+- **Check:** `make -C dm/gfx/tests GAME=010029D00E740000 gl-arguments` exercises a fresh capture with legacy GLSL, compiler failure, rebinding an existing shader, uniform writes and GPU readback.
+- **Found on:** Timespinner 1.0.0 ([PR #1864](https://github.com/seedds/nxnative/pull/1864)).
+
+### GL entry points required by FNA
+
+- **Symptom:** FNA stops during startup with `NoSuitableGraphicsDeviceException` and names `glBlendColor` as the first missing entry point.
+- **Cause:** FNA checks the loader's pointers for its GL device before it renders. The host lacked blend color, indexed masks, range draws, texture and buffer readback, occlusion queries, and framebuffer attachment queries.
+- **Fix:** use Metal's dynamic blend color and reuse existing indexed drawing and pixel readback. Report the default attachment sizes consistently with EGL. Occlusion queries collect the Metal visibility count across the render passes they cover and wait only when a requested result is pending.
+- **Limits:** texture readback covers RGBA8 and BGRA8 with RGBA unsigned-byte output for 2D textures and cube faces. Sample-mask state has no effect on the host's single-sample attachments. Query support here is for occlusion.
+- **Found on:** Timespinner 1.0.0 ([PR #1864](https://github.com/seedds/nxnative/pull/1864)).
 
 ### The GL core profile and persistently mapped buffers
 
@@ -2486,6 +2519,13 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
 
 - `glBufferData` on a buffer the GPU may still read gets a new `MTLBuffer`, as GL drivers orphan it. A whole-framebuffer clear becomes the next pass's load action; a scissored or masked one is a quad.
 - **Found on:** [Digimon Story Cyber Sleuth: Complete Edition](../../dm/games/010014E00DB56000/README.md).
+
+### A pending GL clear follows the old attachment
+
+- **Symptom:** scene layers disappear after the game clears a texture and changes the framebuffer's attachment without an intervening draw.
+- **Cause:** a whole-framebuffer clear waits to become a Metal load action. The framebuffer name stays the same, so the clear can land on the replacement image.
+- **Fix:** encode the pending clear before changing an attachment of that framebuffer. Unchanged attachments still allow the clear to fold into the next draw pass.
+- **Found on:** Timespinner 1.0.0 ([PR #1864](https://github.com/seedds/nxnative/pull/1864)). Empty layers were clearing the texture where the earlier layers had already been composed.
 
 ### GL draws and framebuffers
 
