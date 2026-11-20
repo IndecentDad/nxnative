@@ -1,142 +1,12 @@
 # nxnative
 
-## IndecentDad fork
-
-The canonical repository is [IndecentDad/nxnative](https://github.com/IndecentDad/nxnative). Its `main` branch is the complete Windows-compatible fork, including our builder, GUI, shader and Metal toolchain adapters, game profiles, SMB staging, split-data packaging, and accumulated customizations. GitHub's default branch is `main`; there is no permanent `windows/main`, `integration`, or `nx2` branch.
-
-The `upstream` remote (`seedds/nxnative`) is a source of improvements. Fetch it, review the changes, integrate applicable work into customized `main`, validate, then push to `origin/main`. Follow [the current branch workflow](docs/branch-workflow.md); historical integration and migration records are not current operating instructions.
-
-## Windows build workspace
-
-The Windows PC is the primary iOS build environment. Keep original NSP/XCI archives and downloads in `D:\Downloads`. The Windows GUI places each title's extraction, build data, shader cache, and local SMB staging under `F:\Temp\NXNative\SMB\<title ID>\` when that SSD path is available. It keeps completed IPA output at the selected or established destination. For direct CLI builds, pass `--work-dir F:\Temp\<title ID>`; pass `-o <existing IPA destination>` when you want the completed IPA to remain outside the temporary workspace. See [Windows build worker](docs/windows-build-worker.md).
-
-The working Windows checkout is `D:\NXNativeWindows`. Use the clean `main` worktree at `D:\NXNativeBuilds\main-upstream-sync` for normal changes and upstream integration. Preserve any active feature worktrees until their unique commits and local files are handled.
-
-## Validated custom behavior
-
-- The Windows builder packages unsigned iOS apps using the Windows Metal compiler, LLVM, and iPhoneOS SDK, with existing shader translation, game profiles, staging, and split-data support.
-- Optional Eden-compatible Save Folder Sync uses native `Documents/save` and `<Selected Folder>/<TitleID>/`. Metroid Dread and Celeste builds from `a51aad6e0ae2fef570a94c05e5291fc0f3b5105e` are user-confirmed working on iPhone; `validated/save-folder-sync-v1` is immutable.
-- Tahoe remains available for Mac runtime tests and work that requires the Mac host. Windows builds use `win/build_ipa_windows.py` or the GUI and do not require a Mac for titles whose shaders and game data can be processed offline.
-
-See [build provenance](docs/build-provenance.md) and [current project status](docs/PROJECT_STATUS.md). Never use KylePyne as the NXNative GitHub identity.
-
-## Custom fork history
-
-This fork retains Windows build and staging support, game profiles, shader and Metal toolchain adapters, split-data packaging, and Eden-compatible Save Folder Sync. Current branch, workspace, and upstream instructions are in docs/branch-workflow.md, docs/windows-build-worker.md, and docs/PROJECT_STATUS.md. The build records below are historical provenance.
-
-## Upstream project
-
-Play your own Nintendo Switch games natively on iPhone and iPad. Bring your game (its NSP files) and your `prod.keys`; one script turns them into an IPA that you sideload.
+Play your own Nintendo Switch and Switch 2 games natively on Apple silicon Macs, iPhone and iPad. One script packs your game into a Mac app or an unsigned IPA that you sideload.
 
 It is not an emulator: the game's own code runs directly on the Apple chip, with Switch graphics rebuilt on Metal. Nothing from any game is in this repository, and the project is not affiliated with Nintendo or any game publisher.
 
-Switch 2 games have started too: [Donkey Kong Bananza](dm/games/040074A01BF12000/README.md), [Splatoon Raiders](dm/games/0400380020056000/README.md), [Fire Emblem Fortune's Weave](dm/games/04007EF01F8AE000/README.md), [PokÃ©mon Pokopia](dm/games/0400A3A01EE4C000/README.md), [Hyrule Warriors: Age of Imprisonment](dm/games/04003F40232DE000/README.md), [Mario Kart World](dm/games/0400C3F00006E000/README.md) and [Mario Tennis Fever](dm/games/0400D4201C6EA000/README.md) play on the Mac, packed from one [`.nup` file](#switch-2-games) or a dump of the game; iPhone and iPad are untested.
-
-## Acknowledgements
-
-This project is built on other people's work ([licenses](dm/third_party/README.md)):
-
-- **[d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)** (MIT) developed this native-execution approach, for Diablo II: Resurrected. nxnative started as a copy of its generic parts: the NSO rewriter, the host that stands in for Horizon, the NVN-on-Metal layer and the iOS app shell. Fixes go both ways.
-- **Ryujinx** (MIT): its shader translator (`Ryujinx.Graphics.Shader`, `Ryujinx.Common` and `Spv.Generator` 1.3.2, in `dm/third_party/ryujinx` with a few fixes listed in [its README](dm/third_party/ryujinx/README.md)) turns the games' shaders into SPIR-V. Its emulation of the kernel and system services is also a reference when the host's behaviour is in doubt.
-- **[AtmosphÃ¨re](https://github.com/Atmosphere-NX/Atmosphere)**: its kernel, mesosphÃ¨re, is the reference for Horizon's synchronization semantics (address arbiter, condition variables).
-- **[LibHac](https://github.com/Thealexbarney/LibHac)**: reads NSPs and layers updates over the base game in `dm/tools/nx_extract`.
-- **[SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross)**: SPIR-V to Metal Shading Language.
-- **[glslang](https://github.com/KhronosGroup/glslang)** compiles the GLSL of OpenGL games to SPIR-V for it.
-- **[MacNativeGames](https://github.com/ly05010419/MacNativeGames)** (MIT): the GPU widening of 8-bit indices and in-pass clears in `dm/gfx/nvn/nvn_mtl.m`, and the visibility-counter lowering in the shader translator.
-
-## How to play
-
-Switch 2 games are built from one `.nup` file or a folder of their files, not from NSPs, and are tested on the Mac only: see [Switch 2 games](#switch-2-games).
-
-### With a Mac app
-
-Community projects build on nxnative with Mac apps that turn your games into apps for your iPhone, iPad or Mac, with no command line, and keep them in a library. They are separate projects: questions and bugs about them go to their own pages.
-
-- [NX2Apple](https://github.com/LNPANDY/NX2Apple)
-- [NX Play](https://github.com/varyform/nx-native-wrapper)
-- [NxNative Launcher](https://github.com/rennan101/nxnative_Launcher)
-- [LumaNX](https://github.com/Xc1Ym/LumaNX)
-
-### Build from the command line
-
-You need a Mac with macOS 26.6 or later, [Xcode](https://developer.apple.com/download/all/?q=Xcode%2027.2) 27.2, [Homebrew](https://brew.sh) and Python 3.12 or newer (an arm64 one, not an Intel Homebrew's). An iPhone build also needs Xcode's iOS platform (Xcode â†’ Settings â†’ Components).
-
-The shaders are built with Xcode 27.2's Metal compiler. Select it before step 1: `sudo xcode-select -s /Applications/Xcode.app`. With several Xcode versions installed, name this one `Xcode-27.2.app` and select it with `sudo xcode-select -s /Applications/Xcode-27.2.app`.
-
-**1. Install the tools** (only once), in Terminal:
-
-```
-xcodebuild -downloadComponent MetalToolchain
-git clone https://github.com/seedds/nxnative.git && cd nxnative
-brew install xcodegen zstd glslang
-brew install --cask dotnet-sdk
-python3 -m pip install lz4 "capstone>=5,<6" fonttools nsz zbic "backports.zstd; python_version < '3.14'"
-```
-
-**2. Put your game in a folder**: the game, plus its update and DLC if you have them (`.nsp`, `.xci`, `.nsz` or `.xcz`):
-
-```
-~/Games/MarioWonder/
-  Super Mario Bros. Wonder [010015100B514000][v0].nsp
-  Super Mario Bros. Wonder [010015100B514800][v327680].nsp
-```
-
-**3. Build**, with your game folder and your `prod.keys`:
-
-```
-python3 scripts/build_ipa_from_nsp.py ~/Games/MarioWonder -k ~/keys/prod.keys
-```
-
-The IPA appears in the game's folder. The first build takes 30â€“60 minutes and needs free disk space of about twice the game's size plus 10 GB; building again is much faster.
-
-To play on the Mac instead, add `--platform mac-app`: you get a Mac app of the game to open from Finder. All options: [The packing script in detail](docs/development.md#the-packing-script-in-detail).
-
-### Install
-
-Install the IPA on your iPhone or iPad with a sideloading tool such as AltStore, Sideloadly or LiveContainer. If your tool offers **Increased Memory Limit**, turn it on: the bigger games need it.
-
-Game too big to install? Build again with `--romfs separate`, and run the command the script prints once to copy the game files to your phone ([Quick reinstalls](docs/development.md#quick-reinstalls)).
-
-Controls, saves and settings: [Playing](docs/playing.md).
-
-### Switch 2 games
-
-A Switch 2 game is built from one [NUP](https://github.com/a55uka/nup) container (a `.nup` file) or a folder of its files, not from NSPs. Neither needs `prod.keys`. A game this project has no profile for is surveyed and gets a provisional profile, as NSPs do ([Port another game](docs/development.md#port-another-game)), which may not boot. You get a Mac app; iPhone and iPad are untested.
-
-**From a `.nup` file**, which holds the base game, its updates and DLC in one file. Give the file, or a folder that holds it:
-
-```
-python3 scripts/build_ipa_from_nsp.py ~/Games/DonkeyKongBananza.nup --platform mac-app
-```
-
-[Hyrule Warriors: Age of Imprisonment](dm/games/04003F40232DE000/README.md) is played this way: its 47 GB NUP unpacks in under five minutes. A NUP that carries the game's control data (its NACP) and icon gives the app the game's name and icon; otherwise the name comes from the game's profile and the app has no icon.
-
-A NUP without the base game also works, when its base package is empty or it has none and its updates are marked `standalone_update`: the update is taken as the whole game, and the script says so. If the game then stops on missing files, that update holds only what changed: pack a NUP with the base game. The newest update is selected by default; `--package v<N>` selects another version in the container. Such a container has no `v0` (base game) to select.
-
-**From a folder of files**. The script expects this layout (`updates` and `dlc` are optional):
-
-```
-~/Games/DonkeyKongBananza/
-  base/exefs/                     main, main.npdm, sdk, rtld
-  base/romfs/
-  updates/458752/exefs/           the update's version, as a decimal number
-  updates/458752/romfs/           the patched RomFS, not a patch
-  dlc/040074a01bf13001/0/romfs/   the DLC's title ID
-```
-
-```
-python3 scripts/build_ipa_from_nsp.py ~/Games/DonkeyKongBananza --platform mac-app
-```
-
-An update's folder alone will do (no `base/`), and so will `exefs/` and `romfs/` directly in the folder, as `nup extract` writes them, which count as `base/`. The app has no icon, because the folder holds none. To turn such a folder into a NUP: `nup pack ~/Games/DonkeyKongBananza game.nup`.
+[Games](#games) · [Community front ends](#community-front-ends) · [Requirements](#requirements) · [How to play](#how-to-play) · [Discussions](#discussions) · [For developers](#for-developers)
 
 ## Games
-
-Games tested on Mac or iPhone. See the [per-game notes](dm/games/README.md#games) for tested platforms, progress and known issues:
-
-Needs iOS / iPadOS 26 or later on an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later: the games' textures are BC-compressed, and older iPhones can't read that format. Other games aren't supported yet. For them the script writes a survey and still tries its best to pack an IPA, guessing the game's settings; such an IPA may not start.
-
-Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) with that update. "Up to 120 fps" names no update because the host finds the frame rate in the game's code, whichever version it is; choose it under Frame rate, on a screen that shows 120 Hz.
 
 <!-- gallery: written by dm/tools/docs_gallery.py from docs/images/gallery.tsv; change the table, then run it -->
 <table>
@@ -146,7 +16,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 <td align="center" valign="top" width="33%"><img src="docs/images/fire-emblem-fortunes-weave.jpg" width="256" alt="Fire Emblem Fortune's Weave"><br><small><b><a href="dm/games/04007EF01F8AE000/README.md">Fire Emblem Fortune's Weave</a></b><br>Switch 2, Mac only, from a dump, up to 120 fps</small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-pokopia.jpg" width="256" alt="PokÃ©mon Pokopia"><br><small><b><a href="dm/games/0400A3A01EE4C000/README.md">PokÃ©mon Pokopia</a></b><br>Switch 2, Mac only, from a dump</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-pokopia.jpg" width="256" alt="Pokémon Pokopia"><br><small><b><a href="dm/games/0400A3A01EE4C000/README.md">Pokémon Pokopia</a></b><br>Switch 2, Mac only, from a dump</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/hyrule-warriors-age-of-imprisonment.jpg" width="256" alt="Hyrule Warriors: Age of Imprisonment"><br><small><b><a href="dm/games/04003F40232DE000/README.md">Hyrule Warriors: Age of Imprisonment</a></b><br>Switch 2, Mac only, from a NUP</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/mario-kart-world.jpg" width="256" alt="Mario Kart World"><br><small><b><a href="dm/games/0400C3F00006E000/README.md">Mario Kart World</a></b><br>Switch 2, Mac only, from a dump</small></td>
 </tr>
@@ -216,7 +86,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 <td align="center" valign="top" width="33%"><img src="docs/images/dragon-quest-vii-reimagined.jpg" width="256" alt="DRAGON QUEST VII Reimagined"><br><small><b><a href="dm/games/0100A9D01C446000/README.md">DRAGON QUEST VII Reimagined</a></b><br>60 fps with 1.2.0</small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/dragon-quest-xi-s.jpg" width="256" alt="DRAGON QUEST XI S: Echoes of an Elusive Age â€“ Definitive Edition"><br><small><b><a href="dm/games/01006C300E9F0000/README.md">DRAGON QUEST XI S: Echoes of an Elusive Age â€“ Definitive Edition</a></b><br>60 fps with 1.0.4</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/dragon-quest-xi-s.jpg" width="256" alt="DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition"><br><small><b><a href="dm/games/01006C300E9F0000/README.md">DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition</a></b><br>60 fps with 1.0.4</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/final-fantasy-resonance.jpg" width="256" alt="FINAL FANTASY RESONANCE"><br><small><b><a href="dm/games/0100606026F12000/README.md">FINAL FANTASY RESONANCE</a></b><br>60 fps with 1.0.1</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/final-fantasy-tactics.jpg" width="256" alt="FINAL FANTASY TACTICS - The Ivalice Chronicles"><br><small><b><a href="dm/games/010038B015560000/README.md">FINAL FANTASY TACTICS - The Ivalice Chronicles</a></b></small></td>
 </tr>
@@ -252,16 +122,16 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/pikmin-4.jpg" width="256" alt="Pikmin 4"><br><small><b><a href="dm/games/0100B7C00933A000/README.md">Pikmin 4</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-brilliant-diamond.jpg" width="256" alt="PokÃ©mon Brilliant Diamond"><br><small><b><a href="dm/games/0100000011D90000/README.md">PokÃ©mon Brilliant Diamond</a></b><br>60 fps with 1.3.0</small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-z-a.jpg" width="256" alt="PokÃ©mon Legends: Z-A"><br><small><b><a href="dm/games/0100F43008C44000/README.md">PokÃ©mon Legends: Z-A</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-brilliant-diamond.jpg" width="256" alt="Pokémon Brilliant Diamond"><br><small><b><a href="dm/games/0100000011D90000/README.md">Pokémon Brilliant Diamond</a></b><br>60 fps with 1.3.0</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-z-a.jpg" width="256" alt="Pokémon Legends: Z-A"><br><small><b><a href="dm/games/0100F43008C44000/README.md">Pokémon Legends: Z-A</a></b></small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-scarlet.png" width="256" alt="PokÃ©mon Scarlet"><br><small><b><a href="dm/games/0100A3D008C5C000/README.md">PokÃ©mon Scarlet</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-violet.jpg" width="256" alt="PokÃ©mon Violet"><br><small><b><a href="dm/games/01008F6008C5E000/README.md">PokÃ©mon Violet</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-sword.jpg" width="256" alt="PokÃ©mon Sword"><br><small><b><a href="dm/games/0100ABF008968000/README.md">PokÃ©mon Sword</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-scarlet.png" width="256" alt="Pokémon Scarlet"><br><small><b><a href="dm/games/0100A3D008C5C000/README.md">Pokémon Scarlet</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-violet.jpg" width="256" alt="Pokémon Violet"><br><small><b><a href="dm/games/01008F6008C5E000/README.md">Pokémon Violet</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-sword.jpg" width="256" alt="Pokémon Sword"><br><small><b><a href="dm/games/0100ABF008968000/README.md">Pokémon Sword</a></b></small></td>
 </tr>
 <tr>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-shield.jpg" width="256" alt="PokÃ©mon Shield"><br><small><b><a href="dm/games/01008DB008C2C000/README.md">PokÃ©mon Shield</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-shield.jpg" width="256" alt="Pokémon Shield"><br><small><b><a href="dm/games/01008DB008C2C000/README.md">Pokémon Shield</a></b></small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/portal.jpg" width="256" alt="Portal"><br><small><b><a href="dm/games/01007BB017812000/README.md">Portal</a></b></small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/raging-loop.jpg" width="256" alt="Raging Loop"><br><small><b><a href="dm/games/010020400E1C2000/README.md">Raging Loop</a></b></small></td>
 </tr>
@@ -277,7 +147,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/super-smash-bros-ultimate.jpg" width="256" alt="Super Smash Bros. Ultimate"><br><small><b><a href="dm/games/01006A800016E000/README.md">Super Smash Bros. Ultimate</a></b><br>offline</small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/taiko-risshiden-v-dx.jpg" width="256" alt="Taiko Risshiden V DX"><br><small><b><a href="dm/games/0100346017304000/README.md">Taiko Risshiden V DX</a></b><br>Japanese Â· played by touch</small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/taiko-risshiden-v-dx.jpg" width="256" alt="Taiko Risshiden V DX"><br><small><b><a href="dm/games/0100346017304000/README.md">Taiko Risshiden V DX</a></b><br>Japanese · played by touch</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/unicorn-overlord.jpg" width="256" alt="Unicorn Overlord"><br><small><b><a href="dm/games/010069401ADB8000/README.md">Unicorn Overlord</a></b></small></td>
 </tr>
 <tr>
@@ -307,7 +177,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/xenoblade-chronicles-definitive-edition.jpg" width="256" alt="Xenoblade Chronicles: Definitive Edition"><br><small><b><a href="dm/games/0100FF500E34A000/README.md">Xenoblade Chronicles: Definitive Edition</a></b></small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-arceus.jpg" width="256" alt="PokÃ©mon Legends: Arceus"><br><small><b><a href="dm/games/01001F5010DFA000/README.md">PokÃ©mon Legends: Arceus</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/pokemon-legends-arceus.jpg" width="256" alt="Pokémon Legends: Arceus"><br><small><b><a href="dm/games/01001F5010DFA000/README.md">Pokémon Legends: Arceus</a></b></small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/super-mario-party-jamboree.jpg" width="256" alt="Super Mario Party Jamboree"><br><small><b><a href="dm/games/0100965017338000/README.md">Super Mario Party Jamboree</a></b></small></td>
 </tr>
 <tr>
@@ -373,7 +243,7 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/star-fox.jpg" width="256" alt="Star Fox"><br><small><b><a href="dm/games/0400E88025B1A000/README.md">Star Fox</a></b><br>Switch 2, Mac only, from a NUP</small></td>
 <td align="center" valign="top" width="33%"><img src="docs/images/kirby-air-riders.jpg" width="256" alt="Kirby Air Riders"><br><small><b><a href="dm/games/040077201BE50000/README.md">Kirby Air Riders</a></b><br>Switch 2, Mac only, from a NUP</small></td>
-<td align="center" valign="top" width="33%"><img src="docs/images/okami-hd.jpg" width="256" alt="ÅŒKAMI HD"><br><small><b><a href="dm/games/0100276009872000/README.md">ÅŒKAMI HD</a></b></small></td>
+<td align="center" valign="top" width="33%"><img src="docs/images/okami-hd.jpg" width="256" alt="ŌKAMI HD"><br><small><b><a href="dm/games/0100276009872000/README.md">ŌKAMI HD</a></b></small></td>
 </tr>
 <tr>
 <td align="center" valign="top" width="33%"><img src="docs/images/minecraft-dungeons-ii.jpg" width="256" alt="Minecraft Dungeons II"><br><small><b><a href="dm/games/0100A7C01B792000/README.md">Minecraft Dungeons II</a></b></small></td>
@@ -383,10 +253,146 @@ Under a game, "60 fps with 1.2.0" means it runs at 60 fps (30 on the console) wi
 </table>
 <!-- end of gallery -->
 
-### For developers
+The full [tested games table](dm/games/README.md#games) includes original Switch games, tested builds, engines and graphics APIs. Each game's note records its tested platforms, progress and known issues.
 
-[How it works](docs/development.md) Â· [Game notes](dm/games/README.md#games) Â· [Bring-up and debugging](docs/agents/README.md) Â· [Front ends](docs/frontends.md) Â· [Contributing](CONTRIBUTING.md)
+These Switch 2 games have passed Mac gameplay testing. Build them from a [`.nup` file or a dump folder](#switch-2-games):
 
-### License
+- [Donkey Kong Bananza](dm/games/040074A01BF12000/README.md)
+- [Fast Fusion](dm/games/040041E0212AE000/README.md)
+- [Fire Emblem Fortune's Weave](dm/games/04007EF01F8AE000/README.md) — up to 120 fps
+- [Hyrule Warriors: Age of Imprisonment](dm/games/04003F40232DE000/README.md)
+- [Kirby Air Riders](dm/games/040077201BE50000/README.md)
+- [Mario Kart World](dm/games/0400C3F00006E000/README.md)
+- [Mario Tennis Fever](dm/games/0400D4201C6EA000/README.md)
+- [Nintendo Switch 2 Welcome Tour](dm/games/040057C02159A000/README.md) — Area A tested; exhibits need further testing
+- [Nintendo Switch Sports Resort](dm/games/04008E001F098000/README.md)
+- [Orbitals](dm/games/040032B023CA4000/README.md) — two players: a controller for player 2
+- [Pokémon Pokopia](dm/games/0400A3A01EE4C000/README.md)
+- [PRAGMATA](dm/games/0400C76024710000/README.md)
+- [Splatoon Raiders](dm/games/0400380020056000/README.md)
+- [Star Fox](dm/games/0400E88025B1A000/README.md)
+- [Super Mario Bros. Wonder – Nintendo Switch 2 Edition + Meetup in Bellabel Park](dm/games/040015100B514001/README.md)
+- [The Legend of Zelda: Ocarina of Time](dm/games/0400486024DEC000/README.md)
+- [Yoshi and the Mysterious Book](dm/games/0400245021D2C000/README.md)
+
+## Community front ends
+
+Community projects build on nxnative with tools to turn your games into apps for your iPhone, iPad or Mac without the command line, and libraries to organize and launch them. They are separate projects: questions and bugs about them go to their own pages.
+
+- [NX2Apple](https://github.com/LNPANDY/NX2Apple) — Mac builder with a shared iPhone/iPad game library.
+- [NX Play](https://github.com/varyform/nx-native-wrapper) — Mac library with device installs and save sync.
+- [NxNative Launcher](https://github.com/rennan101/nxnative_Launcher) — Mac launcher with guided builds and controller mapping.
+- [LumaNX](https://github.com/Xc1Ym/LumaNX) — Mac game builder with IPA export.
+- [GameCase](https://github.com/Tiaoge-tou/GameCase) — iOS game library based on LiveContainer.
+
+## Requirements
+
+- **Mac:** Apple silicon, macOS 26.6 or later. Building games requires Xcode 27.2.
+- **iPhone:** A17 Pro chip or later, with iOS 26 or later.
+- **iPad:** M1 chip or later, with iPadOS 26 or later.
+
+The games' textures are BC-compressed, which older iPhones cannot read. Switch 2 builds are tested on the Mac; check each game's note for device-specific validation.
+
+For a game without a profile, the script writes a survey and tries a provisional build with guessed settings. That build may not start; see [Port another game](docs/development.md#port-another-game).
+
+## How to play
+
+Switch 2 games are built from one `.nup` file or a folder of their files, not from NSPs, and are tested on the Mac only: see [Switch 2 games](#switch-2-games).
+
+### Build from the command line
+
+You need a Mac with macOS 26.6 or later, [Xcode](https://developer.apple.com/download/all/?q=Xcode%2027.2) 27.2, [Homebrew](https://brew.sh) and Python 3.12 or newer (an arm64 one, not an Intel Homebrew's). An iPhone build also needs Xcode's iOS platform (Xcode → Settings → Components).
+
+The shaders are built with Xcode 27.2's Metal compiler. Select it before step 1: `sudo xcode-select -s /Applications/Xcode.app`. With several Xcode versions installed, name this one `Xcode-27.2.app` and select it with `sudo xcode-select -s /Applications/Xcode-27.2.app`.
+
+**1. Install the tools** (only once), in Terminal:
+
+```
+xcodebuild -downloadComponent MetalToolchain
+git clone https://github.com/seedds/nxnative.git && cd nxnative
+brew install xcodegen zstd glslang
+python3 -m pip install lz4 "capstone>=5,<6" fonttools nsz zbic "backports.zstd; python_version < '3.14'"
+```
+
+**2. Put your game in a folder**: the game, plus its update and DLC if you have them (`.nsp`, `.xci`, `.nsz` or `.xcz`):
+
+```
+~/Games/MarioWonder/
+  Super Mario Bros. Wonder [010015100B514000][v0].nsp
+  Super Mario Bros. Wonder [010015100B514800][v327680].nsp
+```
+
+**3. Build**, with your game folder and your `prod.keys`:
+
+```
+python3 scripts/build_ipa_from_nsp.py ~/Games/MarioWonder -k ~/keys/prod.keys
+```
+
+The IPA appears in the game's folder. The first build takes 30–60 minutes and needs free disk space of about twice the game's size plus 10 GB; building again is much faster.
+
+To play on the Mac instead, add `--platform mac-app`: you get a Mac app of the game to open from Finder. All options: [The packing script in detail](docs/development.md#the-packing-script-in-detail).
+
+### Install
+
+Install the IPA on your iPhone or iPad with a sideloading tool such as AltStore, Sideloadly or LiveContainer. If your tool offers **Increased Memory Limit**, turn it on: the bigger games need it.
+
+Game too big to install? Build again with `--romfs separate`, and run the command the script prints once to copy the game files to your phone ([Quick reinstalls](docs/development.md#quick-reinstalls)). With AltServer, also add `--shader-files`: it cannot install a file of 2 GiB or more.
+
+Controls, saves and settings: [Playing](docs/playing.md).
+
+### Switch 2 games
+
+A Switch 2 game is built from one [NUP](https://github.com/a55uka/nup) container (a `.nup` file) or a folder of its files, not from NSPs. Neither needs `prod.keys`. A game this project has no profile for is surveyed and gets a provisional profile, as NSPs do ([Port another game](docs/development.md#port-another-game)), which may not boot. You get a Mac app; iPhone and iPad are untested.
+
+**From a `.nup` file**, which holds the base game, its updates and DLC in one file. Give the file, or a folder that holds it:
+
+```
+python3 scripts/build_ipa_from_nsp.py ~/Games/DonkeyKongBananza.nup --platform mac-app
+```
+
+[Hyrule Warriors: Age of Imprisonment](dm/games/04003F40232DE000/README.md) is played this way: its 47 GB NUP unpacks in under five minutes. A NUP that carries the game's control data (its NACP) and icon gives the app the game's name and icon; otherwise the name comes from the game's profile and the app has no icon unless you give it one with `--icon <image>` (`ICON` in Spyder; a JPEG or PNG of any size).
+
+A Nintendo Switch 2 Edition of a Switch 1 game can hold both of its programs in one NUP: the Switch 1 program with the game data, and the Switch 2 program, which reads that data from the Switch 1 program and its Switch 2 files from the upgrade add-on. The script packs the Switch 2 program, with the Switch 1 program's game files beside its own and the add-on as DLC; `--program 0` packs the Switch 1 program instead.
+
+A NUP without the base game also works, when its base package is empty or it has none and its updates are marked `standalone_update`: the update is taken as the whole game, and the script says so. If the game then stops on missing files, that update holds only what changed: pack a NUP with the base game. The newest update is selected by default; `--package v<N>` selects another version in the container. Such a container has no `v0` (base game) to select.
+
+**From a folder of files**. The script expects this layout (`updates` and `dlc` are optional):
+
+```
+~/Games/DonkeyKongBananza/
+  base/exefs/                     main, main.npdm, sdk, rtld
+  base/romfs/
+  updates/458752/exefs/           the update's version, as a decimal number
+  updates/458752/romfs/           the patched RomFS, not a patch
+  dlc/040074a01bf13001/0/romfs/   the DLC's title ID
+```
+
+```
+python3 scripts/build_ipa_from_nsp.py ~/Games/DonkeyKongBananza --platform mac-app
+```
+
+An update's folder alone will do (no `base/`), and so will `exefs/` and `romfs/` directly in the folder, as `nup extract` writes them, which count as `base/`. The app has no icon, because the folder holds none; `--icon <image>` (`ICON` in Spyder) gives it one. To turn such a folder into a NUP: `nup pack ~/Games/DonkeyKongBananza game.nup`.
+
+## Discussions
+
+Questions, how a game runs on your Mac or iPhone, and ideas go in [Discussions](https://github.com/seedds/nxnative/discussions); [Issues](https://github.com/seedds/nxnative/issues) are for bugs, with the log. Ocarina of Time's performance (frame rate, resolution, which Macs hold 60 fps) is followed in [Ocarina of Time: state on main](https://github.com/seedds/nxnative/discussions/1789).
+
+## For developers
+
+[How it works](docs/development.md) · [Game notes](dm/games/README.md#games) · [Bring-up and debugging](docs/agents/README.md) · [Front ends](docs/frontends.md) · [Contributing](CONTRIBUTING.md)
+
+## Acknowledgements
+
+This project is built on other people's work ([licenses](dm/third_party/README.md)):
+
+- **[d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)** (MIT) developed this native-execution approach, for Diablo II: Resurrected. nxnative started as a copy of its generic parts: the NSO rewriter, the host that stands in for Horizon, the NVN-on-Metal layer and the iOS app shell. Fixes go both ways.
+- **Ryujinx** (MIT): its shader translator (`Ryujinx.Graphics.Shader`, `Ryujinx.Common` and `Spv.Generator` 1.3.2, in `dm/third_party/ryujinx` with a few fixes listed in [its README](dm/third_party/ryujinx/README.md)) turns the games' shaders into SPIR-V. Its emulation of the kernel and system services is also a reference when the host's behaviour is in doubt.
+- **[Atmosphère](https://github.com/Atmosphere-NX/Atmosphere)**: its kernel, mesosphère, is the reference for Horizon's synchronization semantics (address arbiter, condition variables).
+- **[LibHac](https://github.com/Thealexbarney/LibHac)**: reads NSPs and layers updates over the base game in `dm/tools/nx_extract`.
+- **[SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross)**: SPIR-V to Metal Shading Language.
+- **[glslang](https://github.com/KhronosGroup/glslang)** compiles the GLSL of OpenGL games to SPIR-V for it.
+- **[MacNativeGames](https://github.com/ly05010419/MacNativeGames)** (MIT): the GPU widening of 8-bit indices and in-pass clears in `dm/gfx/nvn/nvn_mtl.m`, and the visibility-counter lowering in the shader translator.
+
+## License
 
 MIT ([LICENSE](LICENSE)). Third-party code keeps its own license ([dm/third_party](dm/third_party/README.md)).

@@ -25,7 +25,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 
 | Now → goal | Patch | Purpose | Status | Evidence | Games | Where | Why |
 |---|---|---|---|---|---|---|---|
-| `build` → `game` | Unreal's allocator on a host malloc zone (hle_uemalloc.c) | address space | gap | judgement | 7 | [DRAGON QUEST VII Reimagined](../../dm/games/0100A9D01C446000/README.md); [FINAL FANTASY RESONANCE](../../dm/games/0100606026F12000/README.md); [FINAL FANTASY RESONANCE (Asian release)](../../dm/games/0100B8A026F14000/README.md); [OCTOPATH TRAVELER 0](../../dm/games/01005270232F2000/README.md); [OCTOPATH TRAVELER II](../../dm/games/0100A3501946E000/README.md); [Pikmin 4](../../dm/games/0100B7C00933A000/README.md); [SHIN MEGAMI TENSEI V: Vengeance](../../dm/games/010069C01AB82000/README.md) | the allocator replacement depends on fixed per-build constructor and vtable addresses |
+| `build` → `game` | Unreal's allocator on a host malloc zone (hle_uemalloc.c) | address space | gap | judgement | 8 | [DRAGON QUEST VII Reimagined](../../dm/games/0100A9D01C446000/README.md); [FINAL FANTASY RESONANCE](../../dm/games/0100606026F12000/README.md); [FINAL FANTASY RESONANCE (Asian release)](../../dm/games/0100B8A026F14000/README.md); [OCTOPATH TRAVELER 0](../../dm/games/01005270232F2000/README.md); [OCTOPATH TRAVELER II](../../dm/games/0100A3501946E000/README.md); [Pikmin 4](../../dm/games/0100B7C00933A000/README.md); [SHIN MEGAMI TENSEI V: Vengeance](../../dm/games/010069C01AB82000/README.md); [TRIANGLE STRATEGY](../../dm/games/0100CC80140F8000/README.md) | the allocator replacement depends on fixed per-build constructor and vtable addresses |
 | `build` → `host` | Unreal FMallocBinned3 constructor cut and host allocator | address space | gap | judgement | 1 | [OCTOPATH TRAVELER 0](../../dm/games/01005270232F2000/README.md) | the two verified builds use fixed constructor addresses and a host allocator vtable |
 | `build` → `engine` | Unity QualitySettings.vSyncCount held at 1 | frame rate | gap | judgement | 1 | [Fire Emblem Engage](../../dm/games/0100A6301214E000/README.md) | an IL2CPP player registers the setter by its icall name, so the place can be found in any Unity game; holding it at 1 stays this profile's choice (its logic steps by the count) |
 | `build` → `game` | frame limiter 30 → 60 fps and the 1/60 update step | frame rate | gap | judgement | 1 | [DARK SOULS: REMASTERED](../../dm/games/01004AB00A260000/README.md) | the game's own limiter constant and fixed step |
@@ -63,6 +63,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | [Animal Crossing: New Horizons](#animal-crossing-new-horizons) | 0 | 0 | 14 | 0 | 0 | `build` → `game` |
 | [ASTRAL CHAIN](#astral-chain) | 0 | 0 | 112 | 0 | 0 | `build` → `game` |
 | [Batman: Arkham Knight](#batman-arkham-knight) | 8 | 0 | 0 | 0 | 0 | `build` → `game` ×2 |
+| [Catherine: Full Body](#catherine-full-body) | 0 | 0 | 0 | 1 | 0 | `game` |
 | [DARK SOULS: REMASTERED](#dark-souls-remastered) | 2 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Diablo II: Resurrected](#diablo-ii-resurrected) | 2 | 0 | 0 | 1 | 0 | `game` |
 | [DRAGON QUEST VII Reimagined](#dragon-quest-vii-reimagined) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
@@ -87,6 +88,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | [OCTOPATH TRAVELER II](#octopath-traveler-ii) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [Ori and the Will of the Wisps](#ori-and-the-will-of-the-wisps) | 0 | 0 | 10 | 0 | 0 | `build` → `engine` |
 | [Paper Mario: The Thousand-Year Door](#paper-mario-the-thousand-year-door) | 1 | 0 | 1 | 0 | 0 | `build` → `game` |
+| [Persona 5 Strikers](#persona-5-strikers) | 0 | 0 | 0 | 1 | 0 | `game` |
 | [Pikmin 4](#pikmin-4) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [Pokémon Legends: Arceus](#pokémon-legends-arceus) | 0 | 0 | 0 | 1 | 0 | `game` |
 | [SHIN MEGAMI TENSEI V: Vengeance](#shin-megami-tensei-v-vengeance) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
@@ -99,6 +101,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | [The Legend of Zelda: Link's Awakening](#the-legend-of-zelda-links-awakening) | 1 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [The Legend of Zelda: Ocarina of Time](#the-legend-of-zelda-ocarina-of-time) | 0 | 0 | 2 | 3 | 0 | `game` ×5 |
 | [The Legend of Zelda: Tears of the Kingdom](#the-legend-of-zelda-tears-of-the-kingdom) | 0 | 0 | 9 | 0 | 0 | `game` |
+| [TRIANGLE STRATEGY](#triangle-strategy) | 0 | 0 | 0 | 0 | 1 | `build` → `game` |
 | [Xenoblade Chronicles 3](#xenoblade-chronicles-3) | 6 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Xenoblade Chronicles X: Definitive Edition](#xenoblade-chronicles-x-definitive-edition) | 6 | 0 | 1 | 1 | 0 | `game` ×2 |
 
@@ -273,6 +276,14 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
   - cut `+0xc5ab94`: queue pop: ldr w9, [x19, #0x1c] (the head again) → and x9, x8, #0xffff
   - cut `+0xc5ab98`: queue pop: and x9, x9, #0xffff → ldr x8, [x19] (the ring; then ldr x8, [x8, x9, lsl #3]: the item)
 
+### Catherine: Full Body
+
+[Catherine: Full Body](../../dm/games/0100BF00112C0000/README.md), `0100BF00112C0000`, [patches.py](../../dm/games/0100BF00112C0000/patches.py).
+
+- **`game`**, frame rate, at goal, checked: 1.0.1a startup, tick callback and timing getter verified by disassembly: Catherine 60 fps startup and simulation. GFD already accepts 60 at startup, but the title also selects its own fixed steps. Both sites must match together; no SDK or host setting selects the title’s timing mode.
+
+- **function-matched** (`main` of builds without CUTS): Catherine 60 fps startup and simulation: 2 functions, 2 cuts
+
 ### DARK SOULS: REMASTERED
 
 [DARK SOULS: REMASTERED](../../dm/games/01004AB00A260000/README.md), `01004AB00A260000`, [patches.py](../../dm/games/01004AB00A260000/patches.py).
@@ -335,7 +346,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 - **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
 
 - **1.0.1 `main`** `84e182f7…`
-  - host [hle_uemalloc.c:49](../../dm/host/hle_uemalloc.c#L49): Unreal's allocator on a host malloc zone
+  - host [hle_uemalloc.c:51](../../dm/host/hle_uemalloc.c#L51): Unreal's allocator on a host malloc zone
 
 ### FINAL FANTASY RESONANCE (Asian release)
 
@@ -344,7 +355,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 - **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
 
 - **1.0.1 `main`** `b7f965b9…`
-  - host [hle_uemalloc.c:51](../../dm/host/hle_uemalloc.c#L51): Unreal's allocator on a host malloc zone
+  - host [hle_uemalloc.c:53](../../dm/host/hle_uemalloc.c#L53): Unreal's allocator on a host malloc zone
 
 ### FINAL FANTASY TACTICS - The Ivalice Chronicles
 
@@ -551,6 +562,14 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
   - cut `+0x2e77a4`: frame step floor in 60 Hz vsyncs: mov w9,#2 → mov w9,#1 (the game steps by the vsyncs that passed, down to one)
   - frame step `+0x2e77f8`: frame step: the base clock steps by the host's vsyncs (state page target fps; 0 = the game's measured step)
 
+### Persona 5 Strikers
+
+[Persona 5 Strikers](../../dm/games/0100801011C3E000/README.md), `0100801011C3E000`, [patches.py](../../dm/games/0100801011C3E000/patches.py).
+
+- **`game`**, frame rate, at goal, checked: 1.0.0 main: all seven functions, original instructions, and the native 60 Hz mode on Mac: 60 Hz gameplay timing and presentation. Strikers sets its own integer and float update rates, counter step and half-rate mode at startup and on scene changes. Changing the host or KTGL interval alone leaves those writers at 30 Hz.
+
+- **function-matched** (`main` of builds without CUTS): 60 Hz gameplay timing and presentation: 7 functions, 24 cuts
+
 ### Pikmin 4
 
 [Pikmin 4](../../dm/games/0100B7C00933A000/README.md), `0100B7C00933A000`.
@@ -575,7 +594,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 - **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
 
 - **1.0.3 `main`** `0a4f14a5…`
-  - host [hle_uemalloc.c:47](../../dm/host/hle_uemalloc.c#L47): Unreal's allocator on a host malloc zone
+  - host [hle_uemalloc.c:49](../../dm/host/hle_uemalloc.c#L49): Unreal's allocator on a host malloc zone
 
 ### Subnautica
 
@@ -732,6 +751,15 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 - **`game`**, frame rate, at goal, checked: 1.4.3 main: one function of each fingerprint; the rule rewrites it byte-identical to its former build entry (2026-11-09): 60 fps frame step and render scale. The game's own timing object, found by its six functions' fingerprints on any build that keeps them; no engine sibling shares the code (BotW, SMO, MK8D, ACNH, Splatoon 2 / 3, Kirby, Mario Party, Ocarina, Smash, Metroid Dread, Origami King: no exact match, 2026-11-09)
 
 - **function-matched frame step** (`main` of builds without FRAME_STEP): 60 fps frame step and render scale: a function of 0x298 bytes, `+0x18` in it; game step reader 1, a function of 0x358 bytes, `+0x34`, `+0x4c` in it; game step reader 2, a function of 0x81c bytes, `+0x4c`, `+0x58` in it; menu fade, a function of 0x3bc bytes, `+0x130` in it; swapchain argument, a function of 0x8bc bytes, `+0x1a4` in it; view render size, a function of 0x1f8 bytes, `+0x9c`, `+0x15c` in it
+
+### TRIANGLE STRATEGY
+
+[TRIANGLE STRATEGY](../../dm/games/0100CC80140F8000/README.md), `0100CC80140F8000`.
+
+- **`build` → `game`**, address space, gap, judgement: Unreal's allocator on a host malloc zone (hle_uemalloc.c). The allocator replacement depends on fixed per-build constructor and vtable addresses
+
+- **1.1.1 `main`** `9cb4490e…`
+  - host [hle_uemalloc.c:46](../../dm/host/hle_uemalloc.c#L46): Unreal's allocator on a host malloc zone
 
 ### Xenoblade Chronicles 3
 

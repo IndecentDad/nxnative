@@ -1,17 +1,16 @@
 // iOS App entry: set the environment (game files, saves, shader libraries), write the host log to Documents/log.txt, create the window (front_ios.m), then run the host's dm_main on a big-stack thread.
-// The game files (RomFS) ship inside the App at <App>/romfs; Documents/romfs.img (one image, scripts/push_romfs.sh) or a Documents/romfs folder is also accepted (lets you swap them without reinstalling).
-// A split build (win/build_app.py, NXW_SPLIT_DATA) ships no game files: its "<Game>-data" folder (romfs/, msl/, aoc/) goes into Documents, whole or its contents.
+// The game files (RomFS) ship inside the App at <App>/romfs; Documents/romfs.img (one image, scripts/push_romfs.sh; its name in any letter case) or a Documents/romfs folder is also accepted (lets you swap them without reinstalling). The DLC folder aoc/ likewise: Documents/aoc, else <App>/aoc.
 #import <UIKit/UIKit.h>
 #import <Metal/Metal.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "game_profile.h"   // game profile constants (the RomFS marker path)
 #include "front.h"
-#import "DmSaveFolderSync.h"
 #include "romfs_image.h"
 #include "romfs_identity.h"
 #include "player_env.h"
@@ -26,17 +25,6 @@ UIViewController *front_ios_root(void);
 void front_ios_focus_event(int ev);
 
 static char *g_argv[4]; static int g_argc;
-static DmSaveFolderSync *g_folder_sync;
-void dm_save_sync_resume(void) { [g_folder_sync resumeSafely]; }
-void front_save_committed(void) { [g_folder_sync saveCommitted]; }
-void dm_save_folder_sync_committed(void) { [g_folder_sync saveCommitted]; }
-DmSaveFolderSync *dm_save_folder_sync(void) { return g_folder_sync; }
-void dm_save_folder_sync_present(DmSaveFolderSync *sync, UIViewController *viewController) { [sync presentFolderPickerFromViewController:viewController]; }
-void dm_save_folder_sync_clear(DmSaveFolderSync *sync) { [sync clearSelectedFolder]; }
-void dm_save_folder_sync_now(DmSaveFolderSync *sync) { [sync syncNow]; }
-void dm_save_folder_sync_import(DmSaveFolderSync *sync) { [sync resolveByImportingExternal]; }
-void dm_save_folder_sync_export(DmSaveFolderSync *sync) { [sync resolveByExportingLocal]; }
-void dm_save_folder_sync_preserve(DmSaveFolderSync *sync) { [sync preserveBoth]; }
 
 // Documents/romfs.img, one RomFS image file (dm/tools/romfs_image.py, scripts/push_romfs.sh): only a complete one counts. Its index is written last and ends the file, so a copy cut off partway is skipped
 static int romfs_image_complete(NSString *path) {
@@ -47,14 +35,11 @@ static int romfs_image_complete(NSString *path) {
     }
     romfs_image_close(m); return 1;
 }
-// The data root may hold romfs.img or romfs/ (and, for a split build, msl/ and aoc/). Check Documents first, then each direct child folder
-// (a split build's "<Game>-data" folder copied over whole), then the App. A folder RomFS counts only when it contains the profile marker.
-static NSString *g_data_root;
-// A build made with DM_COPY_ROMFS=NO carries <App>/romfs.id (dm/host/romfs_identity.h): candidate RomFS images must have that identity. No romfs.id (the default build): any complete image
+// A build made with DM_COPY_ROMFS=NO carries <App>/romfs.id (dm/host/romfs_identity.h): only a Documents/romfs.img with that identity is used. No romfs.id (the default build): any complete image
 static int romfs_identity_accepts(NSString *img) {
     romfs_id want, got;
     int rc = romfs_id_check([NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs.id"].fileSystemRepresentation, img.fileSystemRepresentation, &want, &got);
-    if (rc != ROMFS_ID_OK && rc != ROMFS_ID_NONE) fprintf(stderr, "[RED] boot: RomFS image %s is not the image this build needs (verdict %d); not used\n", img.fileSystemRepresentation, rc);
+    if (rc != ROMFS_ID_OK && rc != ROMFS_ID_NONE) fprintf(stderr, "[RED] boot: Documents/%s is not the image this build needs (verdict %d); not used\n", img.lastPathComponent.UTF8String, rc);
     return rc == ROMFS_ID_OK || rc == ROMFS_ID_NONE;
 }
 // The images in Documents: romfs.img in any letter case, romfs.img itself first. The NSP script writes the image as RomFS.img (extract/<version>/RomFS.img) and the Mac's
@@ -71,20 +56,19 @@ static NSArray<NSString *> *romfs_document_images(NSString *doc) {
 }
 static NSString *romfs_locate(NSString *prog) {   // prog: a game of several programs, the running program's folder in the app (p<N>); nil otherwise
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
+    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
     if (prog) {   // the program's files are in the app (Documents holds one image, one program's)
         NSString *p = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:prog], *img = [p stringByAppendingPathComponent:@"romfs.img"], *d = [p stringByAppendingPathComponent:@"romfs"];
-        if (romfs_image_complete(img)) { g_data_root = p; return img; }
-        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@(DM_GAME_ROMFS_MARKER)]]) { g_data_root = p; return d; } return nil;
+        if (romfs_image_complete(img)) return img;
+        return [fm fileExistsAtPath:[d stringByAppendingPathComponent:@(DM_GAME_ROMFS_MARKER)]] ? d : nil;
     }
     for (NSString *img in romfs_document_images(doc)) {
         if (!romfs_image_complete(img) || !romfs_identity_accepts(img)) continue;
-        g_data_root = doc;
         // A folder copy from before images is now dead weight of up to many GB (often cut off partway). Deleting its 300,000 files here took longer than iOS allows an app to start
         // (Tears of the Kingdom: killed on a black screen), so it is moved aside at once and deleted in the background, leftovers of an interrupted delete included
         NSString *old = [doc stringByAppendingPathComponent:@"romfs"], *tmp = NSTemporaryDirectory();
         if ([fm fileExistsAtPath:old] && [fm moveItemAtPath:old toPath:[tmp stringByAppendingPathComponent:[@"romfs-old-" stringByAppendingString:NSUUID.UUID.UUIDString]] error:nil])
-            fprintf(stderr, "boot: Documents/romfs moved aside for deletion (Documents/romfs.img replaces it)\n");
+            fprintf(stderr, "boot: Documents/romfs moved aside for deletion (Documents/%s replaces it)\n", img.lastPathComponent.UTF8String);
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
             NSFileManager *bfm = [NSFileManager new];
             for (NSString *n in [bfm contentsOfDirectoryAtPath:tmp error:nil]) if ([n hasPrefix:@"romfs-old-"]) [bfm removeItemAtPath:[tmp stringByAppendingPathComponent:n] error:nil];
@@ -93,34 +77,15 @@ static NSString *romfs_locate(NSString *prog) {   // prog: a game of several pro
     }
     NSString *bundledImage = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs.img"];
     NSString *documentFolder = [doc stringByAppendingPathComponent:@"romfs"];
-    if ([fm fileExistsAtPath:[documentFolder stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) { g_data_root = doc; return documentFolder; }
-    if (romfs_image_complete(bundledImage)) { g_data_root = res; return bundledImage; }
-    NSMutableArray<NSString *> *roots = [NSMutableArray array];
-    for (NSString *n in [[fm contentsOfDirectoryAtPath:doc error:nil] sortedArrayUsingSelector:@selector(compare:)]) {
-        BOOL isdir = NO; NSString *p = [doc stringByAppendingPathComponent:n];
-        if (![n isEqualToString:@"romfs"] && ![n hasPrefix:@"."] && [fm fileExistsAtPath:p isDirectory:&isdir] && isdir) [roots addObject:p];
-    }
-    [roots addObject:res];
-    for (NSString *r in roots) {
-        for (NSString *image in romfs_document_images(r))
-            if (romfs_image_complete(image) && romfs_identity_accepts(image)) { g_data_root = r; return image; }
-        NSString *d = [r stringByAppendingPathComponent:@"romfs"];
-        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) { g_data_root = r; return d; }
-    }
+    if ([fm fileExistsAtPath:[documentFolder stringByAppendingPathComponent:@(DM_GAME_ROMFS_MARKER)]]) return documentFolder;
+    if (romfs_image_complete(bundledImage)) return bundledImage;
+    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]])
+        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@(DM_GAME_ROMFS_MARKER)]]) return d;   // only a directory containing the game profile's romfs_marker path counts (Mario: System/Resource, the resource size table)
     return nil;
 }
-int nxw_data_found(void) { return romfs_locate(nil) != nil; }   // win/ios/DataHelp.m's "Check again"
-// <data root>/<name> when it exists and is not empty (a split build's msl/ and aoc/), else <App>/<name>
-static NSString *data_dir(NSString *name) {
-    NSString *res = NSBundle.mainBundle.resourcePath;
-    if (g_data_root && ![g_data_root isEqualToString:res]) {
-        NSString *p = [g_data_root stringByAppendingPathComponent:name];
-        if ([[NSFileManager.defaultManager contentsOfDirectoryAtPath:p error:nil] count]) return p;
-    }
-    return [res stringByAppendingPathComponent:name];
-}
 
-// A multi-program application's DLC can be deployed in Documents or bundled with the app. Keep an explicit DM_AOC_DIR override.
+// Add-on content (DLC): each DLC's RomFS image at <dir>/<index>.img (or a legacy <index>/ folder). Like the game files, Documents/aoc comes before <App>/aoc.
+// A DM_AOC_DIR that is already set (env.txt, the launch environment) wins. The host mounts and counts the DLC from DM_AOC_DIR (hle_fs.c, hle_misc.c)
 static void aoc_locate(void) {
     if (getenv("DM_AOC_DIR")) return;
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -135,14 +100,20 @@ static void aoc_locate(void) {
 }
 
 // Boot prerequisites (done before UIApplicationMain): directories / environment variables / log -- the host's early load reads these
-// Why a slim build found no usable game files: the verdict on Documents/romfs.img, in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
+// Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
 static char g_boot_message[640];
 const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
-// Create the first Metal device only after the launcher applies its settings, then refuse GPUs without the BC formats used by game textures.
+
+static bool g_hud_enabled_from_saved_choice;
+bool front_ios_hud_enabled_from_saved_choice(void) { return g_hud_enabled_from_saved_choice; }
+
+// Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
+// GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
+// its switches, so this device check gives front_hud_env() a chance to enable the Performance HUD at Play (GitHub issue #840).
 const char *front_ios_device_check(void) {
     static char msg[320]; static int done;
     if (done++) return msg[0] ? msg : NULL;
-    id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();
+    id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
     if (gpu.supportsBCTextureCompression) return NULL;
     snprintf(msg, sizeof msg, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
              gpu ? gpu.name.UTF8String : "no Metal device");
@@ -165,7 +136,7 @@ static int boot_env(void) {
     NSString *res = NSBundle.mainBundle.resourcePath;
     for (NSString *d in @[@"save", @"temp"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
     // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
-    for (NSString *d in @[@"romfs", @"romfs.img", @"temp"]) {
+    for (NSString *d in [@[@"romfs", @"aoc", @"temp"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
         NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
         if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
     }
@@ -202,32 +173,31 @@ static int boot_env(void) {
     }
     setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
     setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
-    front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
+    front_hud_env();   // DM_METAL_HUD from the launch environment or an env file
+    // On the M4 iPad Air, setting MTL_HUD_ENABLED at Play was too late. Apply the saved choice before UIApplicationMain (GitHub issue #840).
+    const char *ignore_saved = getenv("DM_SAVED_CHOICES");
+    if (!getenv("DM_METAL_HUD") && !getenv("MTL_HUD_ENABLED") && (!ignore_saved || strcmp(ignore_saved, "0"))) {
+        id saved = [NSUserDefaults.standardUserDefaults objectForKey:@"launcher.DM_METAL_HUD"];
+        if ([saved isKindOfClass:NSString.class] && [saved isEqualToString:@"1"]) {
+            setenv("DM_METAL_HUD", "1", 0);
+            front_hud_env();
+            unsetenv("DM_METAL_HUD");   // Play still sets the app's HUD choice
+            g_hud_enabled_from_saved_choice = getenv("MTL_HUD_ENABLED") != NULL;
+        }
+    }
     // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language → DMLanguage in Info.plist), unless an env file sets DM_LANG
     // (or the launcher, which replaces this default before the game starts)
     NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
     if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
     fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
     NSString *dm = program_env();
-    if (!dm) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs, Documents/<folder>/romfs or <App>/romfs)\n"); return 0; }
-    NSString *romfs = [NSString stringWithUTF8String:getenv("DM_ROMFS") ?: ""];
-    fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
-    for (NSString *d in @[romfs, data_dir(@"msl"), data_dir(@"aoc")])
-        if ([d hasPrefix:doc] && [fm fileExistsAtPath:d]) [[NSURL fileURLWithPath:d isDirectory:YES] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
-    NSString *saveRoot = [doc stringByAppendingPathComponent:@"save"];
-    setenv("DM_SAVE", saveRoot.fileSystemRepresentation, 0);
-    fprintf(stderr, "save-sync: native root and payload %s\n", saveRoot.fileSystemRepresentation);
-    g_folder_sync = [[DmSaveFolderSync alloc] initWithLocalSave:[NSURL fileURLWithPath:saveRoot isDirectory:YES]
-                                                         titleID:@DM_GAME_TITLE_ID];
-    [g_folder_sync startBeforeGameplay];
+    if (!dm) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
+    setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
-    setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest memory in files there
-    setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);
-    if (getenv("DM_PROGRAM")) aoc_locate();
-    else {
-        NSString *aoc = data_dir(@"aoc");
-        if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 0);
-    }
+    setenv("DM_SYSTEM_DIR", [doc stringByAppendingPathComponent:@"system"].fileSystemRepresentation, 0);
+    setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
+    setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
+    aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
     NSString *pso = [res stringByAppendingPathComponent:@"pso"];   // the pipeline archive made offline (build_ipa.sh, dm/gfx/tools/pso_offline.py): the shader pairs' bases, which the device then does not build
     if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
     chdir(doc.fileSystemRepresentation);
@@ -266,8 +236,14 @@ static NSString *program_env(void) {
     if (!romfs) return nil;
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
+    // The RomFS of the application's other programs (scripts/pack_nup.py, a Switch 2 Edition's Switch 1 program), which the game mounts by program index (hle_fs.c): in the app beside its
+    // RomFS, also when that RomFS is Documents/romfs.img
+    NSString *sib = [(prog ? [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:prog] : NSBundle.mainBundle.resourcePath) stringByAppendingPathComponent:@"romfs_programs"];
+    if ([fm fileExistsAtPath:sib]) setenv("DM_ROMFS_PROGRAMS", sib.fileSystemRepresentation, 0);
     setenv("DM_NVN_SHMAP", [dmdir stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
-    setenv("DM_MSL_DIR", (prog ? msl : data_dir(@"msl")).fileSystemRepresentation, 0);
+    setenv("DM_MSL_DIR", msl.fileSystemRepresentation, 0);
+    NSString *control = [dmdir stringByAppendingPathComponent:@"control.nacp"];   // the game's control data (build_ipa.sh program_tables; hle_fs.c control_read)
+    if ([fm fileExistsAtPath:control]) setenv("DM_CONTROL_NACP", control.fileSystemRepresentation, 0);
     return dmdir;
 }
 static int g_boot_ok;
@@ -291,7 +267,7 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
 @end
 @implementation App
 - (UISceneConfiguration *)application:(UIApplication *)a configurationForConnectingSceneSession:(UISceneSession *)s options:(UISceneConnectionOptions *)o {
-    return [[UISceneConfiguration alloc] initWithName:@"Default" sessionRole:s.role];
+    return [[UISceneConfiguration alloc] initWithName:[s.role isEqualToString:UIWindowSceneSessionRoleExternalDisplayNonInteractive] ? @"TV" : @"Default" sessionRole:s.role];   // a TV (front_ios.m DmTVSceneDelegate)
 }
 @end
 
@@ -308,7 +284,7 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
 - (void)sceneWillResignActive:(UIScene *)s { front_ios_focus_event(0); }
 - (void)sceneDidEnterBackground:(UIScene *)s { front_ios_focus_event(1); }
 - (void)sceneWillEnterForeground:(UIScene *)s { front_ios_focus_event(2); }
-- (void)sceneDidBecomeActive:(UIScene *)s { front_ios_focus_event(3); dm_save_sync_resume(); }
+- (void)sceneDidBecomeActive:(UIScene *)s { front_ios_focus_event(3); }
 @end
 
 int main(int argc, char **argv) {
