@@ -4,7 +4,7 @@
 
 - Canonical repository: https://github.com/IndecentDad/nxnative. Customized main is the only permanent branch and GitHub default. Integrate reviewed upstream/main changes into main.
 - Windows host: ssh nxwindows. The dirty primary checkout remains at D:\NXNativeWindows as the common Git repository; do not move it without migrating all linked worktrees.
-- Active Windows source worktree: F:/NXNative/1_Development/Worktrees/celeste-upstream-sync, branch codex/celeste-upstream-sync at da88a960; upstream/main 8a06d255 is merged and pushed. The D: primary checkout and existing game worktrees remain untouched.
+- Active Windows source worktree: F:/NXNative/1_Development/Worktrees/celeste-upstream-sync, branch codex/disco-upstream-sync at 182cb5fb; customized origin/main includes upstream/main 806fabe1. The D: primary checkout and existing game worktrees remain untouched.
 - Permanent NXNative development root and extracted SDKs: F:\NXNative\1_Development. Celeste ROMs, build data, shader caches, logs, and outputs remain under F:\NXNative\Celeste.
 - Original game archives remain on D:. The Celeste build and all game-specific artifacts stay in F:\NXNative\Celeste; other per-title workspaces retain their established paths.
 
@@ -169,3 +169,9 @@
 - Build used SDK 27.2/build 24B8118 and Metal 32023.850 with the explicit allow-other-metal override (lock expects 32023.922). No pipeline archive; device may compile Metal 4 base pipelines on first run.
 - IPA: 44,853,835 bytes, SHA-256 640fb2da9a1b8451b6ed56b0a265874ac2492b793e228e65e0bbd2473c12a55e. ARM64, SDK 27.2 Mach-O/Info.plist, memory entitlement present, unsigned/no provisioning.
 - Split-data ZIP: 30,590,530,831 bytes, SHA-256 2a7d358785c5b8bb5008f95e335b96ae3ebcd60e714ba1246a8473cc0b0faa86. ZIP CRC passed; contains RomFS, nxw_data.tsv, README, and msl/b-edb6fea84983.img. Delivered to /volume1/Media/iOS/Zelda Ocarina of Time; prior IPA and ZIP retained as Rollback-20261120. Physical Duo gameplay remains untested.
+
+
+## Disco Elysium start - 2026-11-21
+
+- Upstream 806fabe1 was integrated into customized main in 182cb5fb. Focused Windows merge tests passed 35, with one POSIX-only descriptor reuse test skipped; doctor passed, and Windows tests passed 11 with one optional skip. The generated shader chain is c1a21333f502. A minimal ROMFS adjustment keeps descriptor pooling on POSIX and uses per-reader handles on Windows for atomic staging replacements.
+- F:\NXNative\Disco Elysium contains the base NSP and v1.0.13 update. No Disco profile exists in customized main or upstream. The established read-only survey stopped before package validation because prod.keys was not supplied/configured. No Disco extraction or build artifacts were created. Next: provide the prod.keys path through the normal builder input, then survey the packages and create/validate the profile.
