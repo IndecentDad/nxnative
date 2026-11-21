@@ -18,6 +18,7 @@
 #define VK_NO_PROTOTYPES
 #include "../../host/hle.h"
 #include "../nvn/nvn_mtl.h"
+#include "../nvn/nvn_dbnd.h"
 #import "../nvn/host_msl.h"
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_vi.h>
@@ -351,6 +352,7 @@ struct VkPipeline_T {
     MTLPrimitiveType prim; MTLCullMode cull; MTLWinding wind; MTLTriangleFillMode fill; MTLDepthClipMode clip;
     int fan, restart;   // a triangle fan, drawn as a list (fan_arrays, fan_indexed), and its primitive restart
     int bias, dyn_bias, dyn_blend; float bias_c, bias_s, bias_cl; float blend[4]; uint32_t sref_f, sref_b;
+    int db_en, dyn_db, dbk; float db[2];   // depth bounds test (nvn_dbnd.h): pipeline enable, dynamic flag, and static resolved state (DBND_*, bounds)
     char keys[64]; int told;   // its shaders' keys, for the report of draws skipped (told: reported)
     uint32_t nviewport;
     MTLViewport vp0, *vp; VkRect2D sc0, *sc;   // static state, with heap storage only for multiple viewports
@@ -1311,7 +1313,11 @@ static VkPipeline pipe_make(const VkGraphicsPipelineCreateInfo *ci) {
             if (fmt_has_depth(df) && ds->depthTestEnable) { dd.depthCompareFunction = (MTLCompareFunction)ds->depthCompareOp; dd.depthWriteEnabled = ds->depthWriteEnable != 0; }
             if (fmt_has_stencil(df) && ds->stencilTestEnable) { dd.frontFaceStencil = stencil_d(&ds->front); dd.backFaceStencil = stencil_d(&ds->back); p->sref_f = ds->front.reference; p->sref_b = ds->back.reference;
                                                                 p->stencil = 1; p->sf = ds->front; p->sb = ds->back; p->dcmp = dd.depthCompareFunction; p->dwrite = dd.depthWriteEnabled; }
-            if (ds->depthBoundsTestEnable) RED1("depth bounds test not implemented");
+            // Depth bounds test (nvn_dbnd.h): static bounds are resolved here; dynamic bounds (VK_DYNAMIC_STATE_DEPTH_BOUNDS) are resolved in pre_draw from vkCmdSetDepthBounds.
+            // Without a depth format, or with rasterization off, it has nothing to test
+            if (ds->depthBoundsTestEnable && fmt_has_depth(df) && !(rs && rs->rasterizerDiscardEnable)) {
+                p->db_en = 1; p->dbk = dbnd_resolve(1, ds->minDepthBounds, ds->maxDepthBounds, p->db);
+            }
             p->dss = [g_dev newDepthStencilStateWithDescriptor:dd];
         } else p->dss = g_dss_off;
         const VkPipelineDynamicStateCreateInfo *dy = ci->pDynamicState;
@@ -1322,7 +1328,7 @@ static VkPipeline pipe_make(const VkGraphicsPipelineCreateInfo *ci) {
             else if (s == VK_DYNAMIC_STATE_STENCIL_REFERENCE) p->dyn_sref = 1;
             else if (s == VK_DYNAMIC_STATE_LINE_WIDTH) continue;   // Metal draws lines one pixel wide whatever the width (Super Mario 64 sets 1)
             else if (s == VK_DYNAMIC_STATE_DEPTH_BIAS) p->dyn_bias = 1; else if (s == VK_DYNAMIC_STATE_BLEND_CONSTANTS) p->dyn_blend = 1;
-            else if (s == VK_DYNAMIC_STATE_DEPTH_BOUNDS) continue;   // the test itself is reported where the pipeline enables it (depthBoundsTestEnable)
+            else if (s == VK_DYNAMIC_STATE_DEPTH_BOUNDS) { p->dyn_db = 1; p->dbk = DBND_OFF; p->db[0] = 0; p->db[1] = 1; }   // Vulkan ignores static min/maxDepthBounds when dynamic
             else if (s == VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK || s == VK_DYNAMIC_STATE_STENCIL_WRITE_MASK) p->dyn_smask |= s == VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK ? 1 : 2;
             else RED1("dynamic state %d not implemented (the imports have no matching set function)", s);
         }
@@ -1523,7 +1529,7 @@ VK(vkCmdDispatchBase, void, VkCommandBuffer cb, uint32_t bx, uint32_t by, uint32
 VK(vkCmdSetBlendConstants, void, VkCommandBuffer cb, const float c[4]) { c_dyn *x = rec(cb, C_DYN, sizeof *x); x->what = 0; memcpy(x->v, c, 4 * sizeof *c); }
 VK(vkCmdSetDepthBias, void, VkCommandBuffer cb, float c, float clamp, float slope) { c_dyn *x = rec(cb, C_DYN, sizeof *x); x->what = 1; x->v[0] = c; x->v[1] = clamp; x->v[2] = slope; x->v[3] = 0; }
 VK(vkCmdSetLineWidth, void, VkCommandBuffer cb, float w) { (void)cb; (void)w; }   // Metal draws lines one pixel wide (wideLines is not advertised: the width is 1)
-VK(vkCmdSetDepthBounds, void, VkCommandBuffer cb, float lo, float hi) { (void)cb; (void)lo; (void)hi; RED1("depth bounds (%g, %g) not implemented", lo, hi); }
+VK(vkCmdSetDepthBounds, void, VkCommandBuffer cb, float lo, float hi) { c_dyn *x = rec(cb, C_DYN, sizeof *x); x->what = 2; x->v[0] = lo; x->v[1] = hi; x->v[2] = x->v[3] = 0; }
 VK(vkCmdSetDeviceMask, void, VkCommandBuffer cb, uint32_t m) { (void)cb; if (m != 1) RED1("device mask %#x: there is one device", m); }   // device groups of one device
 static void rec_drawind(VkCommandBuffer cb, VkBuffer b, VkDeviceSize o, uint32_t count, uint32_t stride, int indexed) {
     *(c_drawind *)rec(cb, C_DRAWIND, sizeof(c_drawind)) = (c_drawind){b, o, count, stride, indexed};
@@ -1639,7 +1645,7 @@ typedef struct {
     id<MTLCommandBuffer> cb; id<MTLRenderCommandEncoder> re; id<MTLBlitCommandEncoder> be; id<MTLComputeCommandEncoder> ce;
     const chdr *cmd; const uint8_t *cmd_end;   // the command being replayed and the end of its command buffer (fan_prepare scans ahead)
     id<MTLBuffer> fan_out; fan_job *fj; uint32_t nfj, fjcap, fji; const void *fan_from, *fan_to;   // the indexed fans of the current stretch of the pass, and the commands its scan covered
-    VkPipeline pipe, applied, cpipe; uint32_t rt_w, rt_h;   // cpipe: the compute pipeline bound
+    VkPipeline pipe, applied, cpipe; uint32_t rt_w, rt_h, rt_layers;   // cpipe: the compute pipeline bound
     struct { VkDescriptorSet s; uint32_t dyn[16]; } set[8], cset[8];   // graphics and compute bind points have separate sets
     VkBuffer vb[14]; VkDeviceSize vbo[14];
     VkBuffer ib; VkDeviceSize ibo; MTLIndexType it; uint32_t isz;
@@ -1651,7 +1657,7 @@ typedef struct {
     MTLRenderPassDescriptor *rpd; const fmt_t *rt_color[8]; MTLStoreAction st_col[8], st_d, st_s; int cut;
     VkQueryPool aq; uint32_t aq_first;   // the occlusion query running (occ_start)
     uint32_t sdyn[3][2]; int sdyn_set[3], s_dirty;   // dynamic stencil compare mask / write mask / reference, front and back (C_STENCIL)
-    float blend[4], bias[3]; int have_blend, have_bias, d_dirty;   // dynamic blend constants and depth bias (C_DYN)
+    float blend[4], bias[3], db[2], db_cur[2]; int have_blend, have_bias, have_db, db_live, d_dirty;   // dynamic blend constants, depth bias and depth bounds (C_DYN); db_live/db_cur: encoder's active bounds
     uint64_t enc_id;   // the render or compute encoder's number (g_enc_id), for argument-buffer residency
 } rs_t;
 static uint64_t g_enc_id;   // under g_qmu: numbers the render and compute encoders replay creates (rs_t.enc_id)
@@ -1704,7 +1710,7 @@ static void load_rp(rs_t *s) {
 static void reopen_rp(rs_t *s) {
     fan_prepare(s, s->cmd);
     s->re = [s->cb renderCommandEncoderWithDescriptor:s->rpd]; s->cut = 0; g_n_resume++; s->enc_id = ++g_enc_id;
-    s->applied = NULL; s->vp_dirty = s->sc_dirty = 1;
+    s->applied = NULL; s->vp_dirty = s->sc_dirty = 1; s->db_live = 0;
     occ_start(s);
 }
 static void resume_rp(rs_t *s) { load_rp(s); reopen_rp(s); }
@@ -1745,10 +1751,13 @@ static void begin_rp(rs_t *s, const c_brp *c) {
         }
     }
     if (!rp->ncol && rp->depth < 0) { d.renderTargetWidth = fb->w; d.renderTargetHeight = fb->h; d.defaultRasterSampleCount = 1; }
-    if (s->sq->vis) d.visibilityResultBuffer = s->sq->vis;
+    if (s->sq->vis) {
+        d.visibilityResultBuffer = s->sq->vis;
+        d.visibilityResultType = MTLVisibilityResultTypeAccumulate;   // Reset clears earlier encoders' slots too; the submit initialized this buffer to zero
+    }
     fan_prepare(s, (const chdr *)((const uint8_t *)s->cmd + s->cmd->size));
     s->rpd = d; s->re = [s->cb renderCommandEncoderWithDescriptor:d]; s->enc_id = ++g_enc_id;
-    s->applied = NULL; s->rt_w = w; s->rt_h = h;
+    s->applied = NULL; s->rt_w = w; s->rt_h = h; s->rt_layers = fb->layers; s->db_live = 0;
     // Dynamic viewport and scissor persist across render passes within a command buffer, as in Vulkan; the render target's size stands in only until the game sets them.
     // Resetting them at every pass drew Super Mario Galaxy's handheld UI 1.5x too big: it sets a 1280x720 viewport once and then draws through several passes into its 1920x1080 swapchain
     s->vp_dirty = s->sc_dirty = 1;
@@ -1856,7 +1865,9 @@ static int bind_args(rs_t *s, VkPipeline p, const shinfo *si, int st) {   // a s
     for (int k = 0; k < p->nab[st]; k++) {
         abuf_t *a = &p->ab[st][k]; VkDescriptorSet ds = a->set < 8 ? sets[a->set].s : NULL;
         if (!ds) { RED1("shader %s: set %u (an argument buffer) is not bound", si->key, a->set); return 0; }
-        uint64_t gen = ds->gen;   // capture before encoding: a concurrent update must not bless old contents with its new generation
+        // Use the same generation for the cache lookup and re-encoding. A new generation invalidates the cached
+        // argument buffer when descriptors change or an allocation reuses a set address.
+        uint64_t gen = ds->gen;
         if ((a->s != ds || a->gen != gen || !a->buf) && !ab_encode(a, ds, si, gen)) return 0;
         put_buf(s, st, a->buf, 0, a->slot);
         if (a->enc_id == s->enc_id) continue;
@@ -1929,6 +1940,12 @@ static int pre_draw(rs_t *s) {
         return 0;
     }
     if (p->logic) { static uint64_t n; if (!n++) LOG("[vk] [RED] logic op %d not implemented: the pipeline draws with its shader's colour", p->logic); if (!(n % 1000)) LOG("[vk] logic op draws so far: %llu", (unsigned long long)n); }
+    int dbk = DBND_OFF; float dbb[2] = {0, 1};
+    if (p->db_en) {
+        if (p->dyn_db) { if (s->have_db) dbk = dbnd_resolve(1, s->db[0], s->db[1], dbb); }
+        else { dbk = p->dbk; dbb[0] = p->db[0]; dbb[1] = p->db[1]; }
+    }
+    if (dbk == DBND_EMPTY && mtl_depth_bounds_hw()) return 0;   // bounds no stored depth meets: nothing passes, and Metal refuses them (nvn_dbnd.h); drawn where the GPU has no test, as before
     if (s->applied != p) {
         [re setRenderPipelineState:p->pso]; [re setDepthStencilState:p->dss ? p->dss : g_dss_off];
         [re setCullMode:p->cull]; [re setFrontFacingWinding:p->wind]; [re setTriangleFillMode:p->fill]; [re setDepthClipMode:p->clip];
@@ -1949,6 +1966,15 @@ static int pre_draw(rs_t *s) {
         if (p->dyn_blend && s->have_blend) [re setBlendColorRed:s->blend[0] green:s->blend[1] blue:s->blend[2] alpha:s->blend[3]];
         if (p->dyn_bias && p->bias && s->have_bias) [re setDepthBias:s->bias[0] slopeScale:s->bias[2] clamp:s->bias[1]];
         s->d_dirty = 0;
+    }
+    if (dbk == DBND_TEST && mtl_depth_bounds_hw()) {
+        if (!s->db_live || s->db_cur[0] != dbb[0] || s->db_cur[1] != dbb[1]) {
+            [re setDepthTestMinBound:dbb[0] maxBound:dbb[1]];
+            s->db_cur[0] = dbb[0]; s->db_cur[1] = dbb[1]; s->db_live = 1;
+        }
+    } else if (s->db_live) {
+        [re setDepthTestMinBound:0 maxBound:1];
+        s->db_live = 0;
     }
     if (s->s_dirty && p->stencil && (p->dyn_sref || p->dyn_smask)) {   // dynamic stencil state, after the pipeline's own
         if (p->dyn_sref) [re setStencilFrontReferenceValue:s->sdyn_set[2] ? s->sdyn[2][0] : p->sref_f backReferenceValue:s->sdyn_set[2] ? s->sdyn[2][1] : p->sref_b];
@@ -2320,34 +2346,121 @@ static void resolve_image(rs_t *s, const c_resolve *x) {
         }
     }
 }
-static int clear_covers_texture(id<MTLTexture> texture, const VkClearRect *r) {
-    return texture && r->baseArrayLayer == 0 && r->layerCount == 1 && r->rect.offset.x == 0 && r->rect.offset.y == 0 &&
-        r->rect.extent.width == texture.width && r->rect.extent.height == texture.height;
+static int clear_covers_attachment(MTLRenderPassAttachmentDescriptor *a, const VkClearRect *rects, uint32_t n) {
+    if (!a.texture) return 1;   // VK_ATTACHMENT_UNUSED and an absent depth / stencil aspect have no effect
+    for (uint32_t i = 0; i < n; i++) {
+        const VkClearRect *r = &rects[i];
+        if (!r->baseArrayLayer && r->layerCount == 1 && !r->rect.offset.x && !r->rect.offset.y &&
+            r->rect.extent.width == MAX(a.texture.width >> a.level, 1u) && r->rect.extent.height == MAX(a.texture.height >> a.level, 1u)) return 1;
+    }
+    return 0;
+}
+// vkCmdClearAttachments is independent of all game graphics state. A load action handles whole attachments; otherwise use the host's precompiled clear triangle in a
+// separate load/store pass for each selected view layer. The game's encoder resumes through reopen_rp, restoring its bindings and allocating a new occlusion-query slot.
+// Helper passes have no visibility buffer: Vulkan permits clears to contribute to occlusion queries, but does not require them to do so.
+typedef struct { uint32_t color, depth, stencil, samples, kind; } attachment_clear_key;
+static id<MTLRenderPipelineState> attachment_clear_pso(MTLRenderPassDescriptor *d, const fmt_t *f) {
+    id<MTLTexture> color = d.colorAttachments[0].texture, depth = d.depthAttachment.texture, stencil = d.stencilAttachment.texture;
+    id<MTLTexture> t = color ?: depth ?: stencil;
+    attachment_clear_key k = {(uint32_t)color.pixelFormat, (uint32_t)depth.pixelFormat, (uint32_t)stencil.pixelFormat, (uint32_t)t.sampleCount,
+        f && f->kind == K_INT ? (fmt_is_signed_int(f) ? 2u : 1u) : 0u};
+    static NSMutableDictionary<NSData *, id<MTLRenderPipelineState>> *cache;
+    NSData *key = [NSData dataWithBytes:&k length:sizeof k]; id<MTLRenderPipelineState> pso = cache[key]; if (pso) return pso;
+    static id<MTLLibrary> lib; static int failed;
+    if (failed) return nil;
+    NSError *e = nil;
+    if (!lib) lib = host_msl_lib(g_dev, nil, "clear", &e);
+    if (!lib) { failed = 1; LOG("[vk] [RED] attachment clear shaders: %s", e.localizedDescription.UTF8String); return nil; }
+    MTLRenderPipelineDescriptor *p = [MTLRenderPipelineDescriptor new];
+    p.vertexFunction = [lib newFunctionWithName:@"clr_vs"];
+    if (color) {
+        static const char *types[] = {"float", "uint", "int"};
+        p.fragmentFunction = [lib newFunctionWithName:[NSString stringWithFormat:@"clr_fs_0_%s", types[k.kind]]];
+        p.colorAttachments[0].pixelFormat = color.pixelFormat;
+    }
+    p.depthAttachmentPixelFormat = depth.pixelFormat; p.stencilAttachmentPixelFormat = stencil.pixelFormat; p.rasterSampleCount = t.sampleCount;
+    pso = [g_dev newRenderPipelineStateWithDescriptor:p error:&e];
+    if (!pso) { LOG("[vk] [RED] attachment clear pipeline (%u/%u/%u, %u samples): %s", k.color, k.depth, k.stencil, k.samples, e.localizedDescription.UTF8String); return nil; }
+    if (!cache) cache = [NSMutableDictionary new]; cache[key] = pso; return pso;
+}
+static id<MTLDepthStencilState> attachment_clear_dss(int depth, int stencil) {
+    static id<MTLDepthStencilState> cache[2][2];
+    if (cache[depth][stencil]) return cache[depth][stencil];
+    MTLDepthStencilDescriptor *d = [MTLDepthStencilDescriptor new]; d.depthCompareFunction = MTLCompareFunctionAlways; d.depthWriteEnabled = depth;
+    if (stencil) {
+        MTLStencilDescriptor *st = [MTLStencilDescriptor new]; st.stencilCompareFunction = MTLCompareFunctionAlways; st.depthStencilPassOperation = MTLStencilOperationReplace;
+        st.writeMask = 0xff; d.frontFaceStencil = d.backFaceStencil = st;
+    }
+    return cache[depth][stencil] = [g_dev newDepthStencilStateWithDescriptor:d];
+}
+static void attachment_clear_layer(MTLRenderPassAttachmentDescriptor *dst, MTLRenderPassAttachmentDescriptor *src, uint32_t layer) {
+    dst.texture = src.texture; dst.level = src.level;
+    if (src.texture.textureType == MTLTextureType3D) dst.depthPlane = src.depthPlane + layer;
+    else dst.slice = src.slice + layer;   // src.texture is already the Vulkan view, including its base mip and array layer
+    dst.loadAction = MTLLoadActionLoad; dst.storeAction = MTLStoreActionStore;
+}
+static void clear_attachment_rects(rs_t *s, const VkClearAttachment *a, const VkClearRect *rects, uint32_t n) {
+    MTLRenderPassDescriptor *source = s->rpd;
+    BOOL color = a->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT;
+    BOOL depth = (a->aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) && source.depthAttachment.texture;
+    BOOL stencil = (a->aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) && source.stencilAttachment.texture;
+    MTLRenderPassAttachmentDescriptor *at = color ? source.colorAttachments[a->colorAttachment] : depth ? source.depthAttachment : source.stencilAttachment;
+    if (!at.texture || (!color && !depth && !stencil)) return;
+    const fmt_t *f = color ? s->rt_color[a->colorAttachment] : NULL;
+    float z = depth ? a->clearValue.depthStencil.depth : 0;
+    for (uint32_t layer = 0; layer < s->rt_layers; layer++) {
+        BOOL selected = NO;
+        for (uint32_t j = 0; j < n; j++) if (layer >= rects[j].baseArrayLayer && layer - rects[j].baseArrayLayer < rects[j].layerCount) { selected = YES; break; }
+        if (!selected) continue;
+        MTLRenderPassDescriptor *d = [MTLRenderPassDescriptor renderPassDescriptor];
+        if (color) attachment_clear_layer(d.colorAttachments[0], at, layer);
+        else {
+            // Bind both planes when present, preserving the plane this clear does not write.
+            if (source.depthAttachment.texture) attachment_clear_layer(d.depthAttachment, source.depthAttachment, layer);
+            if (source.stencilAttachment.texture) attachment_clear_layer(d.stencilAttachment, source.stencilAttachment, layer);
+        }
+        id<MTLRenderPipelineState> pso = attachment_clear_pso(d, f); if (!pso) return;
+        id<MTLRenderCommandEncoder> en = [s->cb renderCommandEncoderWithDescriptor:d];
+        [en setRenderPipelineState:pso]; [en setDepthStencilState:attachment_clear_dss(depth, stencil)];
+        [en setVertexBytes:&z length:sizeof z atIndex:0];
+        if (color) [en setFragmentBytes:&a->clearValue.color length:sizeof a->clearValue.color atIndex:0];   // retain integer bits, including values above INT32_MAX
+        if (stencil) [en setStencilReferenceValue:a->clearValue.depthStencil.stencil];
+        [en setViewport:(MTLViewport){0, 0, MAX(at.texture.width >> at.level, 1u), MAX(at.texture.height >> at.level, 1u), 0, 1}];
+        [en setCullMode:MTLCullModeNone];
+        for (uint32_t j = 0; j < n; j++) {
+            const VkClearRect *r = &rects[j];
+            if (layer < r->baseArrayLayer || layer - r->baseArrayLayer >= r->layerCount) continue;
+            [en setScissorRect:(MTLScissorRect){r->rect.offset.x, r->rect.offset.y, r->rect.extent.width, r->rect.extent.height}];
+            [en drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        }
+        [en endEncoding];
+    }
 }
 static void clear_attachments(rs_t *s, const c_cleara *x) {
     MTLRenderPassDescriptor *d = s->rpd;
     if ((!s->re && !s->cut) || !d) { RED1("vkCmdClearAttachments outside a render pass"); return; }
+    if (!x->n || !x->rects) return;
     const VkClearRect *rects = (const void *)(x->attachments + x->n);
+    BOOL whole = s->rt_layers == 1 && d.renderTargetArrayLength <= 1;
     for (uint32_t i = 0; i < x->n; i++) {
         const VkClearAttachment *a = &x->attachments[i];
         NSUInteger color = a->colorAttachment;
-        BOOL whole = NO;
-        for (uint32_t j = 0; j < x->rects; j++) {
-            const VkClearRect *r = &rects[j];
-            if ((a->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT && color < 8 && clear_covers_texture(d.colorAttachments[color].texture, r)) ||
-                (a->aspectMask == VK_IMAGE_ASPECT_DEPTH_BIT && clear_covers_texture(d.depthAttachment.texture, r)) ||
-                (a->aspectMask == VK_IMAGE_ASPECT_STENCIL_BIT && clear_covers_texture(d.stencilAttachment.texture, r)) ||
-                (a->aspectMask == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) &&
-                 clear_covers_texture(d.depthAttachment.texture, r) && clear_covers_texture(d.stencilAttachment.texture, r))) { whole = YES; break; }
-        }
-        if (!whole || d.renderTargetArrayLength > 1) { RED1("vkCmdClearAttachments region requires a partial attachment clear"); return; }
+        if (a->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT && color >= 8) { RED1("vkCmdClearAttachments color attachment exceeds the host limit"); return; }
+        if (a->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT && !clear_covers_attachment(d.colorAttachments[color], rects, x->rects)) whole = NO;
+        if ((a->aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) && !clear_covers_attachment(d.depthAttachment, rects, x->rects)) whole = NO;
+        if ((a->aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) && !clear_covers_attachment(d.stencilAttachment, rects, x->rects)) whole = NO;
     }
     if (s->re) end_rp(s, 0);
     load_rp(s);
+    if (!whole) {
+        for (uint32_t i = 0; i < x->n; i++) clear_attachment_rects(s, &x->attachments[i], rects, x->rects);
+        reopen_rp(s); return;
+    }
     for (uint32_t i = 0; i < x->n; i++) {
         const VkClearAttachment *a = &x->attachments[i];
         if (a->aspectMask == VK_IMAGE_ASPECT_COLOR_BIT) {
             MTLRenderPassColorAttachmentDescriptor *color = d.colorAttachments[a->colorAttachment];
+            if (!color.texture) continue;
             color.loadAction = MTLLoadActionClear;
             color.clearColor = fmt_clear_color(s->rt_color[a->colorAttachment], &a->clearValue.color);
         }
@@ -2403,7 +2516,9 @@ static void replay_ops(rs_t *s, VkCommandBuffer cb) {
             }
             case C_DYN: {
                 const c_dyn *x = c;
-                if (x->what == 0) { memcpy(s->blend, x->v, sizeof s->blend); s->have_blend = 1; } else { memcpy(s->bias, x->v, sizeof s->bias); s->have_bias = 1; }
+                if (x->what == 0) { memcpy(s->blend, x->v, sizeof s->blend); s->have_blend = 1; }
+                else if (x->what == 1) { memcpy(s->bias, x->v, sizeof s->bias); s->have_bias = 1; }
+                else { s->db[0] = x->v[0]; s->db[1] = x->v[1]; s->have_db = 1; }
                 s->d_dirty = 1; break;
             }
             case C_DRAWIND: {

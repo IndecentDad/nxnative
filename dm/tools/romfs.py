@@ -4,7 +4,11 @@ Readers opt into Path/open/os/mmap here; the real filesystem is untouched. A pat
 like /game/RomFS.img/Data/archive is a bounded view of that image entry. Ordinary
 paths retain their normal behavior, including writes to generated outputs.
 """
+from __future__ import annotations
+
 import builtins
+from contextlib import contextmanager, ExitStack
+from contextvars import ContextVar
 import errno
 import fnmatch
 import functools
@@ -91,9 +95,42 @@ def is_image(path):
     except (OSError, TypeError): return False
 
 
-def _resolve(path):
+def _identity(st: _os.stat_result): return st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+def _same_identity(a, b): return a[:3] == b[:3] if _os.name == 'nt' else a == b
+
+
+def _normal_path(path):
     p = _os.path.abspath(_os.fsdecode(path))
     if _os.sep != '/': p = p.replace(_os.sep, '/')
+    return p
+
+
+
+_scan_descriptors: ContextVar[dict[str, tuple[tuple[int, int, int, int], int]] | None] = ContextVar('_scan_descriptors', default=None)
+
+
+@contextmanager
+def reuse_descriptors(roots):
+    """Keep one backing descriptor per image during a scan where open files do not block replacement. Windows uses per-reader handles so staging can atomically replace images."""
+    if _os.name == 'nt':
+        yield
+        return
+    with ExitStack() as stack:
+        descriptors = {}
+        for path in dict.fromkeys(map(_normal_path, roots)):
+            if not is_image(path): continue
+            fd = stack.enter_context(builtins.open(path, 'rb')).fileno()
+            descriptors[path] = (_identity(_os.fstat(fd)), fd)
+        token = _scan_descriptors.set(descriptors)
+        try:
+            yield
+        finally:
+            _scan_descriptors.reset(token)
+
+
+def _resolve(path):
+    p = _normal_path(path)
     parts = p.split('/')
     for i, part in enumerate(parts):
         if not part.endswith('.img'): continue
@@ -101,7 +138,7 @@ def _resolve(path):
         try: st = _os.stat(image)
         except OSError: continue
         if not _stat.S_ISREG(st.st_mode): continue
-        loaded = _image(image, (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns))
+        loaded = _image(image, _identity(st))
         if loaded is not None: return loaded, '/'.join(parts[i + 1:])
     return None
 
@@ -116,7 +153,10 @@ _fd_ranges = {}
 
 class _File(io.RawIOBase):
     def __init__(self, image, k):
-        self.fd = _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
+        descriptors = _scan_descriptors.get()
+        backing = descriptors.get(_normal_path(image.path)) if descriptors is not None else None
+        binary = getattr(_os, 'O_BINARY', 0)
+        self.fd = _os.dup(backing[1]) if backing is not None and _same_identity(backing[0], _identity(image.stat)) else _os.open(image.path, _os.O_RDONLY | binary)
         self.start, self.length = image.entry(k)[:2]
         self.pos = 0
         _fd_ranges[self.fd] = (self.start, self.length)
