@@ -4,7 +4,7 @@
 
 - Canonical repository: https://github.com/IndecentDad/nxnative. Customized main is the only permanent branch and GitHub default. Integrate reviewed upstream/main changes into main.
 - Windows host: ssh nxwindows. The dirty primary checkout remains at D:\NXNativeWindows as the common Git repository; do not move it without migrating all linked worktrees.
-- Active Windows source worktree: F:/NXNative/1_Development/Worktrees/celeste-upstream-sync, branch codex/disco-upstream-sync at 182cb5fb; customized origin/main includes upstream/main 806fabe1. The D: primary checkout and existing game worktrees remain untouched.
+- Active Windows source worktree: F:/NXNative/1_Development/Worktrees/celeste-upstream-sync, branch codex/disco-upstream-sync at 9b440954; customized origin/main includes upstream/main 806fabe1. The D: primary checkout and existing game worktrees remain untouched.
 - Permanent NXNative development root and extracted SDKs: F:\NXNative\1_Development. Celeste ROMs, build data, shader caches, logs, and outputs remain under F:\NXNative\Celeste.
 - Original game archives remain on D:. The Celeste build and all game-specific artifacts stay in F:\NXNative\Celeste; other per-title workspaces retain their established paths.
 
